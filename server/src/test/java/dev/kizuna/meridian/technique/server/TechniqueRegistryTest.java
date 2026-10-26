@@ -29,6 +29,17 @@ public class TechniqueRegistryTest {
     }
 
     @Test
+    public void rejectsUnspecifiedQiDistribution() {
+        // 费用分配方式必须由功法明确选择，不能依赖旧行为或默认枚举值。
+        TechniqueDefinition base = definition();
+        QiCost unspecified = base.getCost().getQi(0).toBuilder()
+                .clearDistribution()
+                .build();
+        TechniqueCost cost = base.getCost().toBuilder().setQi(0, unspecified).build();
+        assertRejected(base.toBuilder().setCost(cost).build(), "分配方式");
+    }
+
+    @Test
     public void rejectsOutOfRangeParameters() {
         // 非有限值、负费用和冲量上限都在目录边界拒绝。
         TechniqueDefinition base = definition();

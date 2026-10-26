@@ -287,6 +287,7 @@ final class Fixtures {
                 .setAttribute("meridian:fire")
                 .setPhase(QiPhase.GAS)
                 .setAmount(amount)
+                .setDistribution(QiDistribution.EACH)
                 .build();
         WorkCost tissueWork = work("actuator");
         WorkCost organWork = work("organ").toBuilder().clearForce().build();

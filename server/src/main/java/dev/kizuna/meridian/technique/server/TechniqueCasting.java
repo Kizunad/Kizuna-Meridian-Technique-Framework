@@ -25,7 +25,7 @@ public final class TechniqueCasting {
         try {
             TechniqueProtocol.validateCast(request);
         } catch (IllegalArgumentException exception) {
-            return failure(request.getCastId(), INVALID_REQUEST, exception.getMessage());
+            return failure(request.getCastId(), INVALID_REQUEST);
         }
         try {
             Optional<CastOutcome> previous = replay(host, request);
@@ -34,7 +34,7 @@ public final class TechniqueCasting {
             }
             BodySnapshot body = host.inspect();
             if (!body.id().value().equals(request.getBodyId())) {
-                throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "请求身体与宿主绑定身体不一致");
+                throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "身体暂不听使唤");
             }
             TechniqueProgress progress = TechniqueState.read(body);
             TechniqueDefinition definition = requireCastable(body, progress, request);
@@ -46,34 +46,34 @@ public final class TechniqueCasting {
             BodyActivity activity = TechniqueActivities.start(start);
             return submitStart(host, start, activity);
         } catch (TechniqueErrors.Rejected exception) {
-            return failure(request.getCastId(), exception.code, exception.getMessage());
+            return failure(request.getCastId(), exception.code);
         } catch (TechniqueErrors.HostRejected exception) {
             return hostFailure(request.getCastId(), exception);
         } catch (MeridianErrors.CapabilityRejected | MeridianErrors.IntakeRejected exception) {
-            return failure(request.getCastId(), INSUFFICIENT_CAPABILITY, "组织或器官无法承担本次做功与动作占用");
+            return failure(request.getCastId(), INSUFFICIENT_CAPABILITY);
         } catch (MeridianErrors.TransportRejected exception) {
-            return failure(request.getCastId(), INVALID_STATE, "费用无法在当前身体数值精度下安全结算");
+            return failure(request.getCastId(), INVALID_STATE);
         } catch (IllegalArgumentException exception) {
-            return failure(request.getCastId(), INVALID_STATE, exception.getMessage());
+            return failure(request.getCastId(), INVALID_STATE);
         }
     }
 
     private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request) {
         // 先检查生命、目录与可信知识记录，再检查当前占用和身体时钟冷却。
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
-            throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "身体已经死亡或寿命耗尽");
+            throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "你已无法运功");
         }
         TechniqueDefinition definition = registry.find(request.getTechnique())
-                .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE, "目录中没有该功法或版本"));
+                .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE, "你还不会这门功法"));
         if (progress.getKnownList().stream().noneMatch(known -> known.getTechnique().equals(request.getTechnique()))) {
-            throw TechniqueErrors.rejected(NOT_KNOWN, "尚未学会该功法");
+            throw TechniqueErrors.rejected(NOT_KNOWN, "你还不会这门功法");
         }
         if (progress.hasActiveCast()) {
-            throw TechniqueErrors.rejected(ALREADY_CASTING, "当前已有施放，必须等收势结束");
+            throw TechniqueErrors.rejected(ALREADY_CASTING, "正运功中，无暇他顾");
         }
         long cooldownEnd = progress.getCooldownsOrDefault(definition.getId(), 0);
         if (body.settledAt().elapsedMillis() < cooldownEnd) {
-            throw TechniqueErrors.rejected(COOLING_DOWN, "功法冷却中，结束身体时刻为 " + cooldownEnd + " 毫秒");
+            throw TechniqueErrors.rejected(COOLING_DOWN, "气息尚未平复");
         }
         return definition;
     }
@@ -176,7 +176,7 @@ public final class TechniqueCasting {
         } catch (TechniqueErrors.HostRejected exception) {
             return hostFailure(castId, exception);
         } catch (IllegalArgumentException exception) {
-            return failure(castId, INVALID_STATE, exception.getMessage());
+            return failure(castId, INVALID_STATE);
         }
     }
 
@@ -218,26 +218,21 @@ public final class TechniqueCasting {
                 .build();
     }
 
-    private static CastOutcome failure(String castId, TechniqueFailure code, String reason) {
-        // 所有业务失败均携带原因码及一句中文说明，可直接显示给调用者。
+    private static CastOutcome failure(String castId, TechniqueFailure code) {
+        // 结构化失败码供宿主区分原因，玩家文本只保留身体感受。
         return CastOutcome.newBuilder()
                 .setCastId(castId)
                 .setFailure(code)
-                .setReason(reason)
+                .setReason(TechniqueErrors.playerReason(code))
                 .build();
     }
 
     private static CastOutcome hostFailure(String castId, TechniqueErrors.HostRejected exception) {
         // Framework 拒绝保留原码；常见情况给出中文解释，避免用户界面出现枚举名。
-        String reason = switch (exception.failure()) {
-            case REVISION_CONFLICT -> "身体状态已变化，请重试施放";
-            case ACCESS_DENIED -> "宿主没有授权本次操作";
-            case BODY_DEAD -> "身体已经死亡";
-            case TIME_REQUIRES_SETTLEMENT -> "宿主尚未将身体结算到当前时刻";
-            default -> "宿主无法提交本次身体活动";
-        };
-        return failure(castId, FRAMEWORK_REJECTED, reason).toBuilder()
-                .setFrameworkFailure(exception.failure())
+        FailureCode frameworkFailure = exception.failure();
+        return failure(castId, FRAMEWORK_REJECTED).toBuilder()
+                .setFrameworkFailure(frameworkFailure)
+                .setReason(TechniqueErrors.frameworkPlayerReason(frameworkFailure))
                 .build();
     }
 

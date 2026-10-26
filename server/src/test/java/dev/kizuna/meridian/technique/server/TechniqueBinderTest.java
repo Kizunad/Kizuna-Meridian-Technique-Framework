@@ -46,12 +46,12 @@ public class TechniqueBinderTest {
                 .build();
         MeridianState closedState = message.getMeridianStates(0).toBuilder().setOpening(unopened).build();
         BodySnapshot closed = BodyProtobuf.fromMessage(message.toBuilder().setMeridianStates(0, closedState).build());
-        assertFailure(closed, MERIDIAN_NOT_OPENED, "未开拓");
+        assertFailure(closed, MERIDIAN_NOT_OPENED, "经脉未通");
         TissueState disabledState = message.getTissueStates(0).toBuilder().setHp(0).build();
         BodySnapshot disabled = BodyProtobuf.fromMessage(message.toBuilder().setTissueStates(0, disabledState).build());
-        assertFailure(disabled, MODULE_UNAVAILABLE, "失能");
+        assertFailure(disabled, MODULE_UNAVAILABLE, "身体尚未准备好");
         BodySnapshot lowRealm = BodyProtobuf.fromMessage(message.toBuilder().setRealm(Realm.WANDERING_QI).build());
-        assertFailure(lowRealm, REALM_TOO_LOW, "境界不足");
+        assertFailure(lowRealm, REALM_TOO_LOW, "修为尚浅");
         TissueCapacity weakCapacity = message.getStructure().getTissues(0).getCapacity().toBuilder()
                 .setStrengthNewtons(WEAK_STRENGTH)
                 .build();
@@ -60,7 +60,7 @@ public class TechniqueBinderTest {
                 .build();
         BodyStructure weakStructure = message.getStructure().toBuilder().setTissues(0, weakTissue).build();
         BodySnapshot weak = BodyProtobuf.fromMessage(message.toBuilder().setStructure(weakStructure).build());
-        assertFailure(weak, INSUFFICIENT_CAPABILITY, "力量不足");
+        assertFailure(weak, INSUFFICIENT_CAPABILITY, "过于疲惫");
     }
 
     @Test

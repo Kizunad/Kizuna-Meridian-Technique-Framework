@@ -9,6 +9,7 @@ import dev.kizuna.meridian.server.BodyActivityExecution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -120,13 +121,15 @@ final class TechniqueActivities {
         var replacements = new LinkedHashMap<String, QiInventory>();
         var released = new ArrayList<QiInventory>();
         for (QiCost cost : costs) {
-            for (String moduleId : slots.get(cost.getSlotId()).getModuleIdsList()) {
+            BoundSlot slot = slots.get(cost.getSlotId());
+            for (CostAllocation allocation : allocations(cost, slot)) {
+                String moduleId = allocation.moduleId();
                 MeridianState state = states.get(moduleId);
                 if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
-                    throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED, "扣费经脉尚未开拓：" + moduleId);
+                    throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED, "经脉未通");
                 }
                 QiInventory previous = replacements.getOrDefault(moduleId, state.lumenQi());
-                QiInventory debit = selectCost(previous, cost);
+                QiInventory debit = selectCost(previous, cost, allocation.amount());
                 replacements.put(moduleId, QiAccounting.debit(previous, debit));
                 released.add(debit);
             }
@@ -144,17 +147,49 @@ final class TechniqueActivities {
         return new Accounts(List.copyOf(changes), QiInventory.combine(released));
     }
 
-    private static QiInventory selectCost(QiInventory inventory, QiCost cost) {
+    private static List<CostAllocation> allocations(QiCost cost, BoundSlot slot) {
+        // EVEN 使用稳定的经脉顺序，最后一条吸收浮点余数，确保总扣费仍等于声明总量。
+        List<String> moduleIds = slot.getModuleIdsList().stream()
+                .sorted(Comparator.naturalOrder())
+                .toList();
+        double amount = cost.getAmount().getValue();
+        return switch (cost.getDistribution()) {
+            case EACH -> moduleIds.stream()
+                    .map(moduleId -> new CostAllocation(moduleId, amount))
+                    .toList();
+            case EVEN -> evenAllocations(moduleIds, amount);
+            default -> throw TechniqueErrors.rejected(INVALID_STATE, "真元费用分配方式无效");
+        };
+    }
+
+    private static List<CostAllocation> evenAllocations(List<String> moduleIds, double amount) {
+        // Framework 的真元数量使用 double 与最小可流转单位，余数固定归字典序最后的经脉。
+        if (moduleIds.isEmpty()) {
+            throw TechniqueErrors.rejected(INVALID_STATE, "真元费用没有可用经脉");
+        }
+        double share = amount / moduleIds.size();
+        double allocated = 0;
+        var allocations = new ArrayList<CostAllocation>();
+        for (int index = 0; index < moduleIds.size(); index++) {
+            double allocation = share;
+            if (index == moduleIds.size() - 1) {
+                allocation = amount - allocated;
+            }
+            allocations.add(new CostAllocation(moduleIds.get(index), allocation));
+            allocated += allocation;
+        }
+        return List.copyOf(allocations);
+    }
+
+    private static QiInventory selectCost(QiInventory inventory, QiCost cost, double amount) {
         // 只匹配相态和属性，释放保持库存的实际密度，不发生隐式属性转换。
         Qi.QiPhase phase = Qi.QiPhase.valueOf(cost.getPhase().name());
         Qi entry = inventory.entries().stream()
                 .filter(qi -> qi.phase() == phase && qi.attribute().id().value().equals(cost.getAttribute()))
                 .findFirst()
-                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI,
-                        "槽位 " + cost.getSlotId() + "：缺少所需相态与属性的真元"));
-        double amount = cost.getAmount().getValue();
+                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI, "真元不济"));
         if (entry.amount() < amount) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_QI, "槽位 " + cost.getSlotId() + "：真元不足");
+            throw TechniqueErrors.rejected(INSUFFICIENT_QI, "真元不济");
         }
         Qi selected = entry.withAmount(amount);
         QiInventory debit = new QiInventory(List.of(selected));
@@ -184,7 +219,7 @@ final class TechniqueActivities {
             }
         }
         if (efforts.size() > MAX_EFFORTS) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY, "绑定后的做功条数超过单笔活动上限");
+            throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY, "你过于疲惫");
         }
         return List.copyOf(efforts);
     }
@@ -194,9 +229,11 @@ final class TechniqueActivities {
         try {
             return Math.addExact(startMillis, durationMillis);
         } catch (ArithmeticException exception) {
-            throw TechniqueErrors.rejected(INVALID_STATE, "身体时钟已无法表示本次施放或冷却结束时刻");
+            throw TechniqueErrors.rejected(INVALID_STATE, "心神未定，暂时无法运功");
         }
     }
 
     private record Accounts(List<QiAccountChange> changes, QiInventory released) { }
+
+    private record CostAllocation(String moduleId, double amount) { }
 }

@@ -55,11 +55,17 @@ message TechniqueSlot {
   optional bool require_opened = 7; // 经脉槽必须显式声明；扣费槽必须为 true
   Quantity minimum_strength = 8; // 可缺省；组织可用力量下限，N
 }
+enum QiDistribution {
+  QI_DISTRIBUTION_UNSPECIFIED = 0;
+  EACH = 1;
+  EVEN = 2;
+}
 message QiCost {
   string slot_id = 1;
   string attribute = 2;
   kizuna.meridian.v1.QiPhase phase = 3;
-  Quantity amount = 4; // 每个绑定经脉各扣一次，元
+  Quantity amount = 4; // EACH 为每条经脉的费用，EVEN 为这一项的总费用，元
+  QiDistribution distribution = 5; // 必须显式声明；EVEN 按经脉 ID 字典序分配余数
 }
 message WorkCost {
   string slot_id = 1; // 组织或器官，每个绑定模块各做一次功

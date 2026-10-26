@@ -19,6 +19,8 @@ public class TechniqueCastingTest {
     private static final long CAST_END = WARMUP + ACTIVE + RECOVERY;
     private static final double EXCESS_QI = QI_AMOUNT + WATER_AMOUNT;
     private static final double EXCESS_POWER = POWER + 1;
+    private static final double EVEN_TOTAL_COST = 10.1;
+    private static final double POOR_MERIDIAN_QI = 10;
 
     @Test
     public void startSubmitsOneAtomicActivityWithAllCostsAndProgress() {
@@ -47,6 +49,102 @@ public class TechniqueCastingTest {
     }
 
     @Test
+    public void eachDistributionChargesEveryBoundMeridian() {
+        // EACH 把同一项费用完整扣到绑定槽位的每条经脉。
+        TechniqueDefinition base = definition();
+        TechniqueSlot source = base.getSlots(0).toBuilder()
+                .setMinimumCount(2)
+                .setMaximumCount(2)
+                .build();
+        TechniqueDefinition definition = base.toBuilder().setSlots(0, source).build();
+        BodySnapshot before = body(Shape.PAIRED);
+        var host = new MemoryHost(before);
+
+        CastOutcome outcome = new TechniqueCasting(registry(definition))
+                .cast(host, request(before, "each"));
+        assertSuccess(outcome, CastPhase.WARMUP);
+
+        BodySnapshot after = host.current();
+        for (var state : after.meridianStates()) {
+            assertEquals(QI_AMOUNT - COST_QI, state.lumenQi().entries().get(0).amount(), TOLERANCE);
+        }
+        assertEquals(COST_QI * 2, host.store.environmentQi().totalQi(), TOLERANCE);
+    }
+
+    @Test
+    public void evenDistributionUsesStableRemainderAndPreservesTotal() {
+        // EVEN 按经脉 ID 字典序平摊，最后一条经脉承担浮点余数。
+        double totalCost = EVEN_TOTAL_COST;
+        TechniqueDefinition base = definition();
+        TechniqueSlot source = base.getSlots(0).toBuilder()
+                .setMinimumCount(2)
+                .setMaximumCount(2)
+                .build();
+        QiCost even = base.getCost().getQi(0).toBuilder()
+                .setAmount(quantity(totalCost, Unit.QI))
+                .setDistribution(QiDistribution.EVEN)
+                .build();
+        TechniqueCost cost = base.getCost().toBuilder().setQi(0, even).build();
+        TechniqueDefinition definition = base.toBuilder()
+                .setSlots(0, source)
+                .setCost(cost)
+                .build();
+        BodySnapshot before = body(Shape.PAIRED);
+        var host = new MemoryHost(before);
+
+        CastOutcome outcome = new TechniqueCasting(registry(definition))
+                .cast(host, request(before, "even"));
+        assertSuccess(outcome, CastPhase.WARMUP);
+
+        double firstShare = totalCost / 2;
+        double secondShare = totalCost - firstShare;
+        BodySnapshot after = host.current();
+        assertEquals(QI_AMOUNT - firstShare, meridian(after, "a").lumenQi()
+                .entries().get(0).amount(), TOLERANCE);
+        assertEquals(QI_AMOUNT - secondShare, meridian(after, "b").lumenQi()
+                .entries().get(0).amount(), TOLERANCE);
+        assertEquals(totalCost, host.store.environmentQi().totalQi(), TOLERANCE);
+        assertEquals(before.totalQi(), after.totalQi() + host.store.environmentQi().totalQi(), TOLERANCE);
+    }
+
+    @Test
+    public void evenDistributionRejectsWhenOneBoundMeridianCannotPay() {
+        // EVEN 任一经脉不足时整次施放拒绝，不从其他经脉挪补。
+        TechniqueDefinition base = definition();
+        TechniqueSlot source = base.getSlots(0).toBuilder()
+                .setMinimumCount(2)
+                .setMaximumCount(2)
+                .build();
+        QiCost even = base.getCost().getQi(0).toBuilder()
+                .setAmount(quantity(30, Unit.QI))
+                .setDistribution(QiDistribution.EVEN)
+                .build();
+        TechniqueCost cost = base.getCost().toBuilder().setQi(0, even).build();
+        TechniqueDefinition definition = base.toBuilder()
+                .setSlots(0, source)
+                .setCost(cost)
+                .build();
+        BodySnapshot original = body(Shape.PAIRED);
+        var message = BodyProtobuf.toMessage(original);
+        Qi fire = message.getMeridianStates(1).getLumenQi().getEntries(0).toBuilder()
+                .setAmount(POOR_MERIDIAN_QI)
+                .build();
+        QiInventory lumen = QiInventory.newBuilder()
+                .addEntries(fire)
+                .addEntries(message.getMeridianStates(1).getLumenQi().getEntries(1))
+                .build();
+        MeridianState poor = message.getMeridianStates(1).toBuilder().setLumenQi(lumen).build();
+        BodySnapshot before = BodyProtobuf.fromMessage(message.toBuilder().setMeridianStates(1, poor).build());
+        var host = new MemoryHost(before);
+
+        CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "even_poor"));
+
+        assertFailure(outcome, INSUFFICIENT_QI, "真元不济");
+        assertEquals(before, host.current());
+        assertEquals(0, host.activitySubmissions);
+    }
+
+    @Test
     public void insufficientQiRejectsWholeActivity() {
         // 第一项余额足够、第二项不足时，第一项也不能先扣除。
         TechniqueDefinition base = definition();
@@ -61,7 +159,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.PAIRED);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "poor"));
-        assertFailure(outcome, INSUFFICIENT_QI, "真元不足");
+        assertFailure(outcome, INSUFFICIENT_QI, "真元不济");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
         assertEquals(0, host.store.environmentQi().totalQi(), 0);
@@ -78,7 +176,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.PAIRED);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "tired"));
-        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "无法承担");
+        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "过于疲惫");
         assertEquals(before, host.current());
         assertEquals(0, host.store.receipts().size());
     }
@@ -95,7 +193,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = BodyProtobuf.fromMessage(message.toBuilder().setMeridianStates(0, state).build());
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition())).cast(host, request(before, "closed"));
-        assertFailure(outcome, MERIDIAN_NOT_OPENED, "未开拓");
+        assertFailure(outcome, MERIDIAN_NOT_OPENED, "经脉未通");
         assertEquals(before, host.current());
     }
 
@@ -136,10 +234,10 @@ public class TechniqueCastingTest {
         assertSuccess(casting.cast(host, request), CastPhase.WARMUP);
         BodySnapshot after = host.current();
         CastRequest target = request.toBuilder().setTargetId("different").build();
-        assertFailure(casting.cast(host, target), CAST_ID_CONFLICT, "不同施放");
+        assertFailure(casting.cast(host, target), CAST_ID_CONFLICT, "已另有安排");
         HorizontalDirection direction = HorizontalDirection.newBuilder().setX(1).build();
         CastRequest directed = request.toBuilder().setDirection(direction).build();
-        assertFailure(casting.cast(host, directed), CAST_ID_CONFLICT, "不同施放");
+        assertFailure(casting.cast(host, directed), CAST_ID_CONFLICT, "已另有安排");
         assertEquals(after, host.current());
     }
 
@@ -186,7 +284,7 @@ public class TechniqueCastingTest {
         assertSuccess(casting.advance(restored), CastPhase.FINISHED);
         assertEquals(0, restored.current().actions().size());
         restored.nowMillis = COOLDOWN - 1;
-        assertFailure(casting.cast(restored, request(before, "early")), COOLING_DOWN, "冷却中");
+        assertFailure(casting.cast(restored, request(before, "early")), COOLING_DOWN, "气息尚未平复");
         restored.nowMillis = COOLDOWN;
         assertSuccess(casting.cast(restored, request(before, "ready")), CastPhase.WARMUP);
         assertEquals(COST_QI + COST_QI, restored.store.environmentQi().totalQi(), TOLERANCE);
@@ -268,7 +366,7 @@ public class TechniqueCastingTest {
         BodySnapshot paid = host.current();
         TechniqueReference reference = TechniqueRegistry.reference(second);
         CastRequest secondRequest = request(before, "two").toBuilder().setTechnique(reference).build();
-        assertFailure(casting.cast(host, secondRequest), ALREADY_CASTING, "已有施放");
+        assertFailure(casting.cast(host, secondRequest), ALREADY_CASTING, "正运功中");
         assertEquals(paid, host.current());
     }
 
@@ -299,18 +397,19 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.TENDRIL);
         var casting = new TechniqueCasting(registry(definition()));
         var unlearned = new MemoryHost(withProgress(before, TechniqueState.empty()));
-        assertFailure(casting.cast(unlearned, request(before, "unlearned")), NOT_KNOWN, "未学会");
+        assertFailure(casting.cast(unlearned, request(before, "unlearned")), NOT_KNOWN, "还不会");
         TechniqueReference unknown = TechniqueReference.newBuilder()
                 .setId("sample:missing")
                 .setVersion(1)
                 .build();
         CastRequest missing = request(before, "unknown").toBuilder().setTechnique(unknown).build();
-        assertFailure(casting.cast(new MemoryHost(before), missing), UNKNOWN_TECHNIQUE, "没有该功法");
+        assertFailure(casting.cast(new MemoryHost(before), missing), UNKNOWN_TECHNIQUE, "还不会");
         // 死亡身体必须清空所有资源，使用核心死亡算子生成合法状态。
         var deadHost = new MemoryHost(before);
         deadHost.nowMillis = java.util.concurrent.TimeUnit.SECONDS.toMillis((long) LIFESPAN);
         BodySnapshot deadBody = deadHost.inspect();
-        assertFailure(casting.cast(new MemoryHost(deadBody), request(deadBody, "dead")), BODY_UNAVAILABLE, "死亡");
+        CastRequest deadRequest = request(deadBody, "dead");
+        assertFailure(casting.cast(new MemoryHost(deadBody), deadRequest), BODY_UNAVAILABLE, "无法运功");
         assertEquals(TechniqueState.read(before).getKnownList(), TechniqueState.read(deadBody).getKnownList());
     }
 
@@ -325,7 +424,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.TENDRIL);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "force"));
-        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "无法承担");
+        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "过于疲惫");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
     }
@@ -338,7 +437,7 @@ public class TechniqueCastingTest {
         assertSuccess(casting.cast(host, request(host.current(), "stop_retry")), CastPhase.WARMUP);
         BodySnapshot active = host.current();
         host.rejectNextActivity();
-        assertFailure(casting.cancelOnUnload(host), FRAMEWORK_REJECTED, "没有授权");
+        assertFailure(casting.cancelOnUnload(host), FRAMEWORK_REJECTED, "身体暂不听使唤");
         assertEquals(active, host.current());
         assertSuccess(casting.cancelOnUnload(host), CastPhase.CANCELLED);
         assertEquals(COST_QI, host.store.environmentQi().totalQi(), TOLERANCE);
@@ -369,7 +468,7 @@ public class TechniqueCastingTest {
         host.rejectNextActivity();
         var casting = new TechniqueCasting(registry(definition));
         CastOutcome failure = casting.cast(host, request(before, "denied"));
-        assertFailure(failure, FRAMEWORK_REJECTED, "没有授权");
+        assertFailure(failure, FRAMEWORK_REJECTED, "身体暂不听使唤");
         assertEquals(FailureCode.ACCESS_DENIED, failure.getFrameworkFailure());
         assertEquals(before, host.current());
         BindingOutcome binding = TechniqueBinder.bind(before, definition);
@@ -410,6 +509,17 @@ public class TechniqueCastingTest {
         }
     }
 
+    @Test
+    public void playerFacingReasonsContainNoTimingOrNumericDetails() {
+        // 所有玩家文本都不能暴露数值、时间单位或内部字段。
+        for (TechniqueFailure failure : TechniqueFailure.values()) {
+            assertPlayerFacing(TechniqueErrors.playerReason(failure));
+        }
+        for (FailureCode failure : FailureCode.values()) {
+            assertPlayerFacing(TechniqueErrors.frameworkPlayerReason(failure));
+        }
+    }
+
     private static void assertSuccess(CastOutcome outcome, CastPhase phase) {
         // 成功不能夹带失败码，便于宿主直接使用状态推进结果。
         assertEquals(outcome.getReason(), TECHNIQUE_FAILURE_UNSPECIFIED, outcome.getFailure());
@@ -420,6 +530,19 @@ public class TechniqueCastingTest {
         // 原因码和一句中文说明同时属于公开失败契约。
         assertEquals(outcome.getReason(), failure, outcome.getFailure());
         assertTrue(outcome.getReason(), outcome.getReason().contains(reason));
+    }
+
+    private static dev.kizuna.meridian.core.MeridianState meridian(BodySnapshot body, String id) {
+        return body.meridianStates().stream()
+                .filter(state -> state.id().value().equals(id))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static void assertPlayerFacing(String reason) {
+        assertFalse(reason, reason.matches(".*[0-9].*"));
+        assertFalse(reason, reason.contains("毫秒"));
+        assertFalse(reason, reason.contains("秒"));
     }
 
     private enum Exit { UNLOAD, DISCONNECT }

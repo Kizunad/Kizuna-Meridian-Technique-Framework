@@ -23,13 +23,13 @@ public final class TechniqueBinder {
     }
 
     public static BindingOutcome bind(BodySnapshot body, TechniqueDefinition definition) {
-        // 身体与境界先检查，槽位错误随后携带具体局部身份。
+        // 身体与境界先检查，槽位错误随后携带结构化原因码。
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
-            return failure(BODY_UNAVAILABLE, "身体已经死亡或寿命耗尽");
+            return failure(BODY_UNAVAILABLE);
         }
         int realmNumber = BodyMessages.Realm.valueOf(body.realm().name()).getNumber();
         if (realmNumber < definition.getMinimumRealmValue()) {
-            return failure(REALM_TOO_LOW, "境界不足，要求 " + definition.getMinimumRealm());
+            return failure(REALM_TOO_LOW);
         }
         BodyMessages.BodySnapshot message = BodyProtobuf.toMessage(body);
         var binding = TechniqueBinding.newBuilder()
@@ -47,7 +47,7 @@ public final class TechniqueBinder {
                     .map(Candidate::id)
                     .toList();
             if (selected.size() < slot.getMinimumCount()) {
-                return missingSlot(slot, matching);
+                return missingSlot(matching);
             }
             BoundSlot bound = BoundSlot.newBuilder()
                     .setSlotId(slot.getId())
@@ -132,29 +132,22 @@ public final class TechniqueBinder {
         return candidates;
     }
 
-    private static BindingOutcome missingSlot(TechniqueSlot slot, List<Candidate> matching) {
+    private static BindingOutcome missingSlot(List<Candidate> matching) {
         // 匹配了标签但不可用时返回首个确定原因；没有匹配则明确指出缺少模块。
-        TechniqueFailure code = MISSING_MODULE;
-        String reason = "缺少匹配模块或数量不足";
         for (Candidate candidate : matching) {
-            if (candidate.failure() != TECHNIQUE_FAILURE_UNSPECIFIED) {
-                code = candidate.failure();
-                reason = switch (code) {
-                    case MERIDIAN_NOT_OPENED -> "经脉尚未开拓";
-                    case INSUFFICIENT_CAPABILITY -> "组织可用力量不足";
-                    default -> "组织、器官或经脉已经失能";
-                };
-                break;
+            TechniqueFailure candidateFailure = candidate.failure();
+            if (candidateFailure != TECHNIQUE_FAILURE_UNSPECIFIED) {
+                return failure(candidateFailure);
             }
         }
-        return failure(code, "槽位 " + slot.getId() + "（" + String.join("、", slot.getTagsList()) + "）：" + reason);
+        return failure(MISSING_MODULE);
     }
 
-    private static BindingOutcome failure(TechniqueFailure code, String reason) {
-        // 调用方直接使用码和中文说明，不需要猜测空绑定的含义。
+    private static BindingOutcome failure(TechniqueFailure code) {
+        // 绑定失败保留原因码，说明使用玩家能理解的身体感受。
         return BindingOutcome.newBuilder()
                 .setFailure(code)
-                .setReason(reason)
+                .setReason(TechniqueErrors.playerReason(code))
                 .build();
     }
 

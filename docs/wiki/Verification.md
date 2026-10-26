@@ -11,6 +11,7 @@
 | 规则 | 测试类与测试名 |
 |---|---|
 | 缺数值、缺单位拒绝 | `TechniqueRegistryTest.rejectsMissingUnits` |
+| 未指定真元分配方式拒绝 | `TechniqueRegistryTest.rejectsUnspecifiedQiDistribution` |
 | 非有限、负费用、过小/过大费用、冲量速度和时间越界拒绝 | `TechniqueRegistryTest.rejectsOutOfRangeParameters` |
 | 缺少算子、未知二进制算子拒绝 | `TechniqueRegistryTest.rejectsUnknownOperatorsIncludingWireFields` |
 | 未知标签、用错模块种类的标签拒绝 | `TechniqueRegistryTest.rejectsUnknownAndWrongModuleTags` |
@@ -21,6 +22,9 @@
 | 未开拓、组织失能、境界和力量不足有具体原因 | `TechniqueBinderTest.bindingReportsUnopenedUnavailableAndRealm` |
 | revision 改变后重绑；可选、仅类型器官槽位 | `TechniqueBinderTest.rebindsChangedRevisionAndSupportsOptionalSlots` |
 | 起手一笔活动支付真元、组织做功、器官疲劳、动作和进度 | `TechniqueCastingTest.startSubmitsOneAtomicActivityWithAllCostsAndProgress` |
+| `EACH` 每条经脉扣费 | `TechniqueCastingTest.eachDistributionChargesEveryBoundMeridian` |
+| `EVEN` 平摊、稳定余数与总量守恒 | `TechniqueCastingTest.evenDistributionUsesStableRemainderAndPreservesTotal` |
+| `EVEN` 任一经脉不足整笔拒绝 | `TechniqueCastingTest.evenDistributionRejectsWhenOneBoundMeridianCannotPay` |
 | 真元不足整笔拒绝 | `TechniqueCastingTest.insufficientQiRejectsWholeActivity` |
 | 后续做功预算不足不留下先前资源变化 | `TechniqueCastingTest.insufficientWorkBudgetRollsBackQiActionsAndProgress` |
 | 只能从已开拓经脉扣费 | `TechniqueCastingTest.onlyOpenedMeridiansCanFundCasting` |
@@ -39,6 +43,7 @@
 | 死亡后活动清理限制明确报告，知识冷却保留 | `TechniqueCastingTest.deathPreservesKnowledgeAndCooldownButReportsActivityCleanupLimit` |
 | 宿主拒绝和过期 revision 不留下部分变化 | `TechniqueCastingTest.hostRejectionAndStaleRevisionLeaveWholeActivityUnchanged` |
 | 熟练度不改变费用；不执行修正、不发提前移除 | `TechniqueCastingTest.proficiencyDoesNotChangeCostsAndNoStageThreeEffectIsExecuted` |
+| 玩家文本不含数值或时间单位 | `TechniqueCastingTest.playerFacingReasonsContainNoTimingOrNumericDetails` |
 | 宿主 oneof 编号、三操作往返、表现交给 effect | `TechniqueProtocolTest.hostOperationsUseStableFieldNumbersAndRoundTrip` |
 | 缺操作、错误 UUID、截断/超大消息和提前移除拒绝 | `TechniqueProtocolTest.hostRejectsMissingOperationInvalidUuidAndMalformedPayload` |
 | 方向缺省/零/有限值接受，NaN 与无穷拒绝 | `TechniqueProtocolTest.horizontalDirectionAcceptsAbsentZeroAndFiniteValuesButRejectsNonfinite` |
@@ -51,7 +56,7 @@
 |---|---|
 | `TechniqueHostRequest` 与校验 | `inspect=10`、`activity=11`、`effect=12`，有界编解码与结构校验；没有宿主发现或执行器 |
 | `direction` 与 `INPUT` | 请求保存有限水平 x/z；缺省或零向量语义记入契约；算子枚举含 `INPUT`；不执行方向或速度 |
-| 中文失败原因 | `CastOutcome.failure` + `reason`，Framework 拒绝额外保留 `framework_failure` |
+| 玩家失败文本 | `CastOutcome.failure` 保留结构化原因码，`reason` 只描述身体感受；Framework 拒绝额外保留 `framework_failure` |
 | 库不持有身体 | `TechniqueHost.inspect/findActivity/submit`；状态机只有目录字段，测试通过内存假宿主集成真实 Framework |
 | `presentation` 走宿主 effect | 保留定义和 `EffectIntent` 的播放/开始/停止数据及校验；不分发，不提供正式表现内容 |
 | 预输入、展示投影不做 | 无对应消息、队列或接口；忙碌和冷却直接拒绝 |
@@ -59,29 +64,21 @@
 KISS/DRY/YAGNI 的落点是复用 Framework 库存算术、有效能力、原子活动和持久回执；
 本库只维护声明式定义和必要编排。宿主接口隔离身体所有权，绑定、目录、存档和施放各自承担单一职责。
 
-实际运行记录（2026-10-26）：
+实际运行记录（2026-10-27）：
 
 | 命令或检查 | 结果 |
 |---|---|
-| `git init -b main` | 只初始化本地仓库，没有远端 |
 | `./gradlew :server:compileJava --console=plain` | 编译通过 |
-| `./gradlew :server:test --console=plain` | 迭代验证后 33 项测试通过；补零时长回归后纳入最终完整检查 |
-| `./gradlew test build --console=plain` | 最终 `BUILD SUCCESSFUL`，4 秒；24 个任务，6 执行、18 已是最新 |
-| 测试 XML 汇总 | 34 项，0 失败、0 错误、0 跳过：目录 7、绑定 3、施放 19、协议 5 |
+| `./gradlew :server:test --console=plain` | 39 项测试通过，0 失败、0 错误、0 跳过 |
+| `./gradlew test build --console=plain` | 最终构建通过，包含共享协议、服务端测试与打包 |
+| 测试 XML 汇总 | 39 项，0 失败、0 错误、0 跳过：目录 8、绑定 3、施放 23、协议 5 |
 | `python3 "scripts/check_docs.py"` | 7 个页面链接全部通过；构建的 `checkDocs` 也通过 |
-| 产物检查（Python 标准库 `zipfile`） | 两个运行 JAR 包含许可，不含测试数据或复制的 Framework 类；共享 JAR 含源码协议与描述集；服务端字节码为 Java 17 |
-| `git diff --cached --check` | 通过；Windows Wrapper 通过 `.gitattributes` 保留 CRLF，索引使用规范换行 |
-| Framework `git status --porcelain=v1` | 空，依赖仓库保持干净 |
-| `git remote -v` | 空，没有远端 |
+| `git diff --check` | 通过 |
 
-迭代中修正了测试夹具的能力声明、死亡样本误用非致死寿元支出入口，以及验收页写入前触发的链接检查失败。
-最终完整检查已覆盖这些修正，没有修改 Framework。
+本次补充了真元分配方式、平摊余数和玩家文本回归；没有修改 Framework。
 
-代码形状自查：已改第 1 条（`TechniqueCasting.transition`、`Fixtures` 等测试构造的 builder 每行一个 setter）、
-第 4 条（`TechniqueActivities.start`、`TechniqueRegistryTest`、`TechniqueCastingTest` 重复读取输入与构造样本）、
-第 8 条（`TechniqueActivities.start`、`TechniqueProtocol.validateActivity` 明确注明校验意图及异常）、
-第 9 条（`TechniqueBinderTest`、`TechniqueCastingTest`、`TechniqueProtocolTest`、`TechniqueRegistryTest` 超过 120 列的链式构造）。
-其余逐条检查：无嵌套 builder、复杂三元、自有布尔参数或超长方法；输入数量使用命名常量，注释说明代码本身的约束。
+代码形状自查：本次 diff 修正第 4 条（`TechniqueDefinitions`、`TechniqueBinder`、`TechniqueCasting` 与费用测试保存重复读取结果），
+并按第 9 条拆开新增测试和校验的超长表达式。新增 builder 每行一个 setter；其余逐条检查无嵌套 builder、复杂三元、自有布尔参数或超长方法。
 
 未检查的内容：游戏内行为、生产宿主授权/持久存储、Fabric 发现与网络、真实实体朝向/冲量/表现、
 阶段 3–5、AI、性能基准、Windows 实机执行和正式内容平衡。当前阶段没有 Fabric 工程，不制作无运行职责的空模组。

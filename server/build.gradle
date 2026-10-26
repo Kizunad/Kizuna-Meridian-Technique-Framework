@@ -1,0 +1,8 @@
+description = '功法目录、标签绑定和权威活动编排；不引用 Minecraft 或 Fabric。'
+
+dependencies {
+    api project(':shared')
+    api 'local.meridian:server'
+    testImplementation 'junit:junit:4.13.2'
+}
+test { useJUnit() }

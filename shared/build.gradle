@@ -1,0 +1,24 @@
+apply plugin: 'com.google.protobuf'
+description = '功法目录、绑定、进度与施放请求的跨语言 Protobuf 契约。'
+
+dependencies {
+    api 'com.google.protobuf:protobuf-java:4.36.2'
+    compileOnlyApi 'local.meridian:client'
+}
+
+def descriptor = layout.buildDirectory.file('descriptors/technique-v1.desc')
+protobuf {
+    protoc { artifact = 'com.google.protobuf:protoc:4.36.2' }
+    generateProtoTasks {
+        ofSourceSet('main').configureEach { task ->
+            task.generateDescriptorSet = true
+            task.descriptorSetOptions.path = descriptor.get().asFile.path
+            task.descriptorSetOptions.includeImports = true
+            task.descriptorSetOptions.includeSourceInfo = true
+        }
+    }
+}
+tasks.named('processResources') {
+    dependsOn tasks.named('generateProto')
+    from(descriptor) { into 'META-INF/kizuna_meridian/protocol' }
+}

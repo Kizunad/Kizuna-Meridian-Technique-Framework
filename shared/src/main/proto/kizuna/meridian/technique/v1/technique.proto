@@ -1,0 +1,242 @@
+syntax = "proto3";
+package kizuna.meridian.technique.v1;
+
+import "kizuna/meridian/v1/body.proto";
+import "kizuna/meridian/v1/protocol.proto";
+import "kizuna/meridian/v1/activity.proto";
+
+option java_package = "dev.kizuna.meridian.technique.protocol.pb";
+option java_outer_classname = "TechniqueMessages";
+
+// 定义不能携带执行代码；未知字段、枚举和算子均拒绝。字段删除必须 reserved。
+// 所有 Quantity 必须显式提供 value 和正确单位，范围由目录校验器及 Wiki 固定。
+enum Unit {
+  UNIT_UNSPECIFIED = 0;
+  QI = 1; // 元
+  NEWTON = 2;
+  WATT = 3;
+  SECOND = 4;
+  RATIO = 5; // 无量纲
+  METERS_PER_SECOND = 6;
+  METER = 7;
+}
+message Quantity { optional double value = 1; Unit unit = 2; }
+message TechniqueReference { string id = 1; int32 version = 2; }
+
+message TechniqueCatalog {
+  int32 schema_version = 1; // 1
+  string namespace = 2;
+  // 已在 AddonRegistry 登记的模板；按模块种类汇集其标签，拒绝未知标签。
+  repeated kizuna.meridian.v1.TemplateReference binding_templates = 3;
+  repeated TechniqueDefinition definitions = 4;
+}
+enum Category {
+  CATEGORY_UNSPECIFIED = 0;
+  ATTACK = 1;
+  DEFENSE = 2;
+  MOVEMENT = 3;
+  RECOVERY = 4;
+  BUFF = 5;
+  CULTIVATION = 6;
+}
+enum ModuleKind {
+  MODULE_UNSPECIFIED = 0;
+  MERIDIAN = 1;
+  TISSUE = 2;
+  ORGAN = 3;
+}
+message TechniqueSlot {
+  string id = 1; // 功法内局部英文 ID
+  ModuleKind module = 2;
+  repeated string tags = 3; // 全部匹配，最多 16 个；标签和 kind 至少提供一种选择条件
+  string kind = 4; // 组织或器官类型，可空；经脉不得提供
+  optional int32 minimum_count = 5; // [0, 16]；0 表示可选
+  optional int32 maximum_count = 6; // [1, 16]，不小于 minimum_count
+  optional bool require_opened = 7; // 经脉槽必须显式声明；扣费槽必须为 true
+  Quantity minimum_strength = 8; // 可缺省；组织可用力量下限，N
+}
+message QiCost {
+  string slot_id = 1;
+  string attribute = 2;
+  kizuna.meridian.v1.QiPhase phase = 3;
+  Quantity amount = 4; // 每个绑定经脉各扣一次，元
+}
+message WorkCost {
+  string slot_id = 1; // 组织或器官，每个绑定模块各做一次功
+  Quantity force = 2; // 组织必填，N；器官必须缺省
+  Quantity power = 3; // W
+  Quantity duration = 4; // s
+}
+message TechniqueCost { repeated QiCost qi = 1; repeated WorkCost work = 2; }
+message CastPhases {
+  optional int64 warmup_millis = 1;
+  optional int64 active_millis = 2;
+  optional int64 recovery_millis = 3;
+  optional bool interruptible_by_damage = 4;
+}
+message TissueModifier {
+  string slot_id = 1;
+  // 偏移单位 ms，值为无量纲 [-1, 1]；2–16 点，首点偏移 0，首尾值 0，末点是到期。
+  repeated kizuna.meridian.v1.CurvePoint curve = 2;
+  Quantity strength_peak = 3; // RATIO，(0, 10]
+  Quantity burst_peak = 4;
+  Quantity endurance_peak = 5;
+  Quantity recovery_peak = 6;
+  // 不存在提前移除字段；库添加的每条曲线都完整运行，到期由 Framework 清理。
+}
+enum ImpulseDirection {
+  IMPULSE_DIRECTION_UNSPECIFIED = 0;
+  FORWARD = 1;
+  UP = 2;
+  TOWARD_TARGET = 3;
+  INPUT = 4; // direction 为零或缺省时由宿主取施放者朝向
+}
+message Impulse { ImpulseDirection direction = 1; Quantity speed = 2; } // (0, 100] m/s
+enum PresentationDuration {
+  PRESENTATION_DURATION_UNSPECIFIED = 0;
+  ONCE = 1;
+  UNTIL_RECOVERY_END = 2;
+}
+message PresentationEffect { string id = 1; PresentationDuration duration = 2; }
+message TechniqueEffect {
+  optional int64 at_millis = 1; // 相对起手的生效时刻，非负且不晚于收势结束
+  oneof operation {
+    TissueModifier tissue_modifier = 2;
+    Impulse impulse = 3;
+    PresentationEffect presentation = 4;
+  }
+}
+message Presentation {
+  string icon_id = 1;
+  string description = 2;
+  string particle_id = 3;
+  string sound_id = 4;
+}
+message AiHints {
+  Quantity minimum_distance = 1; // m，[0, 1024]
+  Quantity maximum_distance = 2;
+  Quantity maximum_hp_ratio = 3; // [0, 1]
+  Quantity minimum_qi_ratio = 4;
+  Quantity category_weight = 5; // [0, 100]
+}
+message TechniqueDefinition {
+  string id = 1;
+  int32 version = 2;
+  Category category = 3;
+  kizuna.meridian.v1.Realm minimum_realm = 4;
+  repeated TechniqueSlot slots = 5;
+  TechniqueCost cost = 6;
+  CastPhases phases = 7;
+  optional int64 cooldown_millis = 8; // 从起手计时，[0, 86400000]
+  repeated TechniqueEffect effects = 9; // 按 at_millis 非递减排序，同刻保持声明顺序
+  AiHints ai_hints = 10;
+  Presentation presentation = 11;
+}
+
+enum TechniqueFailure {
+  TECHNIQUE_FAILURE_UNSPECIFIED = 0;
+  UNKNOWN_TECHNIQUE = 1;
+  NOT_KNOWN = 2;
+  COOLING_DOWN = 3;
+  ALREADY_CASTING = 4;
+  BODY_UNAVAILABLE = 5;
+  REALM_TOO_LOW = 6;
+  MISSING_MODULE = 7;
+  MERIDIAN_NOT_OPENED = 8;
+  MODULE_UNAVAILABLE = 9;
+  INSUFFICIENT_CAPABILITY = 10;
+  INSUFFICIENT_QI = 11;
+  CAST_ID_CONFLICT = 12;
+  INVALID_STATE = 13;
+  FRAMEWORK_REJECTED = 14;
+  INVALID_REQUEST = 15;
+  NO_HOST = 16; // 宿主发现由后续 Fabric 服务负责
+}
+message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
+message TechniqueBinding {
+  string body_id = 1;
+  int64 revision = 2;
+  repeated BoundSlot slots = 3;
+}
+message BindingOutcome {
+  TechniqueBinding binding = 1; // 成功时存在
+  TechniqueFailure failure = 2;
+  string reason = 3; // 失败时指出槽位及未满足条件
+}
+message CastRequest {
+  string body_id = 1;
+  TechniqueReference technique = 2;
+  string target_id = 3; // 可空，宿主解释；请求不能携带费用、效果剂量或学会记录
+  string cast_id = 4; // 身体内唯一；[A-Za-z0-9_-]，1–64 字符
+  HorizontalDirection direction = 5;
+}
+// 只传水平输入方向，不表示速度；分量须为有限数。缺省或全零由宿主取施放者朝向。
+message HorizontalDirection { double x = 1; double z = 2; }
+enum PresentationAction {
+  PRESENTATION_ACTION_UNSPECIFIED = 0;
+  PLAY_ONCE = 1;
+  START = 2;
+  STOP = 3;
+}
+message PresentationIntent { string id = 1; PresentationAction action = 2; }
+// 世界效果只交给宿主，不包含身体修正；当前仅定义并校验，不分发。
+message EffectIntent {
+  string cast_id = 1;
+  string target_id = 2;
+  HorizontalDirection direction = 3;
+  oneof operation {
+    Impulse impulse = 10;
+    PresentationIntent presentation = 11;
+  }
+}
+message TechniqueHostRequest {
+  string entity_uuid = 1;
+  string request_id = 2;
+  oneof operation {
+    bool inspect = 10;
+    kizuna.meridian.v1.BodyActivity activity = 11;
+    EffectIntent effect = 12;
+  }
+}
+enum CastPhase {
+  CAST_PHASE_UNSPECIFIED = 0;
+  IDLE = 1;
+  WARMUP = 2;
+  EFFECTIVE = 3;
+  RECOVERING = 4;
+  FINISHED = 5;
+  INTERRUPTED = 6;
+  CANCELLED = 7;
+}
+message CastOutcome {
+  string cast_id = 1;
+  CastPhase phase = 2;
+  TechniqueFailure failure = 3;
+  string reason = 4;
+  int64 revision = 5;
+  TechniqueBinding binding = 6;
+  kizuna.meridian.v1.FailureCode framework_failure = 7;
+  bool replayed = 8;
+}
+message KnownTechnique {
+  TechniqueReference technique = 1;
+  Quantity proficiency = 2; // RATIO，[0, 1]，只供未来 AI 权重使用
+  string source = 3; // namespace:path，可信学会来源
+  optional int64 learned_millis = 4;
+}
+message ActiveCast {
+  CastRequest request = 1;
+  int64 started_millis = 2;
+  int64 warmup_end_millis = 3;
+  int64 active_end_millis = 4;
+  int64 recovery_end_millis = 5;
+  string action_instance_id = 6;
+  TechniqueBinding binding = 7;
+  optional bool interruptible_by_damage = 8;
+}
+message TechniqueProgress {
+  int32 schema_version = 1; // 1；Any 的完整大小不得超过 Framework 的 64 KiB 上限
+  repeated KnownTechnique known = 2;
+  map<string, int64> cooldowns = 3; // 功法 ID → 冷却结束的身体毫秒，跨版本共用冷却
+  ActiveCast active_cast = 4; // 至多一个；结束后清除，知识与冷却保留
+}

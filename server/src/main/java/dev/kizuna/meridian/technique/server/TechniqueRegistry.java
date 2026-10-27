@@ -4,6 +4,7 @@ import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -54,10 +55,18 @@ public final class TechniqueRegistry {
         return Optional.ofNullable(definitions.get(reference));
     }
 
+    public Optional<TechniqueDefinition> findLatest(String id) {
+        // 管理命令只接收功法 ID，选择目录中最高版本并保持版本选择可复现。
+        TechniqueValues.id(id, "technique.id");
+        return definitions.values().stream()
+                .filter(definition -> definition.getId().equals(id))
+                .max(Comparator.comparingInt(TechniqueDefinition::getVersion));
+    }
+
     public List<TechniqueDefinition> definitions() {
         // 按身份排序，保证不同加载顺序下目录遍历结果一致。
         return definitions.values().stream()
-                .sorted(java.util.Comparator.comparing(TechniqueDefinition::getId)
+                .sorted(Comparator.comparing(TechniqueDefinition::getId)
                         .thenComparingInt(TechniqueDefinition::getVersion))
                 .toList();
     }

@@ -57,17 +57,19 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 
 `CastRequest.direction` 只含水平 x、z，两个分量必须有限。
 缺省和全零均表示使用施放者朝向；非零值仅表达方向，不决定速度或其他数值。
-当前保留原值以供幂等比较，实际归一化、朝向读取和速度执行仍由阶段 5 宿主负责。
+当前保留原值以供幂等比较；`TechniqueScheduler` 对零输入的 `INPUT` 冲量改成 `FORWARD`，非零方向原样交给效果宿主。
 
 `TechniqueHostRequest` 使用标准小写 `entity_uuid` 和非空 `request_id`。
+`expected_revision` 只用于 `activity`，由宿主按 Framework 当前 revision 做原子校验；查询和效果操作必须为 0。
 oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(EffectIntent)`。
 `inspect=false`、缺操作、错误 UUID、非法嵌套活动或效果均拒绝。
 `EffectIntent` 只声明冲量或表现的播放/开始/停止，交给宿主执行；不包含身体修正。
-`TechniqueHostRequest` 当前只有消息、编解码和校验，没有宿主发现和字节交换执行器。
+`TechniqueHostResponse` 以原 `request_id` 回显未认领、身体快照、活动 revision、效果接受或 Framework 失败。
+`TechniqueHostDirectory` 通过 `meridian_technique_host` 字节入口寻找唯一认领者；无人认领由 `TechniqueService.cast` 返回 `NO_HOST`，多个认领停止并报告接线错误。
 
 阶段 3 的 `TechniqueScheduler` 是无状态纯函数：调用方给出上一次已分发的身体时刻和当前已结算时刻，
 返回区间内的冲量/表现 `EffectIntent`。`TechniqueCasting.advance(host, previousMillis)` 在收势边界
-额外提交停止动作的 `BodyActivity`，并在 `AdvanceResult.recoveryCommit` 返回终止回执；它不接入 Fabric tick。
+额外提交停止动作的 `BodyActivity`，并在 `AdvanceResult.recoveryCommit` 返回终止回执。
 伤害打断、卸载和下线也使用这个带游标的结果入口；只有此前已分发 `START` 的持续表现才会返回 `STOP`。
 目录已卸载时仍能清除动作，但没有定义可用于生成表现停止意图。
 `INPUT` 冲量保留起手请求中的水平方向，缺省或全零仍交由宿主按施放者朝向解释。

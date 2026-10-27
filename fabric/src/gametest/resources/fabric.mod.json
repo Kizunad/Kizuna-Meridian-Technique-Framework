@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_technique_test",
+  "version": "1.0.0",
+  "name": "Meridian Technique Integration Test",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": [
+      "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest"
+    ],
+    "meridian_technique_catalog": [
+      "dev.kizuna.meridian.technique.server.TechniqueGameTestHost"
+    ],
+    "meridian_technique_host": [
+      "dev.kizuna.meridian.technique.server.TechniqueGameTestHost"
+    ]
+  }
+}

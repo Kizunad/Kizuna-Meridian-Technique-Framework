@@ -73,6 +73,17 @@ final class TechniqueActivities {
                 .build();
     }
 
+    static BodyActivity learn(TechniqueProgress progress, KnownTechnique known) {
+        // 学会只改写本库附属进度，不触碰身体资源、动作或其他附属状态。
+        TechniqueProgress learned = progress.toBuilder()
+                .addKnown(known)
+                .build();
+        Any payload = TechniqueState.pack(learned);
+        return BodyActivity.newBuilder()
+                .putProgress(TechniqueState.KEY, payload)
+                .build();
+    }
+
     private static ActiveCast activeCast(Start start) {
         // 固定本次边界与原始请求，目录卸载、升级和重启都不改变收势行为。
         long started = start.body().settledAt().elapsedMillis();

@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 
 import java.util.Optional;
 
@@ -27,7 +28,14 @@ public interface TechniqueHost {
      */
     Commit submit(Submission submission);
 
+    /** 把冲量或表现交给实体宿主；本库不直接改世界。 */
+    EffectCommit submitEffect(EffectSubmission submission);
+
     record Submission(String requestId, long expectedRevision, BodyActivity activity) { }
 
     record Commit(long revision, BodyActivity activity) { }
+
+    record EffectSubmission(String requestId, EffectIntent effect) { }
+
+    record EffectCommit(String requestId) { }
 }

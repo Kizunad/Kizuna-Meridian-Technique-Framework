@@ -53,10 +53,12 @@ public class TechniqueStage34Test {
         TechniqueCasting.AdvanceResult dispatched = casting.advance(host,
                 active.getStartedMillis() - 1);
         assertEquals(1, dispatched.effects().size());
+        assertEquals(WARMUP, dispatched.advancedMillis());
         assertTrue(dispatched.recoveryCommit().isEmpty());
         host.nowMillis = WARMUP + ACTIVE + RECOVERY;
         TechniqueCasting.AdvanceResult finished = casting.advance(host, WARMUP);
         assertEquals(CastPhase.FINISHED, finished.outcome().getPhase());
+        assertEquals(WARMUP + ACTIVE + RECOVERY, finished.advancedMillis());
         assertTrue(finished.effects().isEmpty());
         assertTrue(finished.recoveryCommit().isPresent());
     }

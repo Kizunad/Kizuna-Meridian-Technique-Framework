@@ -2,11 +2,12 @@
 
 实现依据为 2026-10-24 的功法方案、2026-10-26 的框架更新，以及
 `technique-combat-plans-2026-10-26.md` 中新版 `plans/06-Technique-Framework.md`。
-当前交付阶段 1–4；阶段 5 的宿主发现、Fabric 调度和学会入口仍未实现。
+当前交付阶段 1–5；Fabric 模组只负责服务端装配，身体和世界效果仍由独立宿主入口提供。
 依赖核对时 Framework 为 `216710d03ff9bb0e4ae13894ab9b0a8cf7be9a45`，未修改其受版本控制文件。
 
 测试全部属于公开契约、关键业务流程或模块交互的必要整体回归。
-测试功法和双侧/触须身体仅在 `server/src/test/java/`，内存假宿主调用真实 Framework 处理器和存储。
+测试功法和双侧/触须身体仅在 `server/src/test/java/` 与 `fabric/src/gametest/java/`，
+内存假宿主调用真实 Framework 处理器和存储。
 
 | 规则 | 测试类与测试名 |
 |---|---|
@@ -54,38 +55,79 @@
 | 方向缺省/零/有限值接受，NaN 与无穷拒绝 | `TechniqueProtocolTest.horizontalDirectionAcceptsAbsentZeroAndFiniteValuesButRejectsNonfinite` |
 | 损坏或超限进度拒绝且不覆盖身体 | `TechniqueProtocolTest.corruptStateAndOversizeAnyAreRejectedWithoutOverwritingBody` |
 | 生成描述集包含框架协议，无正式功法资源 | `TechniqueProtocolTest.generatedDescriptorContainsImportedProtocolAndNoFormalContent` |
+| 无宿主、宿主多重认领和 request_id 串包拒绝 | `TechniqueStage5Test.directoryRejectsUnboundAndMultipleClaims`, `TechniqueStage5Test.directoryChecksRequestIdAndRoutesEffectOnly` |
+| 学会原子写入、`known` 查询、重复学会幂等和 `KNOWN_CHANGED` 通知 | `TechniqueStage5Test.learnPublishesKnownChangedAndKnownReturnsCommittedEntry` |
+| 直接服务调用也拒绝目录外功法定义 | `TechniqueStage5Test.learnRejectsDefinitionOutsideCurrentRegistry` |
+| `INPUT` 缺省方向转前方、tick 下发效果和收势 | `TechniqueStage5Test.castTickDispatchesForwardImpulseThenFinishes` |
+| 非零输入原样传递、显式零向量转前方 | `TechniqueStage5Test.servicePreservesInputDirectionAndTreatsExplicitZeroAsForward` |
+| 无宿主施放返回 `NO_HOST` 和中文原因 | `TechniqueStage5Test.castWithoutHostReturnsNoHost` |
+| 服务级伤害打断和卸载取消 | `TechniqueStage5Test.serviceDamageInterruptClearsActiveCastWithoutRefund`, `TechniqueStage5Test.serviceUnloadClearsActiveCastWithoutRefund` |
+| 宿主回执索引重建后的活动重放 | `TechniqueStage5Test.activeCastReplaysWhenDirectoryReceiptIsRebuilt` |
+| 未认领、身体不存在后停止每 tick 重试 | `TechniqueStage5Test.lostHostRemovesSessionInsteadOfRetryingEveryTick` |
+| 效果或收势提交时失去认领也清理会话 | `TechniqueStage5Test.lostHostDuringEffectOrRecoveryRemovesSession` |
+| 暂时拒绝重试、永久拒绝移除会话 | `TechniqueStage5Test.temporaryRejectionRetriesButPermanentRejectionDropsSession` |
+| 相邻 inspect 间时钟前进不重复效果 | `TechniqueStage5Test.advancingHostClockDoesNotDispatchEffectTwice` |
+| 部分效果成功及收势后失败仍重试原批次 | `TechniqueStage5Test.effectRetryPreservesBatchAfterPartialAcceptanceAndRecovery` |
+| 同一请求重放不倒退效果游标 | `TechniqueStage5Test.castReplayDoesNotRewindEffectCursor` |
+| 服务入口拒绝未知和未学功法 | `TechniqueStage5Test.serviceRejectsUnknownAndUnlearnedClientReferences` |
+
+Fabric GameTest 全部使用真实服务器启动的 `TechniqueFabric.service()`，测试宿主和目录由 Fabric entrypoint 发现：
+
+| 验收 | `TechniqueServiceGameTest` 测试名 |
+|---|---|
+| 学会命令写进度、`KNOWN_CHANGED`、`known`、真实 tick 下发冲量与表现 START/STOP、收势 | `learnCommandPublishesKnownChangedAndTicksToFinish` |
+| 从公开服务入口调用伤害打断，取消不退费且保留冷却 | `damageInterruptCancels` |
+| 测试世界生成实体、施放、`discard` 触发 `ENTITY_UNLOAD` 后清动作和会话 | `discardTriggersEntityUnloadAndClearsSession` |
+| 学会命令拒绝目录外 ID 与权限不足，知识不变 | `learnCommandRejectsUnknownIdAndInsufficientPermission` |
 
 补充方案逐项落实：
 
 | 补充要求 | 当前实现 |
 |---|---|
-| `TechniqueHostRequest` 与校验 | `inspect=10`、`activity=11`、`effect=12`，有界编解码与结构校验；没有宿主发现或执行器 |
-| `direction` 与 `INPUT` | 请求保存有限水平 x/z；缺省或零向量语义记入契约；算子枚举含 `INPUT`；不执行方向或速度 |
+| `TechniqueHostRequest` 与校验 | `inspect=10`、`activity=11`、`effect=12`，有界编解码、`expected_revision` 和响应回执校验；目录通过 entrypoint 路由 |
+| `direction` 与 `INPUT` | 请求保存有限水平 x/z；缺省或零向量转成 `FORWARD`；非零方向原样交给效果宿主 |
 | 玩家失败文本 | `CastOutcome.failure` 保留结构化原因码，`reason` 只描述身体感受；Framework 拒绝额外保留 `framework_failure` |
-| 库不持有身体 | `TechniqueHost.inspect/findActivity/submit`；状态机只有目录字段，测试通过内存假宿主集成真实 Framework |
-| `presentation` 走宿主 effect | 保留定义和 `EffectIntent` 的播放/开始/停止数据及校验；不分发，不提供正式表现内容 |
+| 库不持有身体 | `TechniqueHost.inspect/findActivity/submit/submitEffect`；服务只缓存 tick 游标，测试通过内存假宿主集成真实 Framework |
+| `presentation` 走宿主 effect | `TechniqueService` 按事件回执下发 `EffectIntent`；不执行世界变化，不提供正式表现内容 |
 | 预输入、展示投影不做 | 无对应消息、队列或接口；忙碌和冷却直接拒绝 |
 
 KISS/DRY/YAGNI 的落点是复用 Framework 库存算术、有效能力、原子活动和持久回执；
 本库只维护声明式定义和必要编排。宿主接口隔离身体所有权，绑定、目录、存档和施放各自承担单一职责。
 
-实际运行记录（2026-10-27）：
+返工涉及文件：
+
+| 文件 | 改动 |
+|---|---|
+| `fabric/.../TechniqueFabric.java` | 接入实体卸载，公开唯一服务入口，删除静态目录安装，命令使用服务目录和标识符参数 |
+| `server/.../TechniqueService.java` | 合并推进路径，确认后更新实际游标，缓存待确认结果，清理永久拒绝会话，重放不重置游标 |
+| `server/.../TechniqueCasting.java` | `AdvanceResult.advancedMillis`，统一构造终止回执，清理全限定名和布尔值注释 |
+| `server/.../TechniqueHostDirectory.java`、`TechniqueRegistry.java`、`TechniqueProtocol.java` | 使用 import，补齐方法意图注释 |
+| `server/.../MemoryHost.java`、`TechniqueStage34Test.java`、`TechniqueStage5Test.java` | 测试辅助 import、实际推进时刻断言、失联/重试/去重/方向/知识回归 |
+| `fabric/src/gametest/.../TechniqueGameTestHost.java`、`TechniqueServiceGameTest.java`、`resources/fabric.mod.json` | 仅测试源集的目录和宿主 entrypoint，真实 Fabric 生命周期旅程 |
+| `docs/wiki/Host-Integration.md`、`Home.md`、`Verification.md` | 公开入口示例、重试与重启语义、命令及验收映射 |
+
+实际运行记录（2026-10-28）：
 
 | 命令或检查 | 结果 |
 |---|---|
-| `./gradlew :server:compileJava --console=plain` | 编译通过 |
-| `./gradlew :server:test --console=plain` | 47 项测试通过，0 失败、0 错误、0 跳过 |
-| `./gradlew test build --console=plain` | 最终构建通过，包含共享协议、服务端测试与打包 |
-| 测试 XML 汇总 | 47 项，0 失败、0 错误、0 跳过：目录 8、绑定 3、施放 23、协议 5、阶段 3/4 8 |
+| `./gradlew :server:test :fabric:compileGametestJava --console=plain` | 服务端测试与 GameTest 编译通过 |
+| `./gradlew :fabric:runGametest --console=plain` | 首轮发现命令无法解析命名空间 ID；改用 `IdentifierArgumentType` 后 4 条全部通过 |
+| `./gradlew test build --console=plain` | 最终构建通过，包含共享协议、服务端测试、Fabric 模组和打包 |
+| 测试 XML 汇总 | 64 项，0 失败、0 错误、0 跳过；阶段 5 共 17 项 |
 | `python3 "scripts/check_docs.py"` | 7 个页面链接全部通过；构建的 `checkDocs` 也通过 |
 | `git diff --check` | 通过 |
 
-本次补充了提前结束表现停止、熟练度基础权重和单一效果推进入口；没有修改 Framework。
+返工修复卸载接线、服务访问、会话失联清理、效果游标与重试；另修复命令不能解析带冒号 ID 的实际缺陷。
+没有修改 Framework，也没有提交或推送。
 
-代码形状自查：修正第 3 条（`TechniqueScheduler.effectsAt`、`TechniqueSelector.weight` 的三元表达式改为显式分支）、
-第 7 条（调度哨兵、情境系数和测试输入改用语义常量）和第 9 条（选择器与阶段测试的超长注释拆行）。
-新增 builder 每行一个 setter；逐条检查无嵌套 builder、自有布尔参数、超过 120 列的新增代码或超过约 40 行的新增业务方法。
+代码形状自查：第 4 条，`TechniqueFabric.learn` 复用服务启动时的目录；
+第 9 条，拆开 `TechniqueStage5Test` 中过长的学会与 tick 测试，提取 `TechniqueCasting.stop` 统一终止活动构造；
+第 10 条，改写服务、宿主目录中的抽象比喻注释；第 11 条，`TechniqueCasting`、`TechniqueHostDirectory`、
+`TechniqueRegistry`、`TechniqueProtocol`、`MemoryHost` 与 `TechniqueFabric` 的行内全限定名改为 import，
+`setReplayed(true)` 使用正常写法。`TechniqueMessages.*` 与相邻核心文件既有写法一致，保留。
+新增 builder 每行一个 setter，无嵌套 builder、自有布尔参数、复杂三元或超过 120 列的新代码。
 
-未检查的内容：游戏内行为、生产宿主授权/持久存储、Fabric 发现与网络、真实实体朝向/冲量/表现执行、
-阶段 5、性能基准、Windows 实机执行和正式内容平衡。当前阶段没有 Fabric 工程，不制作无运行职责的空模组。
+未检查的内容：真实宿主授权/持久存储、Human 或 Threatening 的实体接线、真实实体朝向/冲量/表现执行、
+玩家真实断线事件、异常退出后的实际宿主恢复、性能基准、Windows 实机执行和正式内容平衡。
+Fabric GameTest 验证真实实体卸载事件、服务端 tick 与命令，但身体存储和效果执行器仍是内存测试宿主。
 Framework 的现有接口限制及宿主责任见 [宿主与施放流程](Host-Integration.md)。

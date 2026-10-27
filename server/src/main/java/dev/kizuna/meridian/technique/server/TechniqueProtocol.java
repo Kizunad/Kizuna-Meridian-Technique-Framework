@@ -3,6 +3,11 @@ package dev.kizuna.meridian.technique.server;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.Message;
 import com.google.protobuf.Parser;
+import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.pb.BodyMessages;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages;
 import dev.kizuna.meridian.server.BodyActivityExecution;
@@ -71,6 +76,19 @@ public final class TechniqueProtocol {
         return request;
     }
 
+    public static byte[] encodeHostResponse(TechniqueHostResponse response) {
+        // 宿主回执同样经过边界校验，不能用任意字节伪造身体或活动提交结果。
+        validateHostResponse(response);
+        return response.toByteArray();
+    }
+
+    public static TechniqueHostResponse decodeHostResponse(byte[] payload) {
+        // 回执先限制载荷，再校验唯一 result 分支和嵌套身体活动。
+        TechniqueHostResponse response = parse(payload, TechniqueHostResponse.parser());
+        validateHostResponse(response);
+        return response;
+    }
+
     public static void validateHost(TechniqueHostRequest request) {
         // UUID 使用标准完整文本；空操作与 inspect=false 都不能被解释为查询。
         TechniqueValues.knownFields(request);
@@ -87,15 +105,51 @@ public final class TechniqueProtocol {
                 || request.getSerializedSize() > MAX_PAYLOAD_BYTES) {
             throw TechniqueErrors.invalid("request_id", "请求标识缺失、过长或消息超限");
         }
+        if (request.getExpectedRevision() < 0) {
+            throw TechniqueErrors.invalid("expected_revision", "身体 revision 不能为负");
+        }
         switch (request.getOperationCase()) {
             case INSPECT -> {
+                if (request.getExpectedRevision() != 0) {
+                    throw TechniqueErrors.invalid("expected_revision", "查询操作不能携带身体 revision");
+                }
                 if (!request.getInspect()) {
                     throw TechniqueErrors.invalid("inspect", "查询操作必须为 true");
                 }
             }
             case ACTIVITY -> validateActivity(request);
-            case EFFECT -> validateEffect(request.getEffect());
+            case EFFECT -> {
+                if (request.getExpectedRevision() != 0) {
+                    throw TechniqueErrors.invalid("expected_revision", "效果操作不能携带身体 revision");
+                }
+                validateEffect(request.getEffect());
+            }
             default -> throw TechniqueErrors.invalid("operation", "缺少或未知宿主操作");
+        }
+    }
+
+    public static void validateHostResponse(TechniqueHostResponse response) {
+        // 回执必须带原请求 ID；未认领、成功结果和失败不能同时出现。
+        TechniqueValues.knownFields(response);
+        if (response.getRequestId().isBlank() || response.getRequestId().length() > TechniqueValues.MAX_TEXT
+                || response.getSerializedSize() > MAX_PAYLOAD_BYTES) {
+            throw TechniqueErrors.invalid("response.request_id", "回执请求标识缺失、过长或消息超限");
+        }
+        switch (response.getResultCase()) {
+            case UNBOUND -> {
+                if (!response.getUnbound()) {
+                    throw TechniqueErrors.invalid("response.unbound", "未认领结果必须为 true");
+                }
+            }
+            case BODY -> validateHostBody(response.getBody());
+            case ACTIVITY -> validateActivityCommit(response.getActivity());
+            case EFFECT_ACCEPTED -> {
+                if (!response.getEffectAccepted()) {
+                    throw TechniqueErrors.invalid("response.effect_accepted", "效果回执必须为 true");
+                }
+            }
+            case FAILURE -> validateFailure(response.getFailure());
+            default -> throw TechniqueErrors.invalid("response.result", "缺少或未知宿主回执");
         }
     }
 
@@ -117,6 +171,33 @@ public final class TechniqueProtocol {
                 .build();
         // Framework 编码器校验活动的嵌套必填项与数值，失败抛 IllegalArgumentException。
         MeridianProtocol.encodeRequest(envelope);
+    }
+
+    private static void validateActivityCommit(TechniqueActivityCommit commit) {
+        // 活动回执必须包含非负 revision 和与计划相同的完整活动。
+        if (commit.getRevision() < 0) {
+            throw TechniqueErrors.invalid("response.activity.revision", "活动 revision 不能为负");
+        }
+        if (commit.getActivity().getRemoveModifiersCount() != 0) {
+            throw TechniqueErrors.invalid("response.activity.remove_modifiers", "活动回执不能提前移除修正");
+        }
+        BodyActivityExecution.validate(commit.getActivity());
+    }
+
+    private static void validateHostBody(BodyMessages.BodySnapshot message) {
+        // 使用 Framework 的快照构造器完成结构校验，失败时不把损坏身体交给状态机。
+        BodySnapshot snapshot = BodyProtobuf.fromMessage(message);
+        if (snapshot.id().value().isBlank()) {
+            throw TechniqueErrors.invalid("response.body", "身体身份缺失");
+        }
+    }
+
+    private static void validateFailure(RequestFailure failure) {
+        // 失败码来自 Framework 的枚举，未指定值不能被当成宿主拒绝。
+        if (failure.getCodeValue() <= 0 || failure.getCode()
+                == FailureCode.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("response.failure", "宿主失败码非法");
+        }
     }
 
     public static void validateEffect(EffectIntent intent) {

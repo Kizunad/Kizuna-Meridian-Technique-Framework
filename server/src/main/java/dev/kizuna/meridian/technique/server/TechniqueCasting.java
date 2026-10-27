@@ -20,7 +20,7 @@ public final class TechniqueCasting {
 
     /** 一次可信时钟推进产生的效果意图和可选终止回执。 */
     public record AdvanceResult(CastOutcome outcome, List<EffectIntent> effects,
-                                Optional<TechniqueHost.Commit> recoveryCommit) {
+                                Optional<TechniqueHost.Commit> recoveryCommit, long advancedMillis) {
         public AdvanceResult {
             // 调度结果在交给宿主前固定下来，避免调用方修改效果顺序。
             effects = List.copyOf(effects);
@@ -30,7 +30,7 @@ public final class TechniqueCasting {
 
     public TechniqueCasting(TechniqueRegistry registry) {
         // 只持有不可变定义，运行状态全部位于宿主的身体与回执中。
-        this.registry = java.util.Objects.requireNonNull(registry);
+        this.registry = Objects.requireNonNull(registry);
     }
 
     public CastOutcome cast(TechniqueHost host, CastRequest request) {
@@ -50,6 +50,10 @@ public final class TechniqueCasting {
                 throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
             }
             TechniqueProgress progress = TechniqueState.read(body);
+            Optional<CastOutcome> activeReplay = replayActive(body, progress, request);
+            if (activeReplay.isPresent()) {
+                return activeReplay.get();
+            }
             TechniqueDefinition definition = requireCastable(body, progress, request);
             BindingOutcome result = TechniqueBinder.bind(body, definition);
             if (!result.hasBinding()) {
@@ -109,10 +113,22 @@ public final class TechniqueCasting {
             }
             throw exception;
         }
-        validateCommit(body, activity, commit);
+        if (commit.revision() > body.revision()) {
+            validateCommit(body, activity, commit);
+        }
         ActiveCast active = TechniqueState.decode(activity.getProgressOrThrow(TechniqueState.KEY)
                 .getValue().toByteArray()).getActiveCast();
-        return outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()), commit.revision());
+        if (commit.revision() < 1) {
+            throw new IllegalStateException("宿主返回的活动回执 revision 无效");
+        }
+        CastOutcome started = outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()),
+                commit.revision());
+        if (commit.revision() <= body.revision()) {
+            return started.toBuilder()
+                    .setReplayed(true)
+                    .build();
+        }
+        return started;
     }
 
     private Optional<CastOutcome> replay(TechniqueHost host, CastRequest request) {
@@ -137,7 +153,29 @@ public final class TechniqueCasting {
         CastOutcome replayed = outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()),
                 commit.revision())
                 .toBuilder()
-                .setReplayed(true /* replayed */)
+                .setReplayed(true)
+                .build();
+        return Optional.of(replayed);
+    }
+
+    private Optional<CastOutcome> replayActive(BodySnapshot body, TechniqueProgress progress,
+                                                CastRequest request) {
+        // 宿主回执索引暂时不可见时，已保存的 active_cast 仍能安全识别同一请求。
+        if (!progress.hasActiveCast()) {
+            return Optional.empty();
+        }
+        ActiveCast active = progress.getActiveCast();
+        CastRequest activeRequest = active.getRequest();
+        if (!activeRequest.getCastId().equals(request.getCastId())) {
+            return Optional.empty();
+        }
+        if (!activeRequest.equals(request)) {
+            throw TechniqueErrors.rejected(CAST_ID_CONFLICT);
+        }
+        CastOutcome replayed = outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()),
+                body.revision())
+                .toBuilder()
+                .setReplayed(true)
                 .build();
         return Optional.of(replayed);
     }
@@ -153,35 +191,29 @@ public final class TechniqueCasting {
         try {
             BodySnapshot body = host.inspect();
             TechniqueProgress progress = TechniqueState.read(body);
+            long nowMillis = body.settledAt().elapsedMillis();
             if (!progress.hasActiveCast()) {
                 CastOutcome idle = CastOutcome.newBuilder()
                         .setPhase(CastPhase.IDLE)
                         .setRevision(body.revision())
                         .build();
-                return new AdvanceResult(idle, List.of(), Optional.empty());
+                return new AdvanceResult(idle, List.of(), Optional.empty(), nowMillis);
             }
             ActiveCast active = progress.getActiveCast();
             castId = active.getRequest().getCastId();
-            long nowMillis = body.settledAt().elapsedMillis();
             TechniqueScheduler.Due due = due(active, previousMillis, nowMillis);
             CastPhase current = TechniqueScheduler.phase(active, nowMillis);
             if (!due.recoveryDue()) {
                 return new AdvanceResult(outcome(active, current, body.revision()),
-                        due.effects(), Optional.empty());
+                        due.effects(), Optional.empty(), nowMillis);
             }
-            BodyActivity activity = TechniqueActivities.stop(progress);
-            var submission = new TechniqueHost.Submission("technique_end_" + castId,
-                    body.revision(), activity);
-            TechniqueHost.Commit commit = host.submit(submission);
-            validateCommit(body, activity, commit);
-            CastOutcome finished = outcome(active, CastPhase.FINISHED, commit.revision());
-            return new AdvanceResult(finished, due.effects(), Optional.of(commit));
+            return stop(host, body, progress, CastPhase.FINISHED, due.effects());
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome failure = hostFailure(castId, exception);
-            return new AdvanceResult(failure, List.of(), Optional.empty());
+            return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
         } catch (IllegalArgumentException exception) {
             CastOutcome failure = failure(castId, INVALID_STATE);
-            return new AdvanceResult(failure, List.of(), Optional.empty());
+            return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
         }
     }
 
@@ -206,16 +238,16 @@ public final class TechniqueCasting {
         try {
             BodySnapshot body = host.inspect();
             TechniqueProgress progress = TechniqueState.read(body);
+            long nowMillis = body.settledAt().elapsedMillis();
             if (!progress.hasActiveCast()) {
                 CastOutcome idle = CastOutcome.newBuilder()
                         .setPhase(CastPhase.IDLE)
                         .setRevision(body.revision())
                         .build();
-                return new AdvanceResult(idle, List.of(), Optional.empty());
+                return new AdvanceResult(idle, List.of(), Optional.empty(), nowMillis);
             }
             ActiveCast active = progress.getActiveCast();
             castId = active.getRequest().getCastId();
-            long nowMillis = body.settledAt().elapsedMillis();
             if (previousMillis > nowMillis) {
                 throw new IllegalArgumentException("效果调度时刻倒退");
             }
@@ -223,22 +255,30 @@ public final class TechniqueCasting {
             CastPhase ending = ending(active, phase, signal);
             if (ending == CastPhase.CAST_PHASE_UNSPECIFIED) {
                 return new AdvanceResult(outcome(active, phase, body.revision()),
-                        List.of(), Optional.empty());
+                        List.of(), Optional.empty(), nowMillis);
             }
             List<EffectIntent> effects = stopEffects(active, previousMillis, nowMillis);
-            BodyActivity activity = TechniqueActivities.stop(progress);
-            var submission = new TechniqueHost.Submission("technique_end_" + castId, body.revision(), activity);
-            TechniqueHost.Commit commit = host.submit(submission);
-            validateCommit(body, activity, commit);
-            return new AdvanceResult(outcome(active, ending, commit.revision()),
-                    effects, Optional.of(commit));
+            return stop(host, body, progress, ending, effects);
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome rejected = hostFailure(castId, exception);
-            return new AdvanceResult(rejected, List.of(), Optional.empty());
+            return new AdvanceResult(rejected, List.of(), Optional.empty(), previousMillis);
         } catch (IllegalArgumentException exception) {
             CastOutcome invalid = failure(castId, INVALID_STATE);
-            return new AdvanceResult(invalid, List.of(), Optional.empty());
+            return new AdvanceResult(invalid, List.of(), Optional.empty(), previousMillis);
         }
+    }
+
+    private static AdvanceResult stop(TechniqueHost host, BodySnapshot body, TechniqueProgress progress,
+                                      CastPhase ending, List<EffectIntent> effects) {
+        // 正常收势与提前取消提交同一种原子活动，并返回实际读取到的身体时刻。
+        ActiveCast active = progress.getActiveCast();
+        String castId = active.getRequest().getCastId();
+        BodyActivity activity = TechniqueActivities.stop(progress);
+        var submission = new TechniqueHost.Submission("technique_end_" + castId, body.revision(), activity);
+        TechniqueHost.Commit commit = host.submit(submission);
+        validateCommit(body, activity, commit);
+        return new AdvanceResult(outcome(active, ending, commit.revision()),
+                effects, Optional.of(commit), body.settledAt().elapsedMillis());
     }
 
     private List<EffectIntent> stopEffects(ActiveCast active, long previousMillis, long currentMillis) {

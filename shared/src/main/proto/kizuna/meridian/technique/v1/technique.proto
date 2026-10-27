@@ -198,10 +198,25 @@ message EffectIntent {
 message TechniqueHostRequest {
   string entity_uuid = 1;
   string request_id = 2;
+  int64 expected_revision = 3; // activity 的身体版本；其他操作必须为 0
   oneof operation {
     bool inspect = 10;
     kizuna.meridian.v1.BodyActivity activity = 11;
     EffectIntent effect = 12;
+  }
+}
+message TechniqueActivityCommit {
+  int64 revision = 1;
+  kizuna.meridian.v1.BodyActivity activity = 2;
+}
+message TechniqueHostResponse {
+  string request_id = 1;
+  oneof result {
+    bool unbound = 10;
+    kizuna.meridian.v1.BodySnapshot body = 11;
+    TechniqueActivityCommit activity = 12;
+    bool effect_accepted = 13;
+    kizuna.meridian.v1.RequestFailure failure = 14;
   }
 }
 enum CastPhase {

@@ -7,7 +7,9 @@ import dev.kizuna.meridian.protocol.MeridianProtocol;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +21,7 @@ final class MemoryHost implements TechniqueHost {
     private final BodyCommandHandler<String> commands;
     long nowMillis;
     int activitySubmissions;
+    final List<EffectIntent> effects = new ArrayList<>();
     private FailureCode nextFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
 
     MemoryHost(BodySnapshot body) {
@@ -88,6 +91,14 @@ final class MemoryHost implements TechniqueHost {
             throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
         }
         return new Commit(response.getCommandCommitted().getRevision(), submission.activity());
+    }
+
+    @Override
+    public EffectCommit submitEffect(EffectSubmission submission) {
+        // 测试宿主只记录效果意图，实际世界变化仍由生产实体宿主负责。
+        TechniqueProtocol.validateEffect(submission.effect());
+        effects.add(submission.effect());
+        return new EffectCommit(submission.requestId());
     }
 
     void rejectNextActivity() {

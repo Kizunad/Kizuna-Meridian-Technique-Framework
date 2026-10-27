@@ -1,12 +1,13 @@
 pluginManagement {
     repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
         gradlePluginPortal()
         mavenCentral()
     }
 }
 
 rootProject.name = 'kizuna-meridian-technique-framework'
-include 'shared', 'server'
+include 'shared', 'server', 'fabric'
 
 // 两端复用相邻框架的协议，服务端只链接其纯 Java 实现。
 includeBuild(providers.gradleProperty('meridianFrameworkDir')

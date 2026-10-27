@@ -38,6 +38,8 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 
 `QiCost.distribution` 必须显式填写。`EACH` 适合用标签和数量把槽位收窄到具体经脉；`EVEN` 适合用宽标签和较大 `maximum_count` 选中全部候选经脉。
 `EVEN` 使用 Framework 的 `double` 真元数量和最小可流转单位：经脉 ID 按字典序排列，除最后一条外使用相同份额，最后一条承担浮点余数，因此总扣费等于声明的 `amount`。
+若末份仅因浮点尾差低于最小单位，则取最小单位后仍须使顺序合计严格等于 `amount`，否则拒绝。
+目录对允许的每个绑定数量和起手扣费共用同一分配规则，Framework 的最小单位校验保持不变。
 每条经脉都先单独预检余额，任一经脉不足就拒绝整次施放，不在经脉之间挪补。扣费后的不平衡由 Framework 的 `PassiveQiDiffusion` 自然扩散，本库不再次分配。
 
 同一功法的**每条**修正必须满足：`effect.at_millis + curve.last.offset_millis <= cooldown_millis`。
@@ -45,7 +47,11 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 Framework 接受常值曲线的能力不等于本目录必须接受任意修正数据。
 不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework。施放起手把每个绑定组织的
 `CapabilityModifier` 与费用、做功、动作和进度放进同一份 `BodyActivity`；修正来源为
-`meridian_technique:caster`，并使用 `meridian_technique:<cast_id>/<序号>` 形式的有效内容 ID。
+`meridian_technique:caster`，并使用 `meridian_technique:cast/<cast_id 的 ASCII 小写十六进制>/<序号>`
+形式的有效内容 ID。每个原始字节固定编码为两位，稳定保留大小写差异；例如 `A` 为 `41`、`a` 为 `61`。
+新动作实例 ID 为 `technique.<相同编码>`，可随进度保存并在收势时准确结束。
+原始 `cast_id`、幂等键和已保存的修正、动作 ID 不变；新施放统一采用此编码。
+新增的路径层级与动作前缀也区分旧格式，避免旧存档的原始 ID 恰好等于新编码时发生碰撞。
 由于 Framework 的 `DefinitionId` 只允许一个命名空间分隔符，序号使用路径分隔符而不是第二个冒号。
 起手取消、卸载和下线都不生成 `remove_modifiers`；Framework 在曲线到期时自动清理。
 协议没有提前撤销算子，宿主请求的活动若含 `remove_modifiers` 也会拒绝。

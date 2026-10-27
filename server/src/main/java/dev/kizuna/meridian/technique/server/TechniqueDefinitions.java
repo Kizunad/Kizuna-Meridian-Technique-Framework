@@ -154,10 +154,8 @@ final class TechniqueDefinitions {
             if (qi.getDistributionValue() <= 0 || distribution == QiDistribution.UNRECOGNIZED) {
                 throw TechniqueErrors.invalid("cost.qi.distribution", "费用分配方式必须显式声明");
             }
-            if (distribution == QiDistribution.EVEN
-                    && amount / slot.getMaximumCount() < QiAccounting.MIN_TRANSFER_QI) {
-                throw TechniqueErrors.invalid("cost.qi.amount",
-                        "平摊到每条经脉的费用低于 Framework 的最小可流转单位");
+            if (distribution == QiDistribution.EVEN) {
+                TechniqueQiCosts.validateEvenShares(amount, slot.getMinimumCount(), slot.getMaximumCount());
             }
         }
         for (WorkCost work : cost.getWorkList()) {

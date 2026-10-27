@@ -91,13 +91,14 @@ final class TechniqueActivities {
         long warmupEnd = addTime(started, phases.getWarmupMillis());
         long activeEnd = addTime(warmupEnd, phases.getActiveMillis());
         long recoveryEnd = addTime(activeEnd, phases.getRecoveryMillis());
+        String encodedCastId = TechniqueValues.encodeCastId(start.request().getCastId());
         return ActiveCast.newBuilder()
                 .setRequest(start.request())
                 .setStartedMillis(started)
                 .setWarmupEndMillis(warmupEnd)
                 .setActiveEndMillis(activeEnd)
                 .setRecoveryEndMillis(recoveryEnd)
-                .setActionInstanceId("technique_" + start.request().getCastId())
+                .setActionInstanceId("technique." + encodedCastId)
                 .setBinding(start.binding())
                 .setInterruptibleByDamage(phases.getInterruptibleByDamage())
                 .build();
@@ -176,20 +177,11 @@ final class TechniqueActivities {
     }
 
     private static List<CostAllocation> evenAllocations(List<String> moduleIds, double amount) {
-        // Framework 的真元数量使用 double 与最小可流转单位，余数固定归字典序最后的经脉。
-        if (moduleIds.isEmpty()) {
-            throw TechniqueErrors.rejected(INVALID_STATE);
-        }
-        double share = amount / moduleIds.size();
-        double allocated = 0;
+        // 与目录共用实际份额计算，余数固定归字典序最后的经脉。
+        List<Double> shares = TechniqueQiCosts.evenShares(amount, moduleIds.size());
         var allocations = new ArrayList<CostAllocation>();
         for (int index = 0; index < moduleIds.size(); index++) {
-            double allocation = share;
-            if (index == moduleIds.size() - 1) {
-                allocation = amount - allocated;
-            }
-            allocations.add(new CostAllocation(moduleIds.get(index), allocation));
-            allocated += allocation;
+            allocations.add(new CostAllocation(moduleIds.get(index), shares.get(index)));
         }
         return List.copyOf(allocations);
     }

@@ -8,6 +8,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 import org.junit.Test;
 
+import java.util.HashSet;
 import java.util.List;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
@@ -21,6 +22,65 @@ public class TechniqueCastingTest {
     private static final double EXCESS_POWER = POWER + 1;
     private static final double EVEN_TOTAL_COST = 10.1;
     private static final double POOR_MERIDIAN_QI = 10;
+
+    @Test
+    public void castIdsProduceLegalDistinctFrameworkIds() {
+        // 大小写不同及最长合法请求 ID 都能跨过 Framework 校验，编码不能发生身份碰撞。
+        TechniqueEffect effect = TechniqueRegistryTest.effect(modifier(), WARMUP);
+        TechniqueDefinition definition = definition().toBuilder().addEffects(effect).build();
+        var casting = new TechniqueCasting(registry(definition));
+        var modifierIds = new HashSet<String>();
+        var actionIds = new HashSet<String>();
+        List<String> castIds = List.of("A", "a", "UpperCase_-", "A".repeat(TechniqueValues.MAX_CAST_ID));
+        for (String castId : castIds) {
+            var host = new MemoryHost(body(Shape.TENDRIL));
+            CastOutcome outcome = casting.cast(host, request(host.current(), castId));
+            assertSuccess(outcome, CastPhase.WARMUP);
+            BodySnapshot started = host.current();
+            var modifier = started.modifiers().get(0);
+            String id = modifier.id().value();
+            assertTrue(id, id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"));
+            assertTrue("不同施放 ID 不能共用修正 ID", modifierIds.add(id));
+            ActiveCast active = TechniqueState.read(started).getActiveCast();
+            assertEquals(castId, active.getRequest().getCastId());
+            String actionId = active.getActionInstanceId();
+            assertTrue(actionId.matches("[a-z0-9_.-]+"));
+            assertTrue("不同施放 ID 不能共用动作实例 ID", actionIds.add(actionId));
+            assertEquals(actionId, started.actions().get(0).instanceId());
+            host.nowMillis = CAST_END;
+            assertSuccess(casting.advance(host), CastPhase.FINISHED);
+            assertTrue(host.current().actions().isEmpty());
+        }
+        assertTrue(modifierIds.contains("meridian_technique:cast/41/0"));
+        assertTrue(modifierIds.contains("meridian_technique:cast/61/0"));
+        assertTrue(actionIds.contains("technique.41"));
+        assertTrue(actionIds.contains("technique.61"));
+    }
+
+    @Test
+    public void encodedCastIdsCoexistWithLegacyModifiers() {
+        // 旧存档的原始十六进制形状 ID 仍可运行，不能与新施放的编码路径碰撞。
+        TechniqueEffect effect = TechniqueRegistryTest.effect(modifier(), WARMUP);
+        TechniqueDefinition definition = definition().toBuilder().addEffects(effect).build();
+        BodySnapshot before = body(Shape.TENDRIL);
+        CastRequest request = request(before, "A");
+        TechniqueBinding binding = TechniqueBinder.bind(before, definition).getBinding();
+        var start = new TechniqueActivities.Start(before, definition, request, TechniqueState.read(before), binding);
+        BodyActivity activity = TechniqueActivities.start(start);
+        CapabilityModifier legacyModifier = activity.getAddModifiers(0).toBuilder()
+                .setId("meridian_technique:41/0")
+                .build();
+        var message = BodyProtobuf.toMessage(before).toBuilder().addModifiers(legacyModifier).build();
+        var host = new MemoryHost(BodyProtobuf.fromMessage(message));
+        var casting = new TechniqueCasting(registry(definition));
+
+        assertSuccess(casting.cast(host, request), CastPhase.WARMUP);
+
+        assertEquals(2, host.current().modifiers().size());
+        List<String> ids = host.current().modifiers().stream().map(modifier -> modifier.id().value()).toList();
+        assertTrue(ids.contains("meridian_technique:41/0"));
+        assertTrue(ids.contains("meridian_technique:cast/41/0"));
+    }
 
     @Test
     public void startSubmitsOneAtomicActivityWithAllCostsAndProgress() {
@@ -513,7 +573,7 @@ public class TechniqueCastingTest {
         assertEquals(novice.current().tissueStates(), master.current().tissueStates());
         assertEquals(1, master.current().modifiers().size());
         var modifier = master.current().modifiers().get(0);
-        assertEquals("meridian_technique:master/0", modifier.id().value());
+        assertEquals("meridian_technique:cast/6d6173746572/0", modifier.id().value());
         assertEquals(TechniqueHost.CALLER_ID, modifier.source().value());
         assertEquals(WARMUP, modifier.curve().startMillis());
         master.nowMillis = CAST_END;

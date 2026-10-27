@@ -4,8 +4,9 @@ import com.google.protobuf.Message;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Quantity;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
-import java.util.List;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /** 公共输入边界共用的单位、规模与标识约束。 */
@@ -49,10 +50,16 @@ final class TechniqueValues {
     }
 
     static void castId(String value) {
-        // 幂等键可安全嵌入动作实例与宿主请求 ID。
+        // 原始幂等身份允许大小写，跨 Framework 的标识另行编码。
         if (value.length() > MAX_CAST_ID || !CAST_ID.matcher(value).matches()) {
             throw TechniqueErrors.invalid("cast_id", "必须是 1–64 位英文字母、数字、下划线或连字符");
         }
+    }
+
+    static String encodeCastId(String value) {
+        // 每个合法 ASCII 字节固定编码两位，满足小写标识约束且保留原始身份差异。
+        castId(value);
+        return HexFormat.of().formatHex(value.getBytes(StandardCharsets.US_ASCII));
     }
 
     static double quantity(Quantity quantity, Unit unit, double minimum, double maximum, String path) {

@@ -47,6 +47,7 @@ public final class TechniqueScheduler {
             slots.put(slot.getSlotId(), slot);
         }
         var modifiers = new ArrayList<BodyMessages.CapabilityModifier>();
+        String encodedCastId = TechniqueValues.encodeCastId(active.getRequest().getCastId());
         int sequence = 0;
         for (TechniqueEffect effect : definition.getEffectsList()) {
             if (effect.getOperationCase() != TechniqueEffect.OperationCase.TISSUE_MODIFIER) {
@@ -59,8 +60,7 @@ public final class TechniqueScheduler {
             }
             long startMillis = addTime(active.getStartedMillis(), effect.getAtMillis());
             for (String tissueId : bound.getModuleIdsList()) {
-                String modifierId = MODIFIER_NAMESPACE + ":" + active.getRequest().getCastId()
-                        + "/" + sequence;
+                String modifierId = MODIFIER_NAMESPACE + ":cast/" + encodedCastId + "/" + sequence;
                 modifiers.add(modifier(tissueModifier, modifierId, tissueId, startMillis));
                 sequence++;
             }
@@ -219,6 +219,7 @@ public final class TechniqueScheduler {
     }
 
     private static long relativeOffset(long startedMillis, long currentMillis) {
+        // 起手前返回哨兵，其余时刻换算为相对起手的偏移，供事件边界比较。
         if (currentMillis < startedMillis) {
             return BEFORE_START_OFFSET;
         }

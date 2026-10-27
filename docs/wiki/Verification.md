@@ -25,6 +25,9 @@
 | 起手一笔活动支付真元、组织做功、器官疲劳、动作和进度 | `TechniqueCastingTest.startSubmitsOneAtomicActivityWithAllCostsAndProgress` |
 | `EACH` 每条经脉扣费 | `TechniqueCastingTest.eachDistributionChargesEveryBoundMeridian` |
 | `EVEN` 平摊、稳定余数与总量守恒 | `TechniqueCastingTest.evenDistributionUsesStableRemainderAndPreservesTotal` |
+| 四条最小单位、相邻总额及所有允许绑定数量 | `TechniqueQiCostTest` |
+| 大写、大小写不同、最长施放 ID 的动作与修正合法且不碰撞 | `TechniqueCastingTest.castIdsProduceLegalDistinctFrameworkIds` |
+| 旧格式修正与新编码施放共存 | `TechniqueCastingTest.encodedCastIdsCoexistWithLegacyModifiers` |
 | `EVEN` 任一经脉不足整笔拒绝 | `TechniqueCastingTest.evenDistributionRejectsWhenOneBoundMeridianCannotPay` |
 | 真元不足整笔拒绝 | `TechniqueCastingTest.insufficientQiRejectsWholeActivity` |
 | 后续做功预算不足不留下先前资源变化 | `TechniqueCastingTest.insufficientWorkBudgetRollsBackQiActionsAndProgress` |

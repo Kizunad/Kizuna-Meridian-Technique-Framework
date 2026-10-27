@@ -22,8 +22,8 @@
 2. 按 `technique_start_<cast_id>` 查持久回执；相同请求返回原起手结果并标记 `replayed`，不同请求返回冲突。
 3. 宿主结算时间并提供快照。检查存活、精确功法版本、可信 `known`、无其他施放、冷却结束，再重新绑定。
 4. 按每项 `QiCost.distribution` 扣除绑定经脉的内腔费用：`EACH` 每条经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount`；释放实际扣除的真元，不能扣外壁、未开拓经脉或其他属性余额。
-5. 生成一份 `BodyActivity`，包括 `accounts`、`released_qi`、`efforts`、`start_actions`、`progress`。
-   组织和器官占用取并集。经脉不因施放自动接管自然扩散。
+5. 生成一份 `BodyActivity`，包括 `accounts`、`released_qi`、`efforts`、`start_actions`、`add_modifiers`、`progress`。
+   组织和器官占用取并集。经脉不因施放自动接管自然扩散；新增修正和扣费同一 revision 原子生效。
 6. 预检力量、完整做功区间与原子活动，再交给宿主提交。成功提交只增加一次身体 revision。
 
 冷却从起手时刻开始；所有费用起手一次付清，熟练度不改变数值。
@@ -33,12 +33,15 @@ Framework 负责复核 `旧总量 = 新总量 + 释放`、余额、容量、功�
 
 `advance(host)` 根据保存的身体时钟边界返回 `WARMUP`、`EFFECTIVE`、`RECOVERING`。
 收势结束再提交一份活动，停止本次动作、清 `active_cast`，保留知识和冷却。
-没有逐毫秒循环，也不会因查询阶段状态修改资源或提交效果。
-本次没有效果分发，因此声明的效果不会在阶段 1–2 中实际生效。
+没有逐毫秒循环，也不会因查询阶段状态修改资源或执行世界变化。
+需要效果意图时，宿主用 `advance(host, previousMillis)`；返回的 `AdvanceResult.effects` 是区间内到期的冲量/表现，
+`recoveryCommit` 是收势或取消活动的可信终止回执。组织修正不走效果意图，而是在起手活动里随曲线提交。
 
-`interruptByDamage(host)` 只接受可信伤害事件。起手窗口是半开区间 `[start, warmup_end)`，
+`interruptByDamage(host, previousMillis)` 只接受可信伤害事件。起手窗口是半开区间 `[start, warmup_end)`，
 只有该窗口内且声明可打断时停止。起手结束边界上的伤害不取消施放。
-`cancelOnUnload`、`cancelOnDisconnect` 清当前施放与动作，不退任何费用，不清冷却。
+`cancelOnUnload(host, previousMillis)`、`cancelOnDisconnect(host, previousMillis)` 清当前施放与动作，
+不退任何费用，不清冷却。三个提前结束入口都返回 `AdvanceResult`；若 `previousMillis` 已越过持续表现的
+达到生效时刻，则同时返回对应 `PresentationAction.STOP`，否则不伪造停止意图。
 宿主必须在冻结、撤销访问权或销毁实体之前完成停止提交；失败须处理或重试。
 多次查询到空施放返回 `IDLE`。
 

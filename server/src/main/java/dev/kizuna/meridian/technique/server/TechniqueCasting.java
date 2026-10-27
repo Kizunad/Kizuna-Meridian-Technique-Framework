@@ -7,13 +7,26 @@ import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
 
 /** 无身体缓存的施放编排；每次调用都通过可信宿主读取或提交。 */
 public final class TechniqueCasting {
+    private static final long NO_PREVIOUS_MILLIS = Long.MIN_VALUE;
     private final TechniqueRegistry registry;
+
+    /** 一次可信时钟推进产生的效果意图和可选终止回执。 */
+    public record AdvanceResult(CastOutcome outcome, List<EffectIntent> effects,
+                                Optional<TechniqueHost.Commit> recoveryCommit) {
+        public AdvanceResult {
+            // 调度结果在交给宿主前固定下来，避免调用方修改效果顺序。
+            effects = List.copyOf(effects);
+            recoveryCommit = Objects.requireNonNull(recoveryCommit);
+        }
+    }
 
     public TechniqueCasting(TechniqueRegistry registry) {
         // 只持有不可变定义，运行状态全部位于宿主的身体与回执中。
@@ -34,13 +47,13 @@ public final class TechniqueCasting {
             }
             BodySnapshot body = host.inspect();
             if (!body.id().value().equals(request.getBodyId())) {
-                throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "身体暂不听使唤");
+                throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
             }
             TechniqueProgress progress = TechniqueState.read(body);
             TechniqueDefinition definition = requireCastable(body, progress, request);
             BindingOutcome result = TechniqueBinder.bind(body, definition);
             if (!result.hasBinding()) {
-                throw TechniqueErrors.rejected(result.getFailure(), result.getReason());
+                throw TechniqueErrors.rejected(result.getFailure());
             }
             var start = new TechniqueActivities.Start(body, definition, request, progress, result.getBinding());
             BodyActivity activity = TechniqueActivities.start(start);
@@ -61,19 +74,19 @@ public final class TechniqueCasting {
     private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request) {
         // 先检查生命、目录与可信知识记录，再检查当前占用和身体时钟冷却。
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
-            throw TechniqueErrors.rejected(BODY_UNAVAILABLE, "你已无法运功");
+            throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
         }
         TechniqueDefinition definition = registry.find(request.getTechnique())
-                .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE, "你还不会这门功法"));
+                .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE));
         if (progress.getKnownList().stream().noneMatch(known -> known.getTechnique().equals(request.getTechnique()))) {
-            throw TechniqueErrors.rejected(NOT_KNOWN, "你还不会这门功法");
+            throw TechniqueErrors.rejected(NOT_KNOWN);
         }
         if (progress.hasActiveCast()) {
-            throw TechniqueErrors.rejected(ALREADY_CASTING, "正运功中，无暇他顾");
+            throw TechniqueErrors.rejected(ALREADY_CASTING);
         }
         long cooldownEnd = progress.getCooldownsOrDefault(definition.getId(), 0);
         if (body.settledAt().elapsedMillis() < cooldownEnd) {
-            throw TechniqueErrors.rejected(COOLING_DOWN, "气息尚未平复");
+            throw TechniqueErrors.rejected(COOLING_DOWN);
         }
         return definition;
     }
@@ -99,7 +112,7 @@ public final class TechniqueCasting {
         validateCommit(body, activity, commit);
         ActiveCast active = TechniqueState.decode(activity.getProgressOrThrow(TechniqueState.KEY)
                 .getValue().toByteArray()).getActiveCast();
-        return outcome(active, phase(active, active.getStartedMillis()), commit.revision());
+        return outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()), commit.revision());
     }
 
     private Optional<CastOutcome> replay(TechniqueHost host, CastRequest request) {
@@ -111,17 +124,18 @@ public final class TechniqueCasting {
         TechniqueHost.Commit commit = previous.get();
         Any payload = commit.activity().getProgressOrThrow(TechniqueState.KEY);
         if (!payload.is(TechniqueProgress.class)) {
-            throw TechniqueErrors.rejected(INVALID_STATE, "宿主历史活动的进度类型错误");
+            throw TechniqueErrors.rejected(INVALID_STATE);
         }
         TechniqueProgress progress = TechniqueState.decode(payload.getValue().toByteArray());
         if (!progress.hasActiveCast()) {
-            throw TechniqueErrors.rejected(INVALID_STATE, "宿主起手回执缺少原始施放记录");
+            throw TechniqueErrors.rejected(INVALID_STATE);
         }
         ActiveCast active = progress.getActiveCast();
         if (!active.getRequest().equals(request)) {
-            throw TechniqueErrors.rejected(CAST_ID_CONFLICT, "同一 cast_id 已用于不同施放请求");
+            throw TechniqueErrors.rejected(CAST_ID_CONFLICT);
         }
-        CastOutcome replayed = outcome(active, phase(active, active.getStartedMillis()), commit.revision())
+        CastOutcome replayed = outcome(active, TechniqueScheduler.phase(active, active.getStartedMillis()),
+                commit.revision())
                 .toBuilder()
                 .setReplayed(true /* replayed */)
                 .build();
@@ -129,55 +143,111 @@ public final class TechniqueCasting {
     }
 
     public CastOutcome advance(TechniqueHost host) {
-        // 宿主调度到事件边界即可，不按毫秒循环，也不生成效果意图。
-        return transition(host, Signal.CLOCK);
+        // 只需要阶段状态的调用方不提供效果游标，效果意图仍由带时刻的入口负责生成。
+        return advance(host, NO_PREVIOUS_MILLIS).outcome();
     }
 
-    public CastOutcome interruptByDamage(TechniqueHost host) {
+    public AdvanceResult advance(TechniqueHost host, long previousMillis) {
+        // 先读取已结算身体时钟，再由纯调度器生成意图，最后按需提交收势活动。
+        String castId = "";
+        try {
+            BodySnapshot body = host.inspect();
+            TechniqueProgress progress = TechniqueState.read(body);
+            if (!progress.hasActiveCast()) {
+                CastOutcome idle = CastOutcome.newBuilder()
+                        .setPhase(CastPhase.IDLE)
+                        .setRevision(body.revision())
+                        .build();
+                return new AdvanceResult(idle, List.of(), Optional.empty());
+            }
+            ActiveCast active = progress.getActiveCast();
+            castId = active.getRequest().getCastId();
+            long nowMillis = body.settledAt().elapsedMillis();
+            TechniqueScheduler.Due due = due(active, previousMillis, nowMillis);
+            CastPhase current = TechniqueScheduler.phase(active, nowMillis);
+            if (!due.recoveryDue()) {
+                return new AdvanceResult(outcome(active, current, body.revision()),
+                        due.effects(), Optional.empty());
+            }
+            BodyActivity activity = TechniqueActivities.stop(progress);
+            var submission = new TechniqueHost.Submission("technique_end_" + castId,
+                    body.revision(), activity);
+            TechniqueHost.Commit commit = host.submit(submission);
+            validateCommit(body, activity, commit);
+            CastOutcome finished = outcome(active, CastPhase.FINISHED, commit.revision());
+            return new AdvanceResult(finished, due.effects(), Optional.of(commit));
+        } catch (TechniqueErrors.HostRejected exception) {
+            CastOutcome failure = hostFailure(castId, exception);
+            return new AdvanceResult(failure, List.of(), Optional.empty());
+        } catch (IllegalArgumentException exception) {
+            CastOutcome failure = failure(castId, INVALID_STATE);
+            return new AdvanceResult(failure, List.of(), Optional.empty());
+        }
+    }
+
+    public AdvanceResult interruptByDamage(TechniqueHost host, long previousMillis) {
         // 伤害事实必须由可信宿主提供，仅起手窗口内允许打断。
-        return transition(host, Signal.DAMAGE);
+        return transition(host, Signal.DAMAGE, previousMillis);
     }
 
-    public CastOutcome cancelOnUnload(TechniqueHost host) {
+    public AdvanceResult cancelOnUnload(TechniqueHost host, long previousMillis) {
         // 必须在冻结时间或撤销宿主访问权之前完成停止提交。
-        return transition(host, Signal.UNLOAD);
+        return transition(host, Signal.UNLOAD, previousMillis);
     }
 
-    public CastOutcome cancelOnDisconnect(TechniqueHost host) {
+    public AdvanceResult cancelOnDisconnect(TechniqueHost host, long previousMillis) {
         // 下线只清除当前动作和施放，已经支付的费用与冷却保留。
-        return transition(host, Signal.DISCONNECT);
+        return transition(host, Signal.DISCONNECT, previousMillis);
     }
 
-    private CastOutcome transition(TechniqueHost host, Signal signal) {
+    private AdvanceResult transition(TechniqueHost host, Signal signal, long previousMillis) {
         // 每次从权威进度恢复状态，库对象重建不会影响边界或动作身份。
         String castId = "";
         try {
             BodySnapshot body = host.inspect();
             TechniqueProgress progress = TechniqueState.read(body);
             if (!progress.hasActiveCast()) {
-                return CastOutcome.newBuilder()
+                CastOutcome idle = CastOutcome.newBuilder()
                         .setPhase(CastPhase.IDLE)
                         .setRevision(body.revision())
                         .build();
+                return new AdvanceResult(idle, List.of(), Optional.empty());
             }
             ActiveCast active = progress.getActiveCast();
             castId = active.getRequest().getCastId();
             long nowMillis = body.settledAt().elapsedMillis();
-            CastPhase phase = phase(active, nowMillis);
+            if (previousMillis > nowMillis) {
+                throw new IllegalArgumentException("效果调度时刻倒退");
+            }
+            CastPhase phase = TechniqueScheduler.phase(active, nowMillis);
             CastPhase ending = ending(active, phase, signal);
             if (ending == CastPhase.CAST_PHASE_UNSPECIFIED) {
-                return outcome(active, phase, body.revision());
+                return new AdvanceResult(outcome(active, phase, body.revision()),
+                        List.of(), Optional.empty());
             }
+            List<EffectIntent> effects = stopEffects(active, previousMillis, nowMillis);
             BodyActivity activity = TechniqueActivities.stop(progress);
             var submission = new TechniqueHost.Submission("technique_end_" + castId, body.revision(), activity);
             TechniqueHost.Commit commit = host.submit(submission);
             validateCommit(body, activity, commit);
-            return outcome(active, ending, commit.revision());
+            return new AdvanceResult(outcome(active, ending, commit.revision()),
+                    effects, Optional.of(commit));
         } catch (TechniqueErrors.HostRejected exception) {
-            return hostFailure(castId, exception);
+            CastOutcome rejected = hostFailure(castId, exception);
+            return new AdvanceResult(rejected, List.of(), Optional.empty());
         } catch (IllegalArgumentException exception) {
-            return failure(castId, INVALID_STATE);
+            CastOutcome invalid = failure(castId, INVALID_STATE);
+            return new AdvanceResult(invalid, List.of(), Optional.empty());
         }
+    }
+
+    private List<EffectIntent> stopEffects(ActiveCast active, long previousMillis, long currentMillis) {
+        // 目录卸载后仍可清动作，但没有定义可据以生成表现停止意图。
+        Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
+        if (definition.isEmpty()) {
+            return List.of();
+        }
+        return TechniqueScheduler.stopEffects(definition.get(), active, previousMillis, currentMillis);
     }
 
     private static CastPhase ending(ActiveCast active, CastPhase current, Signal signal) {
@@ -194,18 +264,17 @@ public final class TechniqueCasting {
         return CastPhase.CAST_PHASE_UNSPECIFIED;
     }
 
-    private static CastPhase phase(ActiveCast active, long millis) {
-        // 半开区间使零生效段直接进入收势，边界伤害不会误打断已完成起手。
-        if (millis < active.getWarmupEndMillis()) {
-            return CastPhase.WARMUP;
+    private TechniqueScheduler.Due due(ActiveCast active, long previousMillis, long currentMillis) {
+        // 功法目录可能在施放后卸载；此时仍能收势，但不再凭空解释世界效果。
+        Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
+        if (definition.isEmpty()) {
+            TechniqueScheduler.EndState endState = TechniqueScheduler.EndState.RUNNING;
+            if (currentMillis >= active.getRecoveryEndMillis()) {
+                endState = TechniqueScheduler.EndState.RECOVERY_DUE;
+            }
+            return new TechniqueScheduler.Due(List.of(), endState);
         }
-        if (millis < active.getActiveEndMillis()) {
-            return CastPhase.EFFECTIVE;
-        }
-        if (millis < active.getRecoveryEndMillis()) {
-            return CastPhase.RECOVERING;
-        }
-        return CastPhase.FINISHED;
+        return TechniqueScheduler.due(definition.get(), active, previousMillis, currentMillis);
     }
 
     private static CastOutcome outcome(ActiveCast active, CastPhase phase, long revision) {

@@ -298,7 +298,9 @@ public class TechniqueCastingTest {
         var casting = new TechniqueCasting(registry(definition()));
         assertSuccess(casting.cast(host, request(before, "interrupted")), CastPhase.WARMUP);
         BodySnapshot paid = host.current();
-        assertSuccess(casting.interruptByDamage(host), CastPhase.INTERRUPTED);
+        ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
+        assertSuccess(casting.interruptByDamage(host, active.getStartedMillis() - 1).outcome(),
+                CastPhase.INTERRUPTED);
         assertEquals(paid.totalQi(), host.current().totalQi(), 0);
         assertEquals(paid.tissueStates(), host.current().tissueStates());
         assertEquals(paid.organStates(), host.current().organStates());
@@ -320,12 +322,16 @@ public class TechniqueCastingTest {
         var host = new MemoryHost(body);
         var casting = new TechniqueCasting(registry(uninterruptible));
         assertSuccess(casting.cast(host, request(host.current(), "steady")), CastPhase.WARMUP);
-        assertSuccess(casting.interruptByDamage(host), CastPhase.WARMUP);
+        ActiveCast steadyActive = TechniqueState.read(host.current()).getActiveCast();
+        assertSuccess(casting.interruptByDamage(host, steadyActive.getStartedMillis() - 1).outcome(),
+                CastPhase.WARMUP);
         var regular = new TechniqueCasting(registry(base));
         var regularHost = new MemoryHost(body);
         assertSuccess(regular.cast(regularHost, request(regularHost.current(), "boundary")), CastPhase.WARMUP);
+        ActiveCast regularActive = TechniqueState.read(regularHost.current()).getActiveCast();
         regularHost.nowMillis = WARMUP;
-        assertSuccess(regular.interruptByDamage(regularHost), CastPhase.EFFECTIVE);
+        assertSuccess(regular.interruptByDamage(regularHost, regularActive.getStartedMillis() - 1).outcome(),
+                CastPhase.EFFECTIVE);
         regularHost.nowMillis = WARMUP + ACTIVE;
         assertSuccess(regular.advance(regularHost), CastPhase.RECOVERING);
         regularHost.nowMillis = CAST_END;
@@ -344,7 +350,9 @@ public class TechniqueCastingTest {
         var host = new MemoryHost(body(Shape.TENDRIL));
         var casting = new TechniqueCasting(registry(definition));
         assertSuccess(casting.cast(host, request(host.current(), "instant")), CastPhase.RECOVERING);
-        assertSuccess(casting.interruptByDamage(host), CastPhase.RECOVERING);
+        ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
+        assertSuccess(casting.interruptByDamage(host, active.getStartedMillis() - 1).outcome(),
+                CastPhase.RECOVERING);
         host.nowMillis = RECOVERY;
         assertSuccess(casting.advance(host), CastPhase.FINISHED);
     }
@@ -377,13 +385,14 @@ public class TechniqueCastingTest {
             var host = new MemoryHost(body(Shape.TENDRIL));
             var casting = new TechniqueCasting(registry(definition()));
             assertSuccess(casting.cast(host, request(host.current(), "exit")), CastPhase.WARMUP);
-            CastOutcome cancelled;
+            ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
+            TechniqueCasting.AdvanceResult cancelled;
             if (exit == Exit.UNLOAD) {
-                cancelled = casting.cancelOnUnload(host);
+                cancelled = casting.cancelOnUnload(host, active.getStartedMillis() - 1);
             } else {
-                cancelled = casting.cancelOnDisconnect(host);
+                cancelled = casting.cancelOnDisconnect(host, active.getStartedMillis() - 1);
             }
-            assertSuccess(cancelled, CastPhase.CANCELLED);
+            assertSuccess(cancelled.outcome(), CastPhase.CANCELLED);
             assertEquals(COST_QI, host.store.environmentQi().totalQi(), TOLERANCE);
             assertEquals(COOLDOWN, TechniqueState.read(host.current()).getCooldownsOrThrow(TECHNIQUE_ID));
             assertEquals(0, host.current().actions().size());
@@ -437,9 +446,12 @@ public class TechniqueCastingTest {
         assertSuccess(casting.cast(host, request(host.current(), "stop_retry")), CastPhase.WARMUP);
         BodySnapshot active = host.current();
         host.rejectNextActivity();
-        assertFailure(casting.cancelOnUnload(host), FRAMEWORK_REJECTED, "身体暂不听使唤");
+        ActiveCast activeCast = TechniqueState.read(host.current()).getActiveCast();
+        assertFailure(casting.cancelOnUnload(host, activeCast.getStartedMillis() - 1).outcome(),
+                FRAMEWORK_REJECTED, "身体暂不听使唤");
         assertEquals(active, host.current());
-        assertSuccess(casting.cancelOnUnload(host), CastPhase.CANCELLED);
+        assertSuccess(casting.cancelOnUnload(host, activeCast.getStartedMillis() - 1).outcome(),
+                CastPhase.CANCELLED);
         assertEquals(COST_QI, host.store.environmentQi().totalQi(), TOLERANCE);
     }
 
@@ -483,8 +495,8 @@ public class TechniqueCastingTest {
     }
 
     @Test
-    public void proficiencyDoesNotChangeCostsAndNoStageThreeEffectIsExecuted() {
-        // 熟练度只保存为数据，目录内合法修正声明也不在施放阶段被提前执行。
+    public void proficiencyDoesNotChangeCostsAndStageThreeModifiersRunToCompletion() {
+        // 熟练度只影响未来 AI 权重，合法组织修正随起手原子提交并由 Framework 到期清理。
         TechniqueEffect effect = TechniqueRegistryTest.effect(modifier(), WARMUP);
         TechniqueDefinition definition = definition().toBuilder().addEffects(effect).build();
         TechniqueProgress progress = progress(definition);
@@ -499,12 +511,22 @@ public class TechniqueCastingTest {
         assertSuccess(casting.cast(master, request(master.current(), "master")), CastPhase.WARMUP);
         assertEquals(novice.current().totalQi(), master.current().totalQi(), 0);
         assertEquals(novice.current().tissueStates(), master.current().tissueStates());
-        assertTrue(master.current().modifiers().isEmpty());
+        assertEquals(1, master.current().modifiers().size());
+        var modifier = master.current().modifiers().get(0);
+        assertEquals("meridian_technique:master/0", modifier.id().value());
+        assertEquals(TechniqueHost.CALLER_ID, modifier.source().value());
+        assertEquals(WARMUP, modifier.curve().startMillis());
         master.nowMillis = CAST_END;
         assertSuccess(casting.advance(master), CastPhase.FINISHED);
+        master.nowMillis = WARMUP + CURVE_END;
+        assertTrue(master.inspect().modifiers().isEmpty());
         for (var receipt : master.store.receipts()) {
             BodyActivity activity = receipt.getCommand().getExecuteActivity();
-            assertEquals(0, activity.getAddModifiersCount());
+            if (activity.getStartActionsCount() > 0) {
+                assertEquals(1, activity.getAddModifiersCount());
+            } else {
+                assertEquals(0, activity.getAddModifiersCount());
+            }
             assertEquals(0, activity.getRemoveModifiersCount());
         }
     }

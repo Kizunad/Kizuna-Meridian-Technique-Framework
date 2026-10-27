@@ -43,7 +43,11 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 同一功法的**每条**修正必须满足：`effect.at_millis + curve.last.offset_millis <= cooldown_millis`。
 生效延迟也计入期限；等于冷却结束合法。本库功法目录采用新版方案的首尾归零约束。
 Framework 接受常值曲线的能力不等于本目录必须接受任意修正数据。
-不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework；当前不生成或执行修正。
+不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework。施放起手把每个绑定组织的
+`CapabilityModifier` 与费用、做功、动作和进度放进同一份 `BodyActivity`；修正来源为
+`meridian_technique:caster`，并使用 `meridian_technique:<cast_id>/<序号>` 形式的有效内容 ID。
+由于 Framework 的 `DefinitionId` 只允许一个命名空间分隔符，序号使用路径分隔符而不是第二个冒号。
+起手取消、卸载和下线都不生成 `remove_modifiers`；Framework 在曲线到期时自动清理。
 协议没有提前撤销算子，宿主请求的活动若含 `remove_modifiers` 也会拒绝。
 目录倍率和时长是固定上限；阶段 3 仍须处理 Framework 部署配置更严格时的拒绝。
 
@@ -53,10 +57,21 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 
 `CastRequest.direction` 只含水平 x、z，两个分量必须有限。
 缺省和全零均表示使用施放者朝向；非零值仅表达方向，不决定速度或其他数值。
-当前保留原值以供幂等比较，实际归一化、朝向读取和速度执行不在阶段 1–2。
+当前保留原值以供幂等比较，实际归一化、朝向读取和速度执行仍由阶段 5 宿主负责。
 
 `TechniqueHostRequest` 使用标准小写 `entity_uuid` 和非空 `request_id`。
 oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(EffectIntent)`。
 `inspect=false`、缺操作、错误 UUID、非法嵌套活动或效果均拒绝。
 `EffectIntent` 只声明冲量或表现的播放/开始/停止，交给宿主执行；不包含身体修正。
-当前只有消息、编解码和校验，没有宿主发现和字节交换执行器。
+`TechniqueHostRequest` 当前只有消息、编解码和校验，没有宿主发现和字节交换执行器。
+
+阶段 3 的 `TechniqueScheduler` 是无状态纯函数：调用方给出上一次已分发的身体时刻和当前已结算时刻，
+返回区间内的冲量/表现 `EffectIntent`。`TechniqueCasting.advance(host, previousMillis)` 在收势边界
+额外提交停止动作的 `BodyActivity`，并在 `AdvanceResult.recoveryCommit` 返回终止回执；它不接入 Fabric tick。
+伤害打断、卸载和下线也使用这个带游标的结果入口；只有此前已分发 `START` 的持续表现才会返回 `STOP`。
+目录已卸载时仍能清除动作，但没有定义可用于生成表现停止意图。
+`INPUT` 冲量保留起手请求中的水平方向，缺省或全零仍交由宿主按施放者朝向解释。
+
+阶段 4 的 `TechniqueSelector` 先检查成功绑定、可支付、冷却和距离，再按类别权重、情境函数和熟练度
+计算权重。候选按功法精确版本稳定排序后使用调用方提供的 `Random` 抽样；零权重或没有候选返回空。
+熟练度只影响这一权重，不改变费用、曲线和施放时长。

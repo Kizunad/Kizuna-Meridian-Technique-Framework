@@ -2,7 +2,7 @@
 
 实现依据为 2026-10-24 的功法方案、2026-10-26 的框架更新，以及
 `technique-combat-plans-2026-10-26.md` 中新版 `plans/06-Technique-Framework.md`。
-当前仅交付阶段 1–2；协议和结构已包含用户补充要求。
+当前交付阶段 1–4；阶段 5 的宿主发现、Fabric 调度和学会入口仍未实现。
 依赖核对时 Framework 为 `216710d03ff9bb0e4ae13894ab9b0a8cf7be9a45`，未修改其受版本控制文件。
 
 测试全部属于公开契约、关键业务流程或模块交互的必要整体回归。
@@ -42,7 +42,12 @@
 | 停止失败保留原施放，允许重试 | `TechniqueCastingTest.rejectedStopRetainsActiveCastForRetry` |
 | 死亡后活动清理限制明确报告，知识冷却保留 | `TechniqueCastingTest.deathPreservesKnowledgeAndCooldownButReportsActivityCleanupLimit` |
 | 宿主拒绝和过期 revision 不留下部分变化 | `TechniqueCastingTest.hostRejectionAndStaleRevisionLeaveWholeActivityUnchanged` |
-| 熟练度不改变费用；不执行修正、不发提前移除 | `TechniqueCastingTest.proficiencyDoesNotChangeCostsAndNoStageThreeEffectIsExecuted` |
+| 熟练度不改变费用；修正随曲线到期且不提前移除 | `TechniqueCastingTest.proficiencyDoesNotChangeCostsAndStageThreeModifiersRunToCompletion` |
+| 冲量只在声明时刻生成意图并保留请求方向，收势提交返回回执 | `TechniqueStage34Test.impulseIsReturnedAtItsDeclaredBodyTime`, `TechniqueStage34Test.advanceReturnsDueEffectsAndRecoveryCommit` |
+| 起手打断不撤销已提交修正 | `TechniqueStage34Test.interruptedCastKeepsSubmittedModifierUntilCurveEnd` |
+| AI 同种子稳定选择、过滤不可用和零权重功法 | `TechniqueStage34Test.selectorUsesStableSeedAndIgnoresZeroWeight`, `TechniqueStage34Test.selectorRejectsUnaffordableAndDistantCandidates` |
+| 提前结束只停止已启动的持续表现 | `TechniqueStage34Test.earlyTerminationStopsStartedContinuousPresentation`, `TechniqueStage34Test.earlyTerminationDoesNotStopPresentationBeforeItsStart` |
+| 熟练度为零仍可选，高熟练度权重更大 | `TechniqueStage34Test.selectorAllowsZeroProficiencyAndFavorsHigherProficiency` |
 | 玩家文本不含数值或时间单位 | `TechniqueCastingTest.playerFacingReasonsContainNoTimingOrNumericDetails` |
 | 宿主 oneof 编号、三操作往返、表现交给 effect | `TechniqueProtocolTest.hostOperationsUseStableFieldNumbersAndRoundTrip` |
 | 缺操作、错误 UUID、截断/超大消息和提前移除拒绝 | `TechniqueProtocolTest.hostRejectsMissingOperationInvalidUuidAndMalformedPayload` |
@@ -69,17 +74,18 @@ KISS/DRY/YAGNI 的落点是复用 Framework 库存算术、有效能力、原子
 | 命令或检查 | 结果 |
 |---|---|
 | `./gradlew :server:compileJava --console=plain` | 编译通过 |
-| `./gradlew :server:test --console=plain` | 39 项测试通过，0 失败、0 错误、0 跳过 |
+| `./gradlew :server:test --console=plain` | 47 项测试通过，0 失败、0 错误、0 跳过 |
 | `./gradlew test build --console=plain` | 最终构建通过，包含共享协议、服务端测试与打包 |
-| 测试 XML 汇总 | 39 项，0 失败、0 错误、0 跳过：目录 8、绑定 3、施放 23、协议 5 |
+| 测试 XML 汇总 | 47 项，0 失败、0 错误、0 跳过：目录 8、绑定 3、施放 23、协议 5、阶段 3/4 8 |
 | `python3 "scripts/check_docs.py"` | 7 个页面链接全部通过；构建的 `checkDocs` 也通过 |
 | `git diff --check` | 通过 |
 
-本次补充了真元分配方式、平摊余数和玩家文本回归；没有修改 Framework。
+本次补充了提前结束表现停止、熟练度基础权重和单一效果推进入口；没有修改 Framework。
 
-代码形状自查：本次 diff 修正第 4 条（`TechniqueDefinitions`、`TechniqueBinder`、`TechniqueCasting` 与费用测试保存重复读取结果），
-并按第 9 条拆开新增测试和校验的超长表达式。新增 builder 每行一个 setter；其余逐条检查无嵌套 builder、复杂三元、自有布尔参数或超长方法。
+代码形状自查：修正第 3 条（`TechniqueScheduler.effectsAt`、`TechniqueSelector.weight` 的三元表达式改为显式分支）、
+第 7 条（调度哨兵、情境系数和测试输入改用语义常量）和第 9 条（选择器与阶段测试的超长注释拆行）。
+新增 builder 每行一个 setter；逐条检查无嵌套 builder、自有布尔参数、超过 120 列的新增代码或超过约 40 行的新增业务方法。
 
-未检查的内容：游戏内行为、生产宿主授权/持久存储、Fabric 发现与网络、真实实体朝向/冲量/表现、
-阶段 3–5、AI、性能基准、Windows 实机执行和正式内容平衡。当前阶段没有 Fabric 工程，不制作无运行职责的空模组。
+未检查的内容：游戏内行为、生产宿主授权/持久存储、Fabric 发现与网络、真实实体朝向/冲量/表现执行、
+阶段 5、性能基准、Windows 实机执行和正式内容平衡。当前阶段没有 Fabric 工程，不制作无运行职责的空模组。
 Framework 的现有接口限制及宿主责任见 [宿主与施放流程](Host-Integration.md)。

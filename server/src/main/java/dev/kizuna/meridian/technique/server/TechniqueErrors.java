@@ -14,9 +14,9 @@ public final class TechniqueErrors {
         return new IllegalArgumentException(path + "：" + reason);
     }
 
-    static Rejected rejected(TechniqueFailure code, String reason) {
-        // 运行拒绝单独携带线协议原因码，避免调用方解析中文文本。
-        return new Rejected(code, reason);
+    static Rejected rejected(TechniqueFailure code) {
+        // 运行拒绝只携带结构化原因码，玩家文本统一由 playerReason 生成。
+        return new Rejected(code);
     }
 
     static String playerReason(TechniqueFailure code) {
@@ -53,9 +53,9 @@ public final class TechniqueErrors {
     static final class Rejected extends RuntimeException {
         final TechniqueFailure code;
 
-        Rejected(TechniqueFailure code, String reason) {
+        Rejected(TechniqueFailure code) {
             // 校验拒绝不产生任何候选状态的持久写入。
-            super(reason);
+            super(code.name());
             this.code = code;
         }
     }

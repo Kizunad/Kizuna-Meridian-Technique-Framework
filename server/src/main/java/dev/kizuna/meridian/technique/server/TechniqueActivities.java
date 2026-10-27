@@ -38,8 +38,9 @@ final class TechniqueActivities {
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
         Accounts accounts = accounts(body, definition.getCost().getQiList(), slots);
-        List<ActivityEffort> efforts = efforts(start, slots);
         ActiveCast active = activeCast(start);
+        List<BodyMessages.CapabilityModifier> modifiers = TechniqueScheduler.modifiers(definition, active);
+        List<ActivityEffort> efforts = efforts(start, slots, modifiers);
         long cooldownEnd = addTime(active.getStartedMillis(), definition.getCooldownMillis());
         TechniqueProgress progress = start.progress().toBuilder()
                 .setActiveCast(active)
@@ -52,6 +53,7 @@ final class TechniqueActivities {
                 .setReleasedQi(BodyProtobuf.toInventory(accounts.released()))
                 .addAllEfforts(efforts)
                 .addStartActions(action)
+                .addAllAddModifiers(modifiers)
                 .putProgress(TechniqueState.KEY, payload)
                 .build();
 
@@ -126,7 +128,7 @@ final class TechniqueActivities {
                 String moduleId = allocation.moduleId();
                 MeridianState state = states.get(moduleId);
                 if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
-                    throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED, "经脉未通");
+                    throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED);
                 }
                 QiInventory previous = replacements.getOrDefault(moduleId, state.lumenQi());
                 QiInventory debit = selectCost(previous, cost, allocation.amount());
@@ -158,14 +160,14 @@ final class TechniqueActivities {
                     .map(moduleId -> new CostAllocation(moduleId, amount))
                     .toList();
             case EVEN -> evenAllocations(moduleIds, amount);
-            default -> throw TechniqueErrors.rejected(INVALID_STATE, "真元费用分配方式无效");
+            default -> throw TechniqueErrors.rejected(INVALID_STATE);
         };
     }
 
     private static List<CostAllocation> evenAllocations(List<String> moduleIds, double amount) {
         // Framework 的真元数量使用 double 与最小可流转单位，余数固定归字典序最后的经脉。
         if (moduleIds.isEmpty()) {
-            throw TechniqueErrors.rejected(INVALID_STATE, "真元费用没有可用经脉");
+            throw TechniqueErrors.rejected(INVALID_STATE);
         }
         double share = amount / moduleIds.size();
         double allocated = 0;
@@ -187,9 +189,9 @@ final class TechniqueActivities {
         Qi entry = inventory.entries().stream()
                 .filter(qi -> qi.phase() == phase && qi.attribute().id().value().equals(cost.getAttribute()))
                 .findFirst()
-                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI, "真元不济"));
+                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI));
         if (entry.amount() < amount) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_QI, "真元不济");
+            throw TechniqueErrors.rejected(INSUFFICIENT_QI);
         }
         Qi selected = entry.withAmount(amount);
         QiInventory debit = new QiInventory(List.of(selected));
@@ -197,10 +199,11 @@ final class TechniqueActivities {
         return debit;
     }
 
-    private static List<ActivityEffort> efforts(Start start, Map<String, BoundSlot> slots) {
+    private static List<ActivityEffort> efforts(Start start, Map<String, BoundSlot> slots,
+                                                List<BodyMessages.CapabilityModifier> modifiers) {
         // 力量尚无活动字段，按同一 revision 先校验完整做功时段；活动仍复核功率与耐力。
         var efforts = new ArrayList<ActivityEffort>();
-        BodySnapshot candidate = start.body();
+        BodySnapshot candidate = withModifiers(start.body(), modifiers);
         for (WorkCost work : start.definition().getCost().getWorkList()) {
             BoundSlot slot = slots.get(work.getSlotId());
             for (String moduleId : slot.getModuleIdsList()) {
@@ -219,9 +222,21 @@ final class TechniqueActivities {
             }
         }
         if (efforts.size() > MAX_EFFORTS) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY, "你过于疲惫");
+            throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY);
         }
         return List.copyOf(efforts);
+    }
+
+    private static BodySnapshot withModifiers(BodySnapshot body,
+                                               List<BodyMessages.CapabilityModifier> modifiers) {
+        // 预检力量时纳入同一笔起手活动新增的修正，保持预检和 Framework 执行顺序一致。
+        if (modifiers.isEmpty()) {
+            return body;
+        }
+        BodyMessages.BodySnapshot message = BodyProtobuf.toMessage(body).toBuilder()
+                .addAllModifiers(modifiers)
+                .build();
+        return BodyProtobuf.fromMessage(message);
     }
 
     private static long addTime(long startMillis, long durationMillis) {
@@ -229,7 +244,7 @@ final class TechniqueActivities {
         try {
             return Math.addExact(startMillis, durationMillis);
         } catch (ArithmeticException exception) {
-            throw TechniqueErrors.rejected(INVALID_STATE, "心神未定，暂时无法运功");
+            throw TechniqueErrors.rejected(INVALID_STATE);
         }
     }
 

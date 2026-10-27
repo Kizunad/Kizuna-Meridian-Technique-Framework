@@ -96,9 +96,13 @@ Fabric 模组注册 `/meridian_technique learn <targets> <id>`，只允许权限
 
 效果游标和待确认结果只保存在服务器内存，不跨重启恢复，也不补发离线期间的冲量或表现。
 正常卸载、下线和停服会先取消当前施放；异常退出遗留的 `active_cast` 必须由宿主在恢复身体时、
-重新对外认领之前，用 `TechniqueCasting.cancelOnUnload(host, previousMillis)` 清理并处理停止意图。
-宿主若没有可靠效果回执，以起手前时刻作为 `previousMillis`，避免伪造已启动表现的停止；
-取消保留知识、冷却和已付费用。服务不枚举存档身体，也不自动恢复旧施放或重建其效果游标。
+重新对外认领之前，调用 `TechniqueService.recoverOnLoad(entityUuid, recoveryHost)` 清理。
+`TechniqueRecoveryHost` 不依赖实体目录已认领：`snapshot()` 返回权威事实，`submitRecovery` 将库生成的
+`BodyCommand` 按类型交给 Framework 的 `handleActivity` 或 `handleAddonProgress`，保留原始请求 ID、
+`expected_revision` 和失败码，并返回实际提交版本。调用与身体事件串行，恢复前由宿主结清时间。
+存活身体通过活动同时清施放与动作；死体动作已被 Framework 清空，因此只通过可信进度入口清 `active_cast`。
+成功后清除内存旧会话；拒绝不当作成功，可重试。恢复不补发冲量、START 或 STOP；知识、冷却与已付费用保持不变。
+服务不枚举存档身体，不恢复旧施放或重建效果游标；损坏进度仍明确拒绝。
 
 Framework 现有接口限制已记录，未修改依赖：
 
@@ -106,8 +110,8 @@ Framework 现有接口限制已记录，未修改依赖：
   提交时复核 revision；Framework 回执只携带功率/秒，不独立保留力量要求。
 - Framework 没有全局标签目录或模板枚举；本库使用显式模板引用校验词汇。
 - Framework 死亡会清动作并保留附属进度，但拒绝死体 `BodyActivity`。
-  若宿主先让身体死亡，再尝试收势，库会明确报告 `FRAMEWORK_REJECTED/BODY_DEAD`，保留原进度供宿主处理。
-  死亡后的 `active_cast` 清理需宿主使用现有可信进度入口，或在死亡前按事件顺序完成取消；本次不增加此宿主能力。
+  宿主优先在死亡前取消；身体已致死或恢复旧死体时，使用上述 `recoverOnLoad` 走可信进度清理。
+  此入口不复活身体，也不补回死亡释放的资源。
 
 字节适配的 `TechniqueHostRequest.expected_revision` 显式携带活动提交依据的版本，宿主必须在同一实体事件队列中复核。
 `presentation` 通过 `effect` 交由宿主执行，持续型在收势、打断、卸载或下线时收到停止通知；

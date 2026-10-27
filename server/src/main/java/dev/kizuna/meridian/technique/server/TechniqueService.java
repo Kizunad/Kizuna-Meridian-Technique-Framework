@@ -2,8 +2,21 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
-import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.SetAddonProgress;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Quantity;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProgress;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -13,8 +26,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
-
-import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
 
 /** 服务端主线程使用的功法服务；状态和世界副作用仍归实体宿主。 */
 public final class TechniqueService {
@@ -131,6 +142,40 @@ public final class TechniqueService {
     public Optional<CastOutcome> cancelOnDisconnect(UUID entityUuid) {
         // 玩家下线沿用卸载语义；调用方应在撤销宿主访问前调用此入口。
         return transition(Objects.requireNonNull(entityUuid), Transition.DISCONNECT);
+    }
+
+    public void recoverOnLoad(UUID entityUuid, TechniqueRecoveryHost host) {
+        // 恢复不补发效果；死体动作已由 Framework 清空，只通过可信进度入口清除残留施放。
+        Objects.requireNonNull(entityUuid);
+        BodySnapshot body = host.snapshot();
+        TechniqueProgress progress = TechniqueState.read(body);
+        if (progress.hasActiveCast()) {
+            BodyCommand command = recoveryCommand(body, progress);
+            String requestId = "technique_recover_" + progress.getActiveCast().getRequest().getCastId();
+            long revision = host.submitRecovery(requestId, command);
+            if (revision != body.revision() + 1) {
+                throw new IllegalStateException("宿主返回的恢复提交版本不一致");
+            }
+        }
+        sessions.remove(entityUuid);
+    }
+
+    private static BodyCommand recoveryCommand(BodySnapshot body, TechniqueProgress progress) {
+        // 存活身体原子解除动作；死体保留费用、冷却、知识和其他附属进度。
+        var command = BodyCommand.newBuilder()
+                .setBodyId(body.id().value())
+                .setExpectedRevision(body.revision());
+        if (body.vitality().dead()) {
+            TechniqueProgress stopped = progress.toBuilder().clearActiveCast().build();
+            SetAddonProgress update = SetAddonProgress.newBuilder()
+                    .setId(TechniqueState.KEY)
+                    .setProgress(TechniqueState.pack(stopped))
+                    .build();
+            command.setSetAddonProgress(update);
+        } else {
+            command.setExecuteActivity(TechniqueActivities.stop(progress));
+        }
+        return command.build();
     }
 
     public void shutdown() {
@@ -321,7 +366,7 @@ public final class TechniqueService {
 
     private static boolean success(CastOutcome outcome) {
         // 未设置失败枚举才代表状态机完成了可信提交。
-        return outcome.getFailure() == TECHNIQUE_FAILURE_UNSPECIFIED;
+        return outcome.getFailure() == TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED;
     }
 
     private static void validateCommit(BodySnapshot body, BodyActivity activity, TechniqueHost.Commit commit) {
@@ -335,8 +380,8 @@ public final class TechniqueService {
         // 没有任何实体宿主时返回结构化 NO_HOST，玩家只看到身体无法运功的感受。
         return CastOutcome.newBuilder()
                 .setCastId(request.getCastId())
-                .setFailure(NO_HOST)
-                .setReason(TechniqueErrors.playerReason(NO_HOST))
+                .setFailure(TechniqueFailure.NO_HOST)
+                .setReason(TechniqueErrors.playerReason(TechniqueFailure.NO_HOST))
                 .build();
     }
 

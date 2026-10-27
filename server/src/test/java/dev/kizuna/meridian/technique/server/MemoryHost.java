@@ -4,6 +4,7 @@ import dev.kizuna.meridian.core.BodyId;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.MeridianProtocol;
+import dev.kizuna.meridian.protocol.pb.HealthMessages.ConfirmBodyDeath;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
@@ -15,7 +16,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** 假宿主负责内存持久化，费用结算仍由真实 Framework 处理器验证。 */
-final class MemoryHost implements TechniqueHost {
+final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     final InMemoryBodyStore store;
     final BodyId bodyId;
     private final BodyCommandHandler<String> commands;
@@ -43,6 +44,40 @@ final class MemoryHost implements TechniqueHost {
     BodySnapshot current() {
         // 只读取存储，不隐式推进时间，方便比较拒绝前后的完全相同状态。
         return store.find(bodyId).orElseThrow();
+    }
+
+    @Override
+    public BodySnapshot snapshot() {
+        // 恢复读取保存事实，不提前推进或修改动作占用。
+        return current();
+    }
+
+    @Override
+    public long submitRecovery(String requestId, BodyCommand command) {
+        // 与生产宿主相同，死体清进度使用独立可信入口而非普通活动。
+        Route route = Route.ACTIVITY;
+        if (command.hasSetAddonProgress()) {
+            route = Route.PROGRESS;
+        }
+        ResponseEnvelope response = execute(requestId, command, route);
+        if (response.hasFailure()) {
+            throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
+        }
+        return response.getCommandCommitted().getRevision();
+    }
+
+    void die() {
+        // 通过真实健康入口确认死亡，Framework 清空动作但保留附属进度。
+        ConfirmBodyDeath death = ConfirmBodyDeath.newBuilder().setSourceId("sample:death").build();
+        BodyCommand command = BodyCommand.newBuilder()
+                .setBodyId(bodyId.value())
+                .setExpectedRevision(current().revision())
+                .setConfirmBodyDeath(death)
+                .build();
+        ResponseEnvelope response = execute("death_" + UUID.randomUUID(), command, Route.HEALTH);
+        if (response.hasFailure()) {
+            throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
+        }
     }
 
     @Override
@@ -134,11 +169,15 @@ final class MemoryHost implements TechniqueHost {
         byte[] response;
         if (route == Route.ACTIVITY) {
             response = commands.handleActivity("trusted", payload);
+        } else if (route == Route.PROGRESS) {
+            response = commands.handleAddonProgress("trusted", payload);
+        } else if (route == Route.HEALTH) {
+            response = commands.handleHealthEffect("trusted", payload);
         } else {
             response = commands.handle("trusted", payload);
         }
         return MeridianProtocol.decodeResponse(response);
     }
 
-    private enum Route { NORMAL, ACTIVITY }
+    private enum Route { NORMAL, ACTIVITY, PROGRESS, HEALTH }
 }

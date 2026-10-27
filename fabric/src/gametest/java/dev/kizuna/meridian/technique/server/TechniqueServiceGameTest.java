@@ -2,7 +2,13 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
-import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationAction;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProgress;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -97,6 +103,57 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
                 "非法命令写入了知识");
         release(prepared);
         context.complete();
+    }
+
+    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+    public void unclaimedSavedCastRecoversWithoutEffects(TestContext context) {
+        // 身体已经从实体目录撤销，公开服务仍可经可信恢复入口取消旧档中的施放。
+        Prepared prepared = prepare(context);
+        TechniqueService service = TechniqueFabric.service();
+        UUID entityUuid = prepared.entity().getUuid();
+        service.learn(entityUuid, prepared.reference());
+        context.assertTrue(service.cast(entityUuid, request(prepared.host().current(), "saved_live"))
+                .getPhase() == CastPhase.WARMUP, "没有开始施放");
+        MemoryHost restored = prepared.host().restore();
+        assertRecovered(context, prepared, restored);
+        context.complete();
+    }
+
+    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
+    public void unclaimedDeadCastRecoversWithoutRefund(TestContext context) {
+        // Framework 死亡清空动作后仍可恢复附属进度，死体不再永久保留施放和会话。
+        Prepared prepared = prepare(context);
+        TechniqueService service = TechniqueFabric.service();
+        UUID entityUuid = prepared.entity().getUuid();
+        service.learn(entityUuid, prepared.reference());
+        context.assertTrue(service.cast(entityUuid, request(prepared.host().current(), "saved_dead"))
+                .getPhase() == CastPhase.WARMUP, "没有开始施放");
+        prepared.host().die();
+        MemoryHost restored = prepared.host().restore();
+        context.assertTrue(TechniqueState.read(restored.current()).hasActiveCast(), "没有形成死体残留");
+        assertRecovered(context, prepared, restored);
+        context.assertTrue(restored.current().vitality().dead(), "恢复改变了死亡事实");
+        context.complete();
+    }
+
+    private static void assertRecovered(TestContext context, Prepared prepared, MemoryHost restored) {
+        // 真实存档恢复后保留费用、冷却与知识；恢复本身无世界效果且只提交一次。
+        UUID entityUuid = prepared.entity().getUuid();
+        TechniqueGameTestHost.unbind(entityUuid);
+        var before = TechniqueState.read(restored.current());
+        var released = restored.store.environmentQi();
+        TechniqueService service = TechniqueFabric.service();
+        service.recoverOnLoad(entityUuid, restored);
+        context.assertTrue(TechniqueState.read(restored.current())
+                .equals(before.toBuilder().clearActiveCast().build()), "恢复改变了冷却或学会记录");
+        context.assertTrue(restored.current().actions().isEmpty(), "恢复遗留动作");
+        context.assertTrue(restored.store.environmentQi().equals(released), "恢复退费或改变释放");
+        context.assertTrue(restored.effects.isEmpty(), "恢复补发了效果");
+        var recovered = restored.current();
+        service.recoverOnLoad(entityUuid, restored);
+        context.assertTrue(restored.current().equals(recovered), "恢复重试产生重复提交");
+        context.assertTrue(service.cancelOnUnload(entityUuid).isEmpty(), "恢复保留了旧会话");
+        release(prepared);
     }
 
     private static Prepared prepare(TestContext context) {

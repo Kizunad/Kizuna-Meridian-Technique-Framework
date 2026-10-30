@@ -9,16 +9,18 @@ repositories {
 }
 
 dependencies {
-    minecraft 'com.mojang:minecraft:1.20.1'
-    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
-    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
-    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
+    minecraft libs.minecraft
+    mappings "net.fabricmc:yarn:${libs.versions.yarn.get()}:v2"
+    modImplementation libs.fabric.loader
+    modImplementation libs.fabric.api
     implementation project(':server')
     include project(':server')
     include project(':shared')
     include implementation('local.meridian:server')
-    include implementation('com.google.protobuf:protobuf-java:4.36.2')
-    testImplementation 'junit:junit:4.13.2'
+    // 版本目录条目是 Provider，implementation 不返回依赖对象，嵌套声明单独写。
+    implementation libs.protobuf.java
+    include libs.protobuf.java
+    testImplementation libs.junit4
 }
 
 test { useJUnit() }
@@ -91,9 +93,10 @@ loom {
 
 // 客户端阅读验收读取实际内容包；服务端测试继续使用独立目录夹具。
 if (providers.gradleProperty('scrollFullAssembly').isPresent()) {
-    apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
+    apply from: new File(kizunaWorkspace.directory('framework'), 'scripts/full-assembly.gradle')
     dependencies {
-        localRuntime files('../../Kizuna-Meridian-Human-Addon/client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar')
+        // Human 客户端只在运行时需要，按装配清单读文件，避免低层构建反过来组合高层仓库。
+        localRuntime files(kizunaWorkspace.artifact('human', 'client', false))
     }
 }
 tasks.register('prepareClientTestWorld', Copy) {

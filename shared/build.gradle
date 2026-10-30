@@ -2,13 +2,14 @@ apply plugin: 'com.google.protobuf'
 description = '功法目录、绑定、进度与施放请求的跨语言 Protobuf 契约。'
 
 dependencies {
-    api 'com.google.protobuf:protobuf-java:4.36.2'
+    api libs.protobuf.java
     compileOnlyApi 'local.meridian:client'
 }
 
 def descriptor = layout.buildDirectory.file('descriptors/technique-v1.desc')
 protobuf {
-    protoc { artifact = 'com.google.protobuf:protoc:4.36.2' }
+    // protoc 与运行库同版本，取版本目录中的 protobuf-java。
+    protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.java.get()}" }
     generateProtoTasks {
         ofSourceSet('main').configureEach { task ->
             task.generateDescriptorSet = true

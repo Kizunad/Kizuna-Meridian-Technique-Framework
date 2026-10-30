@@ -10,12 +10,13 @@ Java 目标为 17，Fabric 宿主目标为 Minecraft 1.20.1；身体与世界效
 | `server/src/main/java/` | 不可变目录、定义校验、槽位绑定、施放状态机、效果意图调度和 AI 选择 |
 | `server/src/test/java/` | 必要整体回归、内存假宿主、仅用于测试的功法与身体构型 |
 | `fabric/src/main/java/` | 目录与宿主发现、主线程调度、学会命令、卷轴物品、创造栏、客户端模型和阅读钩子 |
-| `gradle/wrapper/` | Gradle 8.8，保留原始许可和下载校验和 |
+| `gradle/wrapper/` | Gradle 8.14.6，保留原始许可和下载校验和 |
 | `docs/wiki/` | 文档唯一编辑源 |
 | `scripts/check_docs.py` | README 与 Wiki 本地链接检查 |
 
 只通过 Gradle composite 引用相邻 `../Kizuna-Meridian-Mod-Framework`。
-依赖位置可用 `-PmeridianFrameworkDir=...` 指定。只使用本地 composite 的占位依赖，不声明已发布 Maven 安装坐标。
+`settings.gradle` 应用其 `scripts/workspace.gradle`，按装配清单组合框架并取得版本目录 `libs`；
+位置可用 `-Pkizuna.dir.framework=...` 指定。只使用本地 composite 的占位依赖，不声明已发布 Maven 安装坐标。
 `shared` 编译时导入框架客户端协议，运行时由宿主提供对应端框架；`server` 链接框架纯 Java 服务端。
 不依赖 Human、Humanoid、寻路或具体功法内容。
 

@@ -3,6 +3,6 @@ description = '功法目录、标签绑定和权威活动编排；不引用 Mine
 dependencies {
     api project(':shared')
     api 'local.meridian:server'
-    testImplementation 'junit:junit:4.13.2'
+    testImplementation libs.junit4
 }
 test { useJUnit() }

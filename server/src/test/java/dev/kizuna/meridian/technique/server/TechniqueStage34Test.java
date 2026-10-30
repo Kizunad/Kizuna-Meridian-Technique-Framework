@@ -105,12 +105,12 @@ public class TechniqueStage34Test {
         assertEquals(CastPhase.WARMUP, casting.cast(host, request(body, "interrupt")).getPhase());
         assertEquals(1, host.current().modifiers().size());
         ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
-        TechniqueCasting.AdvanceResult interrupted = casting.interruptByDamage(host,
+        TechniqueCasting.AdvanceResult interrupted = casting.interruptByStagger(host,
                 active.getStartedMillis() - 1);
         assertEquals(CastPhase.INTERRUPTED, interrupted.outcome().getPhase());
         assertEquals(1, host.current().modifiers().size());
         host.nowMillis = CURVE_END;
-        assertTrue(host.inspect().modifiers().isEmpty());
+        assertTrue(host.inspect().body().modifiers().isEmpty());
         assertEquals(0, host.current().actions().size());
     }
 
@@ -132,8 +132,8 @@ public class TechniqueStage34Test {
                     started.effects().get(0).getPresentation().getAction());
 
             TechniqueCasting.AdvanceResult ended;
-            if (termination == Termination.DAMAGE) {
-                ended = casting.interruptByDamage(host, active.getStartedMillis());
+            if (termination == Termination.STAGGER) {
+                ended = casting.interruptByStagger(host, active.getStartedMillis());
             } else if (termination == Termination.UNLOAD) {
                 ended = casting.cancelOnUnload(host, active.getStartedMillis());
             } else {
@@ -296,5 +296,5 @@ public class TechniqueStage34Test {
                                     List<KnownTechnique> known,
                                     TechniqueReference zeroRef) { }
 
-    private enum Termination { DAMAGE, UNLOAD, DISCONNECT }
+    private enum Termination { STAGGER, UNLOAD, DISCONNECT }
 }

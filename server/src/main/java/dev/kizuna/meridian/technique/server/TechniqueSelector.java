@@ -56,12 +56,34 @@ public final class TechniqueSelector {
         }
     }
 
-    public record Context(TechniqueRegistry registry, Situation situation, Availability availability) {
+    public enum CombatFact {
+        TARGET_SHIELDING,
+        SURROUNDED,
+        UNDER_ATTACK,
+        PURSUED
+    }
+
+    public record CombatContext(Set<CombatFact> facts, TechniqueProgress progress) {
+        public CombatContext {
+            // 事实由宿主观察，承接则始终读取同一身体的可信进度。
+            facts = Set.copyOf(facts);
+            TechniqueState.validate(progress);
+        }
+    }
+
+    public record Context(TechniqueRegistry registry, Situation situation, Availability availability,
+                          CombatContext combat) {
+        public Context(TechniqueRegistry registry, Situation situation, Availability availability) {
+            // 既有宿主没有战斗事实时使用空进度，不凭空制造承接机会。
+            this(registry, situation, availability, new CombatContext(Set.of(), TechniqueState.empty()));
+        }
+
         public Context {
             // 目录与可用性结果必须来自同一轮 AI 查询，避免使用过期绑定。
             Objects.requireNonNull(registry);
             Objects.requireNonNull(situation);
             Objects.requireNonNull(availability);
+            Objects.requireNonNull(combat);
         }
     }
 
@@ -107,20 +129,16 @@ public final class TechniqueSelector {
 
     private static void addCandidate(Context context, KnownTechnique known,
                                      List<Weighted> candidates) {
+        // 分数入口统一完成可用性筛选，抽样不重复计算承接窗口。
         TechniqueReference reference = known.getTechnique();
-        TechniqueDefinition definition = context.registry().find(reference).orElse(null);
-        if (definition == null || !available(context, known, definition)) {
-            return;
-        }
-        double weight = weight(context.situation(), definition, known);
+        double weight = score(context, known);
         if (Double.isFinite(weight) && weight > 0) {
             candidates.add(new Weighted(reference, weight));
         }
     }
 
-    private static boolean available(Context context, KnownTechnique known,
-                                     TechniqueDefinition definition) {
-        // 绑定、费用、冷却和距离全部满足才允许进入加权池。
+    public static boolean castable(Context context, KnownTechnique known, TechniqueDefinition definition) {
+        // 绑定、费用、冷却和承接窗口满足即可施放；不看距离与 AI 角色，宿主大脑筛辅助式和打断式时复用。
         TechniqueReference reference = known.getTechnique();
         BindingOutcome binding = context.availability().bindings().get(reference);
         if (binding == null || !binding.hasBinding()
@@ -129,13 +147,72 @@ public final class TechniqueSelector {
         }
         long cooldownEnd = context.availability().cooldownEnds()
                 .getOrDefault(definition.getId(), 0L);
-        if (context.situation().nowMillis() < cooldownEnd || !definition.hasAiHints()) {
+        return context.situation().nowMillis() >= cooldownEnd && combatAvailable(context, definition);
+    }
+
+    private static boolean available(Context context, KnownTechnique known,
+                                     TechniqueDefinition definition) {
+        // 可施放、有 AI 提示、不是辅助式且距离落在提示区间内才允许进入加权池。
+        if (!definition.hasAiHints() || !castable(context, known, definition)) {
             return false;
         }
         AiHints hints = definition.getAiHints();
+        if (hints.getSupport().getRole() != AiRole.AI_ROLE_UNSPECIFIED) {
+            return false;
+        }
         double distance = context.situation().targetDistanceMeters();
         return distance >= hints.getMinimumDistance().getValue()
                 && distance <= hints.getMaximumDistance().getValue();
+    }
+
+    private static boolean combatAvailable(Context context, TechniqueDefinition definition) {
+        // 有当前施放或只能承接时必须存在合法窗口，冷却和曲线限制仍然有效。
+        TechniqueProgress progress = context.combat().progress();
+        long now = context.situation().nowMillis();
+        Optional<FollowUp> transition = TechniqueFollowUps.available(definition, progress, now);
+        if ((progress.hasActiveCast() || definition.getFollowUp().getOnlyFollowUp()) && transition.isEmpty()) {
+            return false;
+        }
+        if (now < progress.getCooldownsOrDefault(definition.getId(), 0)
+                || now < progress.getCurveEndsOrDefault(definition.getId(), 0)) {
+            return false;
+        }
+        long clipStart = transition.map(FollowUp::getStartMillis).orElse(0L);
+        long warmup = definition.getPhases().getWarmupMillis() - clipStart;
+        CombatAiHints hints = definition.getAiHints().getCombat();
+        if (context.combat().facts().contains(CombatFact.UNDER_ATTACK)
+                && hints.hasMaximumWarmupUnderAttackMillis()
+                && warmup > hints.getMaximumWarmupUnderAttackMillis()) {
+            return false;
+        }
+        return !hints.hasLongWarmupMillis() || warmup < hints.getLongWarmupMillis()
+                || context.situation().targetDistanceMeters() <= hints.getMaximumLongWarmupDistance().getValue();
+    }
+
+    public static double score(Context context, KnownTechnique known) {
+        // 宿主可查看单个候选分数；不可用候选固定为零，情境不会改变真实伤害或时长。
+        TechniqueDefinition definition = context.registry().find(known.getTechnique()).orElse(null);
+        if (definition == null || !available(context, known, definition)) {
+            return 0;
+        }
+        double base = weight(context.situation(), definition, known);
+        CombatAiHints hints = definition.getAiHints().getCombat();
+        double result = base;
+        for (CombatFact fact : context.combat().facts()) {
+            Quantity multiplier = switch (fact) {
+                case TARGET_SHIELDING -> hints.getTargetShieldingWeight();
+                case SURROUNDED -> hints.getSurroundedWeight();
+                case UNDER_ATTACK -> hints.getUnderAttackWeight();
+                case PURSUED -> hints.getPursuedWeight();
+            };
+            if (multiplier.hasValue()) {
+                result *= multiplier.getValue();
+            }
+        }
+        if (!Double.isFinite(result)) {
+            return 0;
+        }
+        return result;
     }
 
     private static double weight(Situation situation, TechniqueDefinition definition,

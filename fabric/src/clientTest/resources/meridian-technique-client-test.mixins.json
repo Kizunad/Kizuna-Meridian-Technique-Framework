@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.kizuna.meridian.technique.fabric.client.testmixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": ["TechniqueTeleportCounterMixin"],
+  "injectors": {"defaultRequire": 1}
+}

@@ -53,6 +53,9 @@ public final class TechniqueProtocol {
             throw TechniqueErrors.invalid("cast", "身体身份缺失或目标标识过长");
         }
         validateDirection(request.getDirection());
+        if (request.getEntry() == CastEntry.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("entry", "未知施放入口");
+        }
     }
 
     static void validateReference(TechniqueReference reference) {
@@ -141,7 +144,10 @@ public final class TechniqueProtocol {
                     throw TechniqueErrors.invalid("response.unbound", "未认领结果必须为 true");
                 }
             }
-            case BODY -> validateHostBody(response.getBody());
+            case BODY -> {
+                validateHostBody(response.getBody());
+                TechniqueHeldItems.validate(response.getHeldItems());
+            }
             case ACTIVITY -> validateActivityCommit(response.getActivity());
             case EFFECT_ACCEPTED -> {
                 if (!response.getEffectAccepted()) {
@@ -201,24 +207,61 @@ public final class TechniqueProtocol {
     }
 
     public static void validateEffect(EffectIntent intent) {
-        // 世界效果只声明冲量或表现，身体能力修正必须使用权威活动。
+        // 世界效果只声明宿主意图，身体能力修正必须使用权威活动。
         TechniqueValues.knownFields(intent);
         TechniqueValues.castId(intent.getCastId());
+        if (!intent.getEffectId().isEmpty()) {
+            TechniqueValues.localId(intent.getEffectId(), "effect_id");
+        }
+        if (intent.getSelectedHand() == Hand.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("selected_hand", "未知出手手位");
+        }
         validateDirection(intent.getDirection());
         if (intent.getTargetId().length() > TechniqueValues.MAX_TEXT) {
             throw TechniqueErrors.invalid("target_id", "目标身份过长");
         }
+        if (intent.getScheduledMillis() < 0) {
+            throw TechniqueErrors.invalid("scheduled_millis", "效果身体时刻不能为负");
+        }
         switch (intent.getOperationCase()) {
-            case IMPULSE -> TechniqueDefinitions.validateImpulse(intent.getImpulse());
-            case PRESENTATION -> {
-                PresentationIntent presentation = intent.getPresentation();
-                TechniqueValues.id(presentation.getId(), "presentation.id");
-                if (presentation.getActionValue() <= 0
-                        || presentation.getAction() == PresentationAction.UNRECOGNIZED) {
-                    throw TechniqueErrors.invalid("presentation.action", "未知表现操作");
+            case WEAPON_STRIKE -> {
+                validateHeldEffect(intent);
+                TechniqueCombatEffects.validateStrike(intent.getWeaponStrike().getStrike());
+                TechniqueHeldItems.validateRules(intent.getWeaponStrike().getHeldItemRules());
+                for (SoundCue cue : intent.getWeaponStrike().getHitSoundsList()) {
+                    TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "weapon_strike.hit_sounds");
                 }
             }
+            case BREAK_BLOCKS -> {
+                validateHeldEffect(intent);
+                TechniqueCombatEffects.validateBlocks(intent.getBreakBlocks().getBlocks());
+                TechniqueHeldItems.validateRules(intent.getBreakBlocks().getHeldItemRules());
+            }
+            case IMPULSE -> TechniqueDefinitions.validateImpulse(intent.getImpulse());
+            case STATUS_BENEFIT -> TechniqueBenefits.validate(intent.getStatusBenefit());
+            case PRESENTATION -> validatePresentationIntent(intent.getPresentation());
+            case MOVEMENT -> TechniqueMovement.validateIntent(intent.getMovement());
+            case SOUND -> TechniqueSoundCues.validateAnchor(intent.getSound(), SoundAnchor.CASTER, "sound");
             default -> throw TechniqueErrors.invalid("effect", "缺少或未知世界效果");
+        }
+    }
+
+    private static void validatePresentationIntent(PresentationIntent presentation) {
+        // 停止仅引用已有表现，不能携带新的剪辑起播时刻。
+        TechniqueValues.id(presentation.getId(), "presentation.id");
+        TechniqueValues.millis(presentation.getStartMillis(), "presentation.start_millis");
+        if (presentation.getActionValue() <= 0 || presentation.getAction() == PresentationAction.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("presentation.action", "未知表现操作");
+        }
+        if (presentation.getAction() == PresentationAction.STOP && presentation.getStartMillis() != 0) {
+            throw TechniqueErrors.invalid("presentation.start_millis", "停止表现不能携带起播时刻");
+        }
+    }
+
+    private static void validateHeldEffect(EffectIntent intent) {
+        // 宿主必须能按选定手和稳定效果身份执行幂等世界操作。
+        if (intent.getSelectedHand() == Hand.HAND_UNSPECIFIED || intent.getEffectId().isEmpty()) {
+            throw TechniqueErrors.invalid("effect", "持物效果缺少选定手或效果身份");
         }
     }
 

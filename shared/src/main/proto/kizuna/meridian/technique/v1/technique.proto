@@ -19,6 +19,8 @@ enum Unit {
   RATIO = 5; // 无量纲
   METERS_PER_SECOND = 6;
   METER = 7;
+  DAMAGE_POINT = 8;
+  DEGREE = 9;
 }
 message Quantity { optional double value = 1; Unit unit = 2; }
 message TechniqueReference { string id = 1; int32 version = 2; }
@@ -29,6 +31,82 @@ message TechniqueCatalog {
   // 已在 AddonRegistry 登记的模板；按模块种类汇集其标签，拒绝未知标签。
   repeated kizuna.meridian.v1.TemplateReference binding_templates = 3;
   repeated TechniqueDefinition definitions = 4;
+  repeated TechniqueBook books = 5;
+  repeated TechniqueVolume volumes = 6;
+}
+message TechniqueBook {
+  string id = 1;
+  string display_name = 2;
+  HeldItemRules held_item_rules = 3; // 缺省表示不要求持物
+}
+message TechniqueVolume {
+  string id = 1;
+  string book_id = 2;
+  string display_name = 3;
+  repeated TechniqueReference techniques = 4; // 精确版本；一个式版本只属于一卷
+  repeated string prerequisite_volume_ids = 5; // 同书前置卷，无环；学会其中全部式才满足
+}
+enum BaseDamageSource {
+  BASE_DAMAGE_SOURCE_UNSPECIFIED = 0;
+  ITEM_ATTACK_DAMAGE = 1;
+  FIXED_DAMAGE = 2;
+}
+enum InjuryKind {
+  INJURY_KIND_UNSPECIFIED = 0;
+  CUTTING = 1;
+  BLUNT = 2;
+}
+enum ShieldInteraction {
+  SHIELD_INTERACTION_UNSPECIFIED = 0;
+  NO_SHIELD_BREAK = 1;
+  BREAK_BEFORE_HIT = 2;
+  COOLDOWN_AFTER_BLOCK = 3;
+}
+message HeldItemCategory {
+  string id = 1; // 书内局部 ID
+  repeated string item_tags = 2; // 任一标签命中；末项空列表匹配其余物品
+  optional int32 selection_priority = 3; // 非负，越小越优先；不同致伤类别可共用优先级
+  BaseDamageSource base_damage_source = 4;
+  Quantity base_damage = 5; // ITEM_ATTACK_DAMAGE 用 RATIO 倍率；FIXED_DAMAGE 用 DAMAGE_POINT
+  InjuryKind injury_kind = 6;
+  ShieldInteraction shield_interaction = 7;
+  optional bool can_break_doors = 8;
+}
+message DurabilityRule {
+  repeated string item_tags = 1; // 从上到下首次命中；末项空列表兜底，只用于有耐久物品
+  Quantity multiplier = 2; // RATIO，(0, 10]；无耐久物品一律按一次性排在有耐久物品之后
+}
+enum HandSelectionCriterion {
+  HAND_SELECTION_CRITERION_UNSPECIFIED = 0;
+  CATEGORY_PRIORITY = 1;
+  DURABILITY_MULTIPLIER = 2;
+  PREFER_MAIN_HAND = 3;
+}
+message HeldItemRules {
+  repeated HeldItemCategory categories = 1;
+  repeated DurabilityRule durability = 2;
+  repeated HandSelectionCriterion selection_order = 3; // 三项各一次，PREFER_MAIN_HAND 必须最后
+}
+enum Hand {
+  HAND_UNSPECIFIED = 0;
+  MAIN_HAND = 1;
+  OFF_HAND = 2;
+}
+enum HandSide {
+  HAND_SIDE_UNSPECIFIED = 0;
+  LEFT = 1;
+  RIGHT = 2;
+}
+message HeldItem {
+  string item_id = 1; // 空字符串表示空手；空手不得携带其他信息
+  repeated string tags = 2;
+  optional bool damageable = 3;
+  optional bool contains_items = 4;
+}
+message HeldItems {
+  HeldItem main_hand = 1;
+  HeldItem off_hand = 2;
+  HandSide main_hand_side = 3;
 }
 enum Category {
   CATEGORY_UNSPECIFIED = 0;
@@ -60,12 +138,17 @@ enum QiDistribution {
   EACH = 1;
   EVEN = 2;
 }
+enum QiCostMatching {
+  EXACT_VARIANT = 0; // 缺省保留精确属性与相态匹配
+  ANY_ATTRIBUTE_AT_LEAST_PHASE = 1; // 任意属性，库存相态不得低于 phase
+}
 message QiCost {
   string slot_id = 1;
   string attribute = 2;
   kizuna.meridian.v1.QiPhase phase = 3;
   Quantity amount = 4; // EACH 为每条经脉的费用，EVEN 为这一项的总费用，元
   QiDistribution distribution = 5; // 必须显式声明；EVEN 按经脉 ID 字典序分配余数
+  QiCostMatching matching = 6; // 任意属性模式下 attribute 必须为空；扣款保留实际密度
 }
 message WorkCost {
   string slot_id = 1; // 组织或器官，每个绑定模块各做一次功
@@ -95,28 +178,154 @@ enum ImpulseDirection {
   FORWARD = 1;
   UP = 2;
   TOWARD_TARGET = 3;
-  INPUT = 4; // direction 为零或缺省时由宿主取施放者朝向
+  INPUT = 4; // 输入为零或缺省时使用 input_default_direction，未声明则向前
+  BACKWARD = 5;
 }
-message Impulse { ImpulseDirection direction = 1; Quantity speed = 2; } // (0, 100] m/s
+message Impulse {
+  ImpulseDirection direction = 1;
+  Quantity speed = 2; // (0, 100] m/s
+  optional ImpulseDirection input_default_direction = 3; // 仅 INPUT 可声明，FORWARD 或 BACKWARD
+}
+// 注册于模组初始化的增益；相同身份重复施放只刷新持续时间。
+message StatusBenefit {
+  string id = 1;
+  int64 duration_millis = 2;
+  int32 color_rgb = 3;
+  LeapProfile leap = 4;
+}
+// 声音锚点：施放者位置，或本次打击真正造成伤害的每个目标位置。
+enum SoundAnchor {
+  SOUND_ANCHOR_UNSPECIFIED = 0;
+  CASTER = 1;
+  TARGET = 2; // 只能跟在同刻 weapon_strike 之后（中间可隔同刻声音），调度时并入该击的 hit_sounds
+}
+// 原版声音事件的一次播放；类别固定为 PLAYERS，客户端不预测，施放者本人也只听服务端下发的一次。
+message SoundCue {
+  string sound_id = 1; // 命名空间声音事件 ID；可不在服务端注册表中，启动时记 WARN 并内联下发
+  Quantity volume = 2; // RATIO，(0, 4]；省略为 1
+  Quantity pitch = 3; // RATIO，[0.5, 2]；省略为 1
+  Quantity pitch_jitter = 4; // RATIO，[0, 0.5]；每次在 pitch ± jitter 内均匀取值，两端仍在 [0.5, 2]
+  SoundAnchor anchor = 5;
+}
+// 跃步使用所属功法的组织槽位，每次起跳重新绑定并支付 work。
+// 落点限制在起点为心、maximum_path 为半径的球内；飞行 tick 由直线长度与 launch_speed 求得。
+message LeapProfile {
+  WorkCost work = 1;
+  double minimum_distance = 2; // 已停用，必须为 0
+  double maximum_distance = 3; // 已停用，必须为 0
+  double fallback_distance = 4; // 已停用，必须为 0
+  double maximum_rise = 5;
+  double maximum_drop = 6;
+  double snap_radius = 7;
+  int32 flight_ticks = 8; // 已停用，必须为 0
+  int32 landing_delay_ticks = 9;
+  string presentation_id = 10;
+  double ai_minimum_distance = 11;
+  string failure_translation_key = 12;
+  int32 ai_decision_ticks = 13;
+  double maximum_path = 14; // 格；上升计入直线长度，下落只受 maximum_drop 限制
+  double launch_speed = 15; // m/s，沿起点到落点直线的平均速度
+  int32 minimum_flight_ticks = 16;
+  int32 maximum_flight_ticks = 17;
+  SoundCue takeoff_sound = 18; // 起跳成功时在施放者处播放，锚点只能是 CASTER
+}
+// 客户端只表达跳跃意图；位置与速度均由服务端回执提供。
+message LeapMotion {
+  enum Action { ACTION_UNSPECIFIED = 0; START = 1; FINISH = 2; ORDINARY_JUMP = 3; REQUEST = 4; }
+  Action action = 1;
+  int32 entity_id = 2;
+  string effect_id = 3;
+  double x = 4;
+  double y = 5;
+  double z = 6;
+  double velocity_x = 7;
+  double velocity_y = 8;
+  double velocity_z = 9;
+  double landing_y = 10;
+  int64 ready_tick = 11; // FINISH：服务端世界时间达到该值后才能再次起跳
+}
+// 服务端僵直的显示副本；剩余 0 表示僵直结束。判定只以服务端身体时钟为准。
+message StaggerStatus {
+  int32 entity_id = 1;
+  int64 remaining_millis = 2;
+}
 enum PresentationDuration {
   PRESENTATION_DURATION_UNSPECIFIED = 0;
   ONCE = 1;
   UNTIL_RECOVERY_END = 2;
 }
-message PresentationEffect { string id = 1; PresentationDuration duration = 2; }
+message PresentationEffect {
+  string id = 1;
+  PresentationDuration duration = 2;
+  int64 start_millis = 3; // 剪辑起播毫秒，缺省为 0
+}
+enum StrikeShape {
+  STRIKE_SHAPE_UNSPECIFIED = 0;
+  SINGLE_TARGET = 1;
+  SECTOR = 2;
+}
+message WeaponStrike {
+  StrikeShape shape = 1;
+  Quantity distance = 2; // METER，(0, 1024]
+  Quantity angle = 3; // DEGREE，扇形 (0, 360]；单体固定 60 度后备锥
+  Quantity facing_offset = 4; // DEGREE，[-180, 180]，相对打击时朝向
+  Quantity multiplier = 5; // RATIO，(0, 10]
+  optional int32 maximum_targets = 6; // 本次打击上限，单体必须为 1
+  optional int32 cast_target_limit = 7; // 整次施放不同目标共享上限，各次打击必须一致
+  Quantity knockback = 8; // RATIO，[0, 10]，交由宿主换算击退
+  optional bool can_two_hand = 9;
+  Quantity two_hand_multiplier = 10; // RATIO，不能双手时为 1
+  optional bool break_shield = 11; // 配合命中物品类别的 shield_interaction
+  optional InjuryKind injury_override = 12; // 缺省沿用物品类别；叩击可声明 BLUNT
+  optional bool last_strike = 13; // 最后一次打击扣耐久，挥空也扣
+  optional int32 durability_base = 14; // 各次打击一致，乘书级耐久倍率
+  optional int64 shield_cooldown_millis = 15; // break_shield=false 时为 0
+  optional int64 shield_break_millis = 16; // BREAK_BEFORE_HIT 使用；与挡后冷却分别配置
+  string dedup_group = 17; // 必填局部标识，同次施放内同组每目标只命中一次
+}
+message BreakBlocks {
+  Quantity forward_distance = 1; // METER，(0, 1024]
+  Quantity width = 2; // METER，(0, 1024]
+  repeated string block_tags = 3; // 任一命中；宿主归并门上下两半
+  optional int32 maximum_doors = 4;
+}
+message WeaponStrikeIntent {
+  WeaponStrike strike = 1;
+  HeldItemRules held_item_rules = 2; // 按打击时选定手的当前物品重新匹配
+  repeated SoundCue hit_sounds = 3; // 并入的 TARGET 声音，在每个真正受伤的目标处各播一次
+}
+message BreakBlocksIntent {
+  BreakBlocks blocks = 1;
+  HeldItemRules held_item_rules = 2;
+}
+message FollowUp {
+  TechniqueReference previous = 1;
+  Quantity recovery_start_ratio = 2; // RATIO，[0, 1]；后半段填 0.5
+  optional int64 after_recovery_millis = 3; // 结束后窗口；设计值 500
+  optional int64 start_millis = 4; // 后式跳过的预备剪辑毫秒，必须小于起手时长
+}
+message FollowUpRules {
+  repeated FollowUp transitions = 1;
+  bool only_follow_up = 2;
+}
 message TechniqueEffect {
   optional int64 at_millis = 1; // 相对起手的生效时刻，非负且不晚于收势结束
   oneof operation {
     TissueModifier tissue_modifier = 2;
     Impulse impulse = 3;
     PresentationEffect presentation = 4;
+    WeaponStrike weapon_strike = 5;
+    BreakBlocks break_blocks = 6;
+    StatusBenefit status_benefit = 7;
+    SoundCue sound = 8;
   }
 }
 message Presentation {
   string icon_id = 1;
   string description = 2;
   string particle_id = 3;
-  string sound_id = 4;
+  string sound_id = 4; // 已废弃，必须为空；声音改用 TechniqueEffect.sound
+  string display_name = 5; // 无语言条目时使用的式名，不使用资源 ID 作为名称
 }
 message AiHints {
   Quantity minimum_distance = 1; // m，[0, 1024]
@@ -124,6 +333,30 @@ message AiHints {
   Quantity maximum_hp_ratio = 3; // [0, 1]
   Quantity minimum_qi_ratio = 4;
   Quantity category_weight = 5; // [0, 100]
+  CombatAiHints combat = 6;
+  SupportAiHints support = 7; // 可缺省；设了 role 的式不进打击选式，由宿主大脑按角色施放
+}
+enum AiRole {
+  AI_ROLE_UNSPECIFIED = 0; // 打击式，按情境评分选择
+  AI_ROLE_PREPARE = 1;     // 接敌前准备；类别须为 BUFF
+  AI_ROLE_RECOVER = 2;     // 远离威胁时恢复；类别须为 RECOVERY
+  AI_ROLE_REPOSITION = 3;  // 取得机动状态，用于突击与拉扯
+}
+message SupportAiHints {
+  AiRole role = 1;
+  optional int32 order = 2;                        // 同角色先后，小者先放，[0, 100]，缺省 0
+  Quantity minimum_fatigue_ratio = 3;              // 可缺省；RATIO，[0, 1]，所绑定肌肉疲劳比达到此值才放
+  optional bool requires_melee_weapon = 4;         // 主手须为近战武器
+  optional int64 refresh_before_expiry_millis = 5; // 本式给予的状态剩余不超过此值时补放，[0, 86400000]
+}
+message CombatAiHints {
+  Quantity target_shielding_weight = 1; // 可缺省；RATIO，[0, 100]，命中情境时乘权重
+  Quantity surrounded_weight = 2;
+  Quantity under_attack_weight = 3;
+  Quantity pursued_weight = 4;
+  optional int64 maximum_warmup_under_attack_millis = 5;
+  Quantity maximum_long_warmup_distance = 6; // 与 long_warmup_millis 同时提供
+  optional int64 long_warmup_millis = 7;
 }
 message TechniqueDefinition {
   string id = 1;
@@ -133,10 +366,14 @@ message TechniqueDefinition {
   repeated TechniqueSlot slots = 5;
   TechniqueCost cost = 6;
   CastPhases phases = 7;
-  optional int64 cooldown_millis = 8; // 从起手计时，[0, 86400000]
+  optional int64 cooldown_millis = 8; // 从收势结束计时；提前终止从终止时刻计时，[0, 86400000]
   repeated TechniqueEffect effects = 9; // 按 at_millis 非递减排序，同刻保持声明顺序
   AiHints ai_hints = 10;
   Presentation presentation = 11;
+  reserved 12;
+  reserved "lock_movement";
+  FollowUpRules follow_up = 13;
+  optional double movement_speed_multiplier = 14; // (0,1]，缺省为 1；全程限速，不缩放冲量
 }
 
 enum TechniqueFailure {
@@ -157,6 +394,11 @@ enum TechniqueFailure {
   FRAMEWORK_REJECTED = 14;
   INVALID_REQUEST = 15;
   NO_HOST = 16; // 宿主发现由后续 Fabric 服务负责
+  HELD_ITEM_REQUIRED = 17;
+  HELD_ITEM_UNUSABLE = 18;
+  FOLLOW_UP_REQUIRED = 19;
+  FOLLOW_UP_UNAVAILABLE = 20;
+  STAGGERED = 21; // 受击僵直未到期，不能起新式
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -175,8 +417,13 @@ message CastRequest {
   string target_id = 3; // 可空，宿主解释；请求不能携带费用、效果剂量或学会记录
   string cast_id = 4; // 身体内唯一；[A-Za-z0-9_-]，1–64 字符
   HorizontalDirection direction = 5;
+  CastEntry entry = 6; // AUTO 自动承接可用窗口，否则普通起手；FOLLOW_UP 强制要求窗口
 }
-// 只传水平输入方向，不表示速度；分量须为有限数。缺省或全零由宿主取施放者朝向。
+enum CastEntry {
+  AUTO = 0;
+  FOLLOW_UP = 1;
+}
+// 只传水平输入方向，不表示速度；分量须为有限数。缺省或全零使用冲量声明的默认方向。
 message HorizontalDirection { double x = 1; double z = 2; }
 enum PresentationAction {
   PRESENTATION_ACTION_UNSPECIFIED = 0;
@@ -184,15 +431,36 @@ enum PresentationAction {
   START = 2;
   STOP = 3;
 }
-message PresentationIntent { string id = 1; PresentationAction action = 2; }
-// 世界效果只交给宿主，不包含身体修正；当前仅定义并校验，不分发。
+message PresentationIntent {
+  string id = 1;
+  PresentationAction action = 2;
+  int64 start_millis = 3; // STOP 必须为 0
+}
+enum MovementAction {
+  MOVEMENT_ACTION_UNSPECIFIED = 0;
+  LOCK = 1; // 应用施放移动倍率；保留稳定操作身份，不再锁死移动
+  UNLOCK = 2;
+}
+message MovementIntent {
+  MovementAction action = 1;
+  optional double movement_speed_multiplier = 2; // LOCK 为 (0,1]，缺省 1；UNLOCK 不携带倍率
+}
+// 世界效果只交给宿主，不包含身体修正。
 message EffectIntent {
   string cast_id = 1;
   string target_id = 2;
   HorizontalDirection direction = 3;
+  string effect_id = 4; // 施放内稳定 ID，独立于 tick 批次；同一 ID 重试不得重复执行
+  Hand selected_hand = 5; // 施放起手选定；无持物规则时未指定
+  int64 scheduled_millis = 6; // 权威身体时钟；迟到 tick 不改变原生效时刻
   oneof operation {
     Impulse impulse = 10;
     PresentationIntent presentation = 11;
+    MovementIntent movement = 12;
+    WeaponStrikeIntent weapon_strike = 13;
+    BreakBlocksIntent break_blocks = 14;
+    StatusBenefit status_benefit = 15;
+    SoundCue sound = 16; // 只承载 CASTER，由功法服务交给声音监听者，不提交宿主
   }
 }
 message TechniqueHostRequest {
@@ -211,6 +479,7 @@ message TechniqueActivityCommit {
 }
 message TechniqueHostResponse {
   string request_id = 1;
+  HeldItems held_items = 2; // body 回执必须携带，与身体同一次 inspect 采集
   oneof result {
     bool unbound = 10;
     kizuna.meridian.v1.BodySnapshot body = 11;
@@ -254,10 +523,28 @@ message ActiveCast {
   string action_instance_id = 6;
   TechniqueBinding binding = 7;
   optional bool interruptible_by_damage = 8;
+  Hand selected_hand = 9;
+  reserved 10;
+  reserved "lock_movement";
+  optional int64 cooldown_millis = 11; // 固定本次冷却长度，缺省的旧存档保留原冷却
+  repeated TechniqueEffect presentations = 12; // 保留停止所需的表现声明，目录卸载后仍可清理
+  int64 clip_start_millis = 13;
+  HeldItemRules held_item_rules = 14;
+  repeated EffectIntent predecessor_cleanup = 15; // 原式清理与新起手同次保存，可稳定重试
+  optional double movement_speed_multiplier = 16; // 固定本次限速，缺省为 1
+}
+message LastCast {
+  TechniqueReference technique = 1;
+  string cast_id = 2;
+  int64 active_end_millis = 3;
+  int64 recovery_end_millis = 4; // 保留正常边界，提前承接不提前开始前式冷却
+  CastPhase ending = 5; // 只有 FINISHED 可用于收势后的承接
 }
 message TechniqueProgress {
   int32 schema_version = 1; // 1；Any 的完整大小不得超过 Framework 的 64 KiB 上限
   repeated KnownTechnique known = 2;
   map<string, int64> cooldowns = 3; // 功法 ID → 冷却结束的身体毫秒，跨版本共用冷却
   ActiveCast active_cast = 4; // 至多一个；结束后清除，知识与冷却保留
+  map<string, int64> curve_ends = 5; // 功法 ID → 已提交修正的最晚到期；提前终止也不撤销
+  LastCast last_cast = 6;
 }

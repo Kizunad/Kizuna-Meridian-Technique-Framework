@@ -18,6 +18,7 @@ dependencies {
     include project(':shared')
     include implementation('local.meridian:server')
     include implementation('com.google.protobuf:protobuf-java:4.36.2')
+    testImplementation 'junit:junit:4.13.2'
 }
 
 test { useJUnit() }
@@ -25,6 +26,15 @@ test { useJUnit() }
 processResources {
     inputs.property 'version', project.version
     filesMatching('fabric.mod.json') { expand version: project.version }
+}
+
+// Loom 只按坐标复用 modprocessing 里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧 server/shared JAR 打进发布 JAR；
+// 每次打发布 JAR 前清掉该缓存，让 include 的 JAR 按当前产物重新生成。
+def clearNestedJarCache = tasks.register('clearNestedJarCache', Delete) {
+    delete layout.buildDirectory.dir('loom-cache/temp/modprocessing')
+}
+tasks.named('remapJar') {
+    dependsOn clearNestedJarCache
 }
 
 loom {
@@ -39,6 +49,10 @@ loom {
 }
 
 sourceSets {
+    clientTest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
     gametest {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output + project(':server').sourceSets.test.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output + project(':server').sourceSets.test.output
@@ -48,8 +62,22 @@ sourceSets {
 loom {
     mods {
         meridian_technique_test { sourceSet sourceSets.gametest }
+        meridian_technique_client_test { sourceSet sourceSets.clientTest }
     }
     runs {
+        clientTest {
+            client()
+            source sourceSets.clientTest
+            runDir 'build/clienttest'
+            programArgs '--quickPlaySingleplayer', 'scroll-screen-test', '--width', '1280', '--height', '960'
+        }
+        leapClientTest {
+            client()
+            source sourceSets.clientTest
+            runDir 'build/leapclienttest'
+            programArgs '--quickPlaySingleplayer', 'leap-test', '--width', '1280', '--height', '960'
+            vmArg '-Dmeridian.leapClientTest=true'
+        }
         gametest {
             server()
             name 'Meridian Technique GameTest'
@@ -57,6 +85,55 @@ loom {
             runDir 'build/gametest'
             vmArg '-Dfabric-api.gametest'
             vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
+        }
+    }
+}
+
+// 客户端阅读验收读取实际内容包；服务端测试继续使用独立目录夹具。
+if (providers.gradleProperty('scrollFullAssembly').isPresent()) {
+    apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
+    dependencies {
+        localRuntime files('../../Kizuna-Meridian-Human-Addon/client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar')
+    }
+}
+tasks.register('prepareClientTestWorld', Copy) {
+    from layout.buildDirectory.dir('gametest/world')
+    into layout.buildDirectory.dir('clienttest/saves/scroll-screen-test')
+    exclude 'session.lock'
+}
+tasks.named('runClientTest') {
+    dependsOn tasks.named('prepareClientTestWorld')
+    def report = layout.buildDirectory.file('clienttest-results.txt')
+    doFirst {
+        if (!providers.gradleProperty('scrollFullAssembly').isPresent()) {
+            throw new GradleException('卷轴客户端验收需要 -PscrollFullAssembly 完整装配')
+        }
+        report.get().asFile.text = 'success=false\n'
+    }
+    doLast {
+        if (!report.get().asFile.text.startsWith('success=true')) {
+            throw new GradleException("卷轴客户端验收失败：${report.get().asFile}")
+        }
+    }
+}
+
+tasks.register('prepareLeapClientWorld', Copy) {
+    from layout.buildDirectory.dir('gametest/world')
+    into layout.buildDirectory.dir('leapclienttest/saves/leap-test')
+    exclude 'session.lock'
+}
+tasks.named('runLeapClientTest') {
+    dependsOn tasks.named('prepareLeapClientWorld')
+    def report = layout.buildDirectory.file('leap-client-results.txt')
+    doFirst {
+        if (!providers.gradleProperty('scrollFullAssembly').isPresent()) {
+            throw new GradleException('跃步客户端验收需要 -PscrollFullAssembly 完整装配')
+        }
+        report.get().asFile.text = 'success=false\n'
+    }
+    doLast {
+        if (!report.get().asFile.text.startsWith('success=true')) {
+            throw new GradleException("跃步客户端验收失败：${report.get().asFile}")
         }
     }
 }

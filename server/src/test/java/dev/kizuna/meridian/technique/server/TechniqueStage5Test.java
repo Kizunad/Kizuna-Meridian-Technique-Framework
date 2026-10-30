@@ -111,8 +111,8 @@ public class TechniqueStage5Test {
     }
 
     @Test
-    public void lostHostRemovesSessionInsteadOfRetryingEveryTick() {
-        // 未认领和身体不存在都代表终止关系，后续 tick 不再访问旧宿主。
+    public void lostHostRetainsTerminationUntilHostAcceptsAgain() {
+        // 未认领不证明实体资源已销毁，宿主恢复后仍须结束原施放。
         for (TechniqueHostResponse.ResultCase refusal : List.of(TechniqueHostResponse.ResultCase.UNBOUND,
                 TechniqueHostResponse.ResultCase.FAILURE)) {
             ControlledHost endpoint = controlledHost(definition());
@@ -124,14 +124,17 @@ public class TechniqueStage5Test {
             service.tick();
             int exchanges = endpoint.exchanges;
             service.tick();
-            assertEquals(exchanges, endpoint.exchanges);
+            assertTrue(endpoint.exchanges > exchanges);
+            endpoint.refusal = TechniqueHostResponse.ResultCase.RESULT_NOT_SET;
+            service.tick();
+            assertFalse(TechniqueState.read(endpoint.host.current()).hasActiveCast());
             assertTrue(service.cancelOnUnload(ENTITY_UUID).isEmpty());
         }
     }
 
     @Test
-    public void lostHostDuringEffectOrRecoveryRemovesSession() {
-        // 失去认领既可能发生于读取，也可能发生于效果或收势提交。
+    public void lostHostDuringEffectOrRecoveryRetainsCleanup() {
+        // 效果或收势失去认领后保存取消责任，恢复访问时不补发业务效果。
         for (TechniqueHostRequest.OperationCase operation : List.of(TechniqueHostRequest.OperationCase.EFFECT,
                 TechniqueHostRequest.OperationCase.ACTIVITY)) {
             TechniqueDefinition definition = impulseDefinition();
@@ -144,14 +147,20 @@ public class TechniqueStage5Test {
             service.tick();
             int exchanges = endpoint.exchanges;
             service.tick();
-            assertEquals(exchanges, endpoint.exchanges);
+            if (operation == TechniqueHostRequest.OperationCase.ACTIVITY) {
+                assertTrue(endpoint.exchanges > exchanges);
+            }
+            endpoint.refusal = TechniqueHostResponse.ResultCase.RESULT_NOT_SET;
+            service.tick();
+            assertFalse(TechniqueState.read(endpoint.host.current()).hasActiveCast());
+            assertTrue(endpoint.host.effects.isEmpty());
             assertTrue(service.cancelOnUnload(ENTITY_UUID).isEmpty());
         }
     }
 
     @Test
-    public void temporaryRejectionRetriesButPermanentRejectionDropsSession() {
-        // 并发冲突保留游标允许重试，权限拒绝不会永久占用服务会话。
+    public void temporaryRejectionRetriesAndPermanentRejectionRetainsTermination() {
+        // 并发冲突重试业务，权限拒绝转入终止并保留责任直到宿主重新接受。
         ControlledHost endpoint = controlledHost(impulseDefinition());
         TechniqueService service = controlledService(endpoint, impulseDefinition());
         service.cast(ENTITY_UUID, request(endpoint.host.current(), "retry"));
@@ -168,7 +177,11 @@ public class TechniqueStage5Test {
         service.tick();
         int exchanges = endpoint.exchanges;
         service.tick();
-        assertEquals(exchanges, endpoint.exchanges);
+        assertTrue(endpoint.exchanges > exchanges);
+        endpoint.refusal = TechniqueHostResponse.ResultCase.RESULT_NOT_SET;
+        service.tick();
+        assertFalse(TechniqueState.read(endpoint.host.current()).hasActiveCast());
+        assertEquals(1, endpoint.host.effects.size());
     }
 
     @Test
@@ -289,8 +302,8 @@ public class TechniqueStage5Test {
     }
 
     @Test
-    public void serviceDamageInterruptClearsActiveCastWithoutRefund() {
-        // 服务级伤害入口清除起手动作，已支付的费用和冷却仍由 Framework 进度保留。
+    public void serviceStaggerInterruptClearsActiveCastWithoutRefund() {
+        // 服务级僵直入口清除起手动作，已支付的费用和冷却仍由 Framework 进度保留。
         TechniqueDefinition definition = definition();
         BodySnapshot initial = withProgress(body(Shape.TENDRIL), progress(definition));
         MemoryHost host = new MemoryHost(initial);
@@ -298,7 +311,7 @@ public class TechniqueStage5Test {
         CastOutcome cast = service.cast(ENTITY_UUID, request(initial, "damage_interrupt"));
         assertEquals(CastPhase.WARMUP, cast.getPhase());
 
-        CastOutcome interrupted = service.interruptByDamage(ENTITY_UUID).orElseThrow();
+        CastOutcome interrupted = service.stagger(ENTITY_UUID, HIT_STAGGER).orElseThrow();
         assertEquals(CastPhase.INTERRUPTED, interrupted.getPhase());
         assertFalse(TechniqueState.read(host.current()).hasActiveCast());
         assertEquals(COST_QI, host.store.environmentQi().totalQi(), QI_TOLERANCE);
@@ -368,10 +381,14 @@ public class TechniqueStage5Test {
     private static byte[] route(MemoryHost host, TechniqueHostRequest request) {
         // 三种操作分别返回身体、原子活动回执和世界效果确认。
         return switch (request.getOperationCase()) {
-            case INSPECT -> TechniqueProtocol.encodeHostResponse(TechniqueHostResponse.newBuilder()
-                    .setRequestId(request.getRequestId())
-                    .setBody(BodyProtobuf.toMessage(host.inspect()))
-                    .build());
+            case INSPECT -> {
+                TechniqueHost.Inspection inspection = host.inspect();
+                yield TechniqueProtocol.encodeHostResponse(TechniqueHostResponse.newBuilder()
+                        .setRequestId(request.getRequestId())
+                        .setBody(BodyProtobuf.toMessage(inspection.body()))
+                        .setHeldItems(inspection.heldItems())
+                        .build());
+            }
             case ACTIVITY -> {
                 TechniqueHost.Commit commit = host.submit(new TechniqueHost.Submission(request.getRequestId(),
                         request.getExpectedRevision(), request.getActivity()));

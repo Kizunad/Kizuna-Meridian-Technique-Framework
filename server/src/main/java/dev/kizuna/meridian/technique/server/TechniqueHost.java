@@ -3,7 +3,9 @@ package dev.kizuna.meridian.technique.server;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -13,8 +15,19 @@ import java.util.Optional;
 public interface TechniqueHost {
     String CALLER_ID = "meridian_technique:caster";
 
-    /** 先按旧动作结算至可信当前身体时刻，再返回权威不可变快照；不接受客户端时间。 */
-    BodySnapshot inspect();
+    /**
+     * 先按旧动作结算至可信当前身体时刻，再同时采集权威身体和两手物品。
+     * 不接受客户端提供的身体或物品事实。
+     */
+    Inspection inspect();
+
+    record Inspection(BodySnapshot body, HeldItems heldItems) {
+        public Inspection {
+            // 身体和双手事实来自同一次可信查询，缺少持物接入时明确拒绝。
+            Objects.requireNonNull(body);
+            TechniqueHeldItems.validate(heldItems);
+        }
+    }
 
     /**
      * 返回该身体、本库固定可信调用身份下已提交的活动；未提交返回 empty。
@@ -28,7 +41,7 @@ public interface TechniqueHost {
      */
     Commit submit(Submission submission);
 
-    /** 把冲量或表现交给实体宿主；本库不直接改世界。 */
+    /** 把冲量、表现或移动锁交给实体宿主；本库不直接改世界。 */
     EffectCommit submitEffect(EffectSubmission submission);
 
     record Submission(String requestId, long expectedRevision, BodyActivity activity) { }

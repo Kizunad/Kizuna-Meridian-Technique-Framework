@@ -6,6 +6,8 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 /** 附属状态只随身体快照保存，不另建知识、冷却或施放账本。 */
 public final class TechniqueState {
@@ -64,11 +66,36 @@ public final class TechniqueState {
         TechniqueValues.knownFields(progress);
         if (progress.getSchemaVersion() != TechniqueValues.SCHEMA_VERSION
                 || progress.getKnownCount() > MAX_KNOWN || progress.getCooldownsCount() > MAX_KNOWN
+                || progress.getCurveEndsCount() > MAX_KNOWN
                 || Any.pack(progress).getSerializedSize() > MAX_PROGRESS_BYTES) {
             throw TechniqueErrors.invalid(KEY, "进度版本不支持、记录数量或载荷大小超限");
         }
+        validateKnown(progress.getKnownList());
+        validateEndTimes(progress.getCooldownsMap(), "cooldowns");
+        validateEndTimes(progress.getCurveEndsMap(), "curve_ends");
+        if (progress.hasActiveCast()) {
+            validateActive(progress.getActiveCast());
+        }
+        if (progress.hasLastCast()) {
+            validateLastCast(progress.getLastCast());
+        }
+    }
+
+    private static void validateLastCast(LastCast last) {
+        // 最近施放事实不依赖仍在目录内，但其边界和结束原因必须可解释。
+        TechniqueProtocol.validateReference(last.getTechnique());
+        TechniqueValues.castId(last.getCastId());
+        if (last.getActiveEndMillis() < 0 || last.getRecoveryEndMillis() < last.getActiveEndMillis()
+                || (last.getEnding() != CastPhase.FINISHED && last.getEnding() != CastPhase.CANCELLED
+                        && last.getEnding() != CastPhase.INTERRUPTED)) {
+            throw TechniqueErrors.invalid("last_cast", "最近施放的边界或结束原因非法");
+        }
+    }
+
+    private static void validateKnown(List<KnownTechnique> records) {
+        // 已学记录按精确版本去重，同时校验来源、熟练度和身体时刻。
         var identities = new HashSet<TechniqueReference>();
-        for (KnownTechnique known : progress.getKnownList()) {
+        for (KnownTechnique known : records) {
             TechniqueProtocol.validateReference(known.getTechnique());
             TechniqueValues.quantity(known.getProficiency(), Unit.RATIO, 0, 1, "proficiency");
             TechniqueValues.id(known.getSource(), "known.source");
@@ -76,19 +103,21 @@ public final class TechniqueState {
                 throw TechniqueErrors.invalid("known", "学会记录重复或缺少合法学会时刻");
             }
         }
-        for (var cooldown : progress.getCooldownsMap().entrySet()) {
-            TechniqueValues.id(cooldown.getKey(), "cooldowns.id");
-            if (cooldown.getValue() < 0) {
-                throw TechniqueErrors.invalid("cooldowns", "冷却结束的身体时刻不能为负");
+    }
+
+    private static void validateEndTimes(Map<String, Long> times, String path) {
+        // 冷却和已提交曲线都按功法身份保存非负的身体结束时刻。
+        for (var entry : times.entrySet()) {
+            TechniqueValues.id(entry.getKey(), path + ".id");
+            if (entry.getValue() < 0) {
+                throw TechniqueErrors.invalid(path, "结束的身体时刻不能为负");
             }
-        }
-        if (progress.hasActiveCast()) {
-            validateActive(progress.getActiveCast());
         }
     }
 
     private static void validateActive(ActiveCast active) {
         // 固定三段边界允许缺包后收势，不需要重新读取可能升级的功法定义。
+        TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(active));
         TechniqueProtocol.validateCast(active.getRequest());
         long started = active.getStartedMillis();
         long warmupEnd = active.getWarmupEndMillis();
@@ -102,6 +131,8 @@ public final class TechniqueState {
             throw TechniqueErrors.invalid("active_cast", "施放边界、动作身份或绑定信息非法");
         }
         var slots = new HashSet<String>();
+        validateCastRules(active);
+        validateEntry(active);
         for (BoundSlot slot : active.getBinding().getSlotsList()) {
             TechniqueValues.localId(slot.getSlotId(), "binding.slot_id");
             if (!slots.add(slot.getSlotId()) || slot.getModuleValue() <= 0
@@ -109,6 +140,56 @@ public final class TechniqueState {
                     || new HashSet<>(slot.getModuleIdsList()).size() != slot.getModuleIdsCount()) {
                 throw TechniqueErrors.invalid("binding", "槽位重复、模块种类非法或模块身份重复");
             }
+        }
+    }
+
+    private static void validateEntry(ActiveCast active) {
+        // 持物规则和前式清理随新施放保存，恢复阶段只能重放停止或解锁。
+        TechniqueValues.millis(active.getClipStartMillis(), "clip_start_millis");
+        if (active.getHeldItemRules().getCategoriesCount() > 0) {
+            TechniqueHeldItems.validateRules(active.getHeldItemRules());
+        }
+        if (active.getPredecessorCleanupCount() > TechniqueValues.MAX_EFFECTS + 1) {
+            throw TechniqueErrors.invalid("predecessor_cleanup", "前式清理数量超限");
+        }
+        var identities = new HashSet<String>();
+        for (EffectIntent effect : active.getPredecessorCleanupList()) {
+            TechniqueProtocol.validateEffect(effect);
+            boolean stop = effect.hasPresentation()
+                    && effect.getPresentation().getAction() == PresentationAction.STOP;
+            boolean unlock = effect.hasMovement() && effect.getMovement().getAction() == MovementAction.UNLOCK;
+            if ((!stop && !unlock) || effect.getCastId().equals(active.getRequest().getCastId())
+                    || !identities.add(effect.getCastId() + "/" + effect.getEffectId())) {
+                throw TechniqueErrors.invalid(
+                        "predecessor_cleanup",
+                        "前式清理必须为不同身份的停止或解锁");
+            }
+        }
+    }
+
+    private static void validateCastRules(ActiveCast active) {
+        // 新增字段缺省兼容旧存档，已保存的新规则仍须满足目录边界。
+        if (active.getSelectedHand() == Hand.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("active_cast.selected_hand", "未知出手手位");
+        }
+        if (active.hasCooldownMillis()) {
+            TechniqueValues.millis(active.getCooldownMillis(), "active_cast.cooldown_millis");
+        }
+        if (active.getPresentationsCount() > TechniqueValues.MAX_EFFECTS) {
+            throw TechniqueErrors.invalid("active_cast.presentations", "表现数量超限");
+        }
+        long duration = active.getRecoveryEndMillis() - active.getStartedMillis();
+        long previous = 0;
+        for (TechniqueEffect effect : active.getPresentationsList()) {
+            PresentationEffect presentation = effect.getPresentation();
+            if (!effect.hasPresentation() || !effect.hasAtMillis() || effect.getAtMillis() < previous
+                    || effect.getAtMillis() > duration || presentation.getDurationValue() <= 0
+                    || presentation.getDuration() == PresentationDuration.UNRECOGNIZED) {
+                throw TechniqueErrors.invalid("active_cast.presentations", "表现声明非法");
+            }
+            TechniqueValues.id(presentation.getId(), "presentation.id");
+            TechniqueValues.millis(presentation.getStartMillis(), "presentation.start_millis");
+            previous = effect.getAtMillis();
         }
     }
 }

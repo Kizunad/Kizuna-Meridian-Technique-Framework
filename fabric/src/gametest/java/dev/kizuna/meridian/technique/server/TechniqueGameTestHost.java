@@ -5,6 +5,7 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -12,13 +13,51 @@ import static dev.kizuna.meridian.technique.server.Fixtures.*;
 
 /** 只在 GameTest 中提供目录和按真实实体 UUID 认领的内存身体宿主。 */
 public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, TechniqueRegistryEntrypoint {
+    static final String HELD_TECHNIQUE_ID = "sample:held";
+    static final String COMBAT_ID = "sample:combat";
+    static final String COMBAT_NEXT_ID = "sample:combat_next";
+    static final String COMBAT_VOLUME_ID = "sample:combat_volume";
+    private static final String COMBAT_BOOK_ID = "sample:combat_book";
     private static final String PRESENTATION_ID = "sample:stance";
     private static final Map<UUID, MemoryHost> HOSTS = new HashMap<>();
 
     @Override
     public TechniqueRegistry registry() {
         // 测试内容通过与生产相同的目录 entrypoint 装配，不提供全局安装旁路。
-        return Fixtures.registry(definitionWithEffects());
+        TechniqueDefinition held = HeldTechniqueFixtures.movementDefinition().toBuilder()
+                .setId(HELD_TECHNIQUE_ID)
+                .build();
+        return TechniqueRegistry.load(addons(), List.of(catalog(definitionWithEffects()),
+                HeldTechniqueFixtures.groupedCatalog(held), combatCatalog()));
+    }
+
+    private static TechniqueCatalog combatCatalog() {
+        // 独立测试书隔离同服其他旅程，承接引用仍通过真实目录校验。
+        TechniqueDefinition first = CombatTechniqueFixtures.first().toBuilder().setId(COMBAT_ID).build();
+        TechniqueDefinition originalNext = CombatTechniqueFixtures.next();
+        FollowUp transition = originalNext.getFollowUp().getTransitions(0).toBuilder()
+                .setPrevious(TechniqueRegistry.reference(first))
+                .build();
+        FollowUpRules rules = originalNext.getFollowUp().toBuilder().setTransitions(0, transition).build();
+        TechniqueDefinition next = originalNext.toBuilder()
+                .setId(COMBAT_NEXT_ID)
+                .setFollowUp(rules)
+                .build();
+        TechniqueBook book = TechniqueBook.newBuilder()
+                .setId(COMBAT_BOOK_ID)
+                .setHeldItemRules(HeldTechniqueFixtures.rules())
+                .build();
+        TechniqueVolume volume = TechniqueVolume.newBuilder()
+                .setId(COMBAT_VOLUME_ID)
+                .setBookId(COMBAT_BOOK_ID)
+                .addTechniques(TechniqueRegistry.reference(first))
+                .addTechniques(TechniqueRegistry.reference(next))
+                .build();
+        return catalog(first).toBuilder()
+                .addDefinitions(next)
+                .addBooks(book)
+                .addVolumes(volume)
+                .build();
     }
 
     static void bind(UUID entityUuid, MemoryHost host) {
@@ -59,7 +98,11 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
         // 按操作类型分别确认身体快照、原子活动和世界效果。
         var response = TechniqueHostResponse.newBuilder().setRequestId(request.getRequestId());
         switch (request.getOperationCase()) {
-            case INSPECT -> response.setBody(BodyProtobuf.toMessage(host.inspect()));
+            case INSPECT -> {
+                TechniqueHost.Inspection inspection = host.inspect();
+                response.setBody(BodyProtobuf.toMessage(inspection.body()));
+                response.setHeldItems(inspection.heldItems());
+            }
             case ACTIVITY -> {
                 TechniqueHost.Commit commit = host.submit(new TechniqueHost.Submission(request.getRequestId(),
                         request.getExpectedRevision(), request.getActivity()));

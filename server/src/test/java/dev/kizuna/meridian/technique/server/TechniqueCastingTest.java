@@ -65,7 +65,8 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.TENDRIL);
         CastRequest request = request(before, "A");
         TechniqueBinding binding = TechniqueBinder.bind(before, definition).getBinding();
-        var start = new TechniqueActivities.Start(before, definition, request, TechniqueState.read(before), binding);
+        var selection = new TechniqueActivities.CastBinding(binding, Hand.HAND_UNSPECIFIED);
+        var start = new TechniqueActivities.Start(before, definition, request, TechniqueState.read(before), selection);
         BodyActivity activity = TechniqueActivities.start(start);
         CapabilityModifier legacyModifier = activity.getAddModifiers(0).toBuilder()
                 .setId("meridian_technique:41/0")
@@ -104,7 +105,7 @@ public class TechniqueCastingTest {
         assertEquals(before.meridianStates().get(0).wallQi(), host.current().meridianStates().get(0).wallQi());
         TechniqueProgress state = TechniqueState.read(host.current());
         assertTrue(state.hasActiveCast());
-        assertEquals(COOLDOWN, state.getCooldownsOrThrow(TECHNIQUE_ID));
+        assertEquals(CAST_END + COOLDOWN, state.getCooldownsOrThrow(TECHNIQUE_ID));
         assertEquals(TechniqueState.read(before).getKnownList(), state.getKnownList());
     }
 
@@ -343,9 +344,9 @@ public class TechniqueCastingTest {
         restored.nowMillis = CAST_END;
         assertSuccess(casting.advance(restored), CastPhase.FINISHED);
         assertEquals(0, restored.current().actions().size());
-        restored.nowMillis = COOLDOWN - 1;
+        restored.nowMillis = CAST_END + COOLDOWN - 1;
         assertFailure(casting.cast(restored, request(before, "early")), COOLING_DOWN, "气息尚未平复");
-        restored.nowMillis = COOLDOWN;
+        restored.nowMillis = CAST_END + COOLDOWN;
         assertSuccess(casting.cast(restored, request(before, "ready")), CastPhase.WARMUP);
         assertEquals(COST_QI + COST_QI, restored.store.environmentQi().totalQi(), TOLERANCE);
     }
@@ -359,7 +360,7 @@ public class TechniqueCastingTest {
         assertSuccess(casting.cast(host, request(before, "interrupted")), CastPhase.WARMUP);
         BodySnapshot paid = host.current();
         ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
-        assertSuccess(casting.interruptByDamage(host, active.getStartedMillis() - 1).outcome(),
+        assertSuccess(casting.interruptByStagger(host, active.getStartedMillis() - 1).outcome(),
                 CastPhase.INTERRUPTED);
         assertEquals(paid.totalQi(), host.current().totalQi(), 0);
         assertEquals(paid.tissueStates(), host.current().tissueStates());
@@ -383,14 +384,14 @@ public class TechniqueCastingTest {
         var casting = new TechniqueCasting(registry(uninterruptible));
         assertSuccess(casting.cast(host, request(host.current(), "steady")), CastPhase.WARMUP);
         ActiveCast steadyActive = TechniqueState.read(host.current()).getActiveCast();
-        assertSuccess(casting.interruptByDamage(host, steadyActive.getStartedMillis() - 1).outcome(),
+        assertSuccess(casting.interruptByStagger(host, steadyActive.getStartedMillis() - 1).outcome(),
                 CastPhase.WARMUP);
         var regular = new TechniqueCasting(registry(base));
         var regularHost = new MemoryHost(body);
         assertSuccess(regular.cast(regularHost, request(regularHost.current(), "boundary")), CastPhase.WARMUP);
         ActiveCast regularActive = TechniqueState.read(regularHost.current()).getActiveCast();
         regularHost.nowMillis = WARMUP;
-        assertSuccess(regular.interruptByDamage(regularHost, regularActive.getStartedMillis() - 1).outcome(),
+        assertSuccess(regular.interruptByStagger(regularHost, regularActive.getStartedMillis() - 1).outcome(),
                 CastPhase.EFFECTIVE);
         regularHost.nowMillis = WARMUP + ACTIVE;
         assertSuccess(regular.advance(regularHost), CastPhase.RECOVERING);
@@ -411,7 +412,7 @@ public class TechniqueCastingTest {
         var casting = new TechniqueCasting(registry(definition));
         assertSuccess(casting.cast(host, request(host.current(), "instant")), CastPhase.RECOVERING);
         ActiveCast active = TechniqueState.read(host.current()).getActiveCast();
-        assertSuccess(casting.interruptByDamage(host, active.getStartedMillis() - 1).outcome(),
+        assertSuccess(casting.interruptByStagger(host, active.getStartedMillis() - 1).outcome(),
                 CastPhase.RECOVERING);
         host.nowMillis = RECOVERY;
         assertSuccess(casting.advance(host), CastPhase.FINISHED);
@@ -476,7 +477,7 @@ public class TechniqueCastingTest {
         // 死亡身体必须清空所有资源，使用核心死亡算子生成合法状态。
         var deadHost = new MemoryHost(before);
         deadHost.nowMillis = java.util.concurrent.TimeUnit.SECONDS.toMillis((long) LIFESPAN);
-        BodySnapshot deadBody = deadHost.inspect();
+        BodySnapshot deadBody = deadHost.inspect().body();
         CastRequest deadRequest = request(deadBody, "dead");
         assertFailure(casting.cast(new MemoryHost(deadBody), deadRequest), BODY_UNAVAILABLE, "无法运功");
         assertEquals(TechniqueState.read(before).getKnownList(), TechniqueState.read(deadBody).getKnownList());
@@ -544,8 +545,9 @@ public class TechniqueCastingTest {
         assertEquals(FailureCode.ACCESS_DENIED, failure.getFrameworkFailure());
         assertEquals(before, host.current());
         BindingOutcome binding = TechniqueBinder.bind(before, definition);
+        var selection = new TechniqueActivities.CastBinding(binding.getBinding(), Hand.HAND_UNSPECIFIED);
         var start = new TechniqueActivities.Start(before, definition, request(before, "stale"),
-                TechniqueState.read(before), binding.getBinding());
+                TechniqueState.read(before), selection);
         BodyActivity activity = TechniqueActivities.start(start);
         var stale = new TechniqueHost.Submission("stale", before.revision() + 1, activity);
         TechniqueErrors.HostRejected rejected = assertThrows(TechniqueErrors.HostRejected.class,
@@ -579,7 +581,7 @@ public class TechniqueCastingTest {
         master.nowMillis = CAST_END;
         assertSuccess(casting.advance(master), CastPhase.FINISHED);
         master.nowMillis = WARMUP + CURVE_END;
-        assertTrue(master.inspect().modifiers().isEmpty());
+        assertTrue(master.inspect().body().modifiers().isEmpty());
         for (var receipt : master.store.receipts()) {
             BodyActivity activity = receipt.getCommand().getExecuteActivity();
             if (activity.getStartActionsCount() > 0) {

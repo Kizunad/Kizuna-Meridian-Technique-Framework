@@ -17,6 +17,10 @@ import static dev.kizuna.meridian.technique.server.TechniqueValues.*;
 final class TechniqueDefinitions {
     private static final int MIN_CURVE_POINTS = 2;
     private static final int MAX_CURVE_POINTS = 16;
+    private static final int MAX_SUPPORT_ORDER = 100;
+    private static final Map<AiRole, Category> SUPPORT_CATEGORIES = Map.of(
+            AiRole.AI_ROLE_PREPARE, Category.BUFF,
+            AiRole.AI_ROLE_RECOVER, Category.RECOVERY);
 
     private TechniqueDefinitions() {
         // 校验器不对宿主或 Framework 施加修正。
@@ -32,11 +36,14 @@ final class TechniqueDefinitions {
             throw TechniqueErrors.invalid(definition.getId(), "版本、类别或最低境界非法");
         }
         validateTiming(definition);
+        TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
         validateCosts(addons, slots, definition);
         validateEffects(slots, definition);
+        TechniqueCombatEffects.validateSequence(definition);
+        TechniqueSoundCues.validateTargets(definition);
         if (definition.hasAiHints()) {
-            validateAiHints(definition.getAiHints());
+            validateAiHints(definition.getCategory(), definition.getAiHints());
         }
         if (definition.hasPresentation()) {
             validatePresentation(definition.getPresentation());
@@ -142,7 +149,7 @@ final class TechniqueDefinitions {
             if (!slot.getRequireOpened() || slot.getMinimumCount() == 0) {
                 throw TechniqueErrors.invalid(qi.getSlotId(), "扣费经脉必须已开拓且不可缺省");
             }
-            validateSymbol(addons, qi.getAttribute(), ContentSymbolKind.QI_ATTRIBUTE);
+            validateQiMatching(addons, qi);
             if (qi.getPhaseValue() <= 0 || qi.getPhase() == BodyMessages.QiPhase.UNRECOGNIZED) {
                 throw TechniqueErrors.invalid("cost.qi.phase", "未知相态");
             }
@@ -160,6 +167,19 @@ final class TechniqueDefinitions {
         }
         for (WorkCost work : cost.getWorkList()) {
             validateWork(slots, work);
+        }
+    }
+
+    private static void validateQiMatching(AddonRegistry addons, QiCost cost) {
+        // 旧目录保持精确匹配，任意属性模式拒绝同时填写属性以免产生两种解释。
+        switch (cost.getMatching()) {
+            case EXACT_VARIANT -> validateSymbol(addons, cost.getAttribute(), ContentSymbolKind.QI_ATTRIBUTE);
+            case ANY_ATTRIBUTE_AT_LEAST_PHASE -> {
+                if (!cost.getAttribute().isEmpty()) {
+                    throw TechniqueErrors.invalid("cost.qi.attribute", "任意属性匹配时属性必须为空");
+                }
+            }
+            default -> throw TechniqueErrors.invalid("cost.qi.matching", "未知费用匹配方式");
         }
     }
 
@@ -197,9 +217,18 @@ final class TechniqueDefinitions {
             switch (effect.getOperationCase()) {
                 case TISSUE_MODIFIER -> validateModifier(slots, definition, effect);
                 case IMPULSE -> validateImpulse(effect.getImpulse());
+                case STATUS_BENEFIT -> {
+                    TechniqueBenefits.validate(effect.getStatusBenefit());
+                    validateWork(slots, effect.getStatusBenefit().getLeap().getWork());
+                    requireSlot(slots, effect.getStatusBenefit().getLeap().getWork().getSlotId(), ModuleKind.TISSUE);
+                }
+                case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
+                case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
+                case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
                 case PRESENTATION -> {
                     PresentationEffect presentation = effect.getPresentation();
                     id(presentation.getId(), "effect.presentation.id");
+                    millis(presentation.getStartMillis(), "effect.presentation.start_millis");
                     if (presentation.getDurationValue() <= 0
                             || presentation.getDuration() == PresentationDuration.UNRECOGNIZED) {
                         throw TechniqueErrors.invalid("effect.presentation.duration", "未知表现持续规则");
@@ -226,7 +255,8 @@ final class TechniqueDefinitions {
         }
         long endOffsetMillis = last.getOffsetMillis();
         if (endOffsetMillis > MAX_CURVE_MILLIS
-                || endOffsetMillis > definition.getCooldownMillis() - effect.getAtMillis()) {
+                || endOffsetMillis > durationMillis(definition.getPhases())
+                        + definition.getCooldownMillis() - effect.getAtMillis()) {
             throw TechniqueErrors.invalid("tissue_modifier.curve", "修正曲线结束晚于冷却结束或超过曲线上限");
         }
         double[] peaks = {
@@ -262,10 +292,18 @@ final class TechniqueDefinitions {
         if (impulse.getDirectionValue() <= 0 || impulse.getDirection() == ImpulseDirection.UNRECOGNIZED) {
             throw TechniqueErrors.invalid("impulse.direction", "未知冲量方向");
         }
+        if (impulse.hasInputDefaultDirection()
+                && (impulse.getDirection() != ImpulseDirection.INPUT
+                        || (impulse.getInputDefaultDirection() != ImpulseDirection.FORWARD
+                                && impulse.getInputDefaultDirection() != ImpulseDirection.BACKWARD))) {
+                throw TechniqueErrors.invalid(
+                        "impulse.input_default_direction",
+                        "仅 INPUT 可声明向前或向后缺省方向");
+        }
         positive(impulse.getSpeed(), Unit.METERS_PER_SECOND, MAX_SPEED, "impulse.speed");
     }
 
-    private static void validateAiHints(AiHints hints) {
+    private static void validateAiHints(Category category, AiHints hints) {
         // 提示仅作为数据保存，熟练度与提示均不参与费用、倍率或阶段时长计算。
         double minimum = quantity(hints.getMinimumDistance(), Unit.METER, 0, MAX_DISTANCE, "minimum_distance");
         double maximum = quantity(hints.getMaximumDistance(), Unit.METER, 0, MAX_DISTANCE, "maximum_distance");
@@ -275,12 +313,65 @@ final class TechniqueDefinitions {
         quantity(hints.getMaximumHpRatio(), Unit.RATIO, 0, 1, "maximum_hp_ratio");
         quantity(hints.getMinimumQiRatio(), Unit.RATIO, 0, 1, "minimum_qi_ratio");
         quantity(hints.getCategoryWeight(), Unit.RATIO, 0, MAX_WEIGHT, "category_weight");
+        validateCombatHints(hints.getCombat());
+        if (hints.hasSupport()) {
+            validateSupportHints(category, hints.getSupport());
+        }
+    }
+
+    private static void validateSupportHints(Category category, SupportAiHints hints) {
+        // 角色必须显式；准备式须为增益类、恢复式须为恢复类，打击式不能被误标成辅助。
+        if (hints.getRoleValue() <= 0 || hints.getRole() == AiRole.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("support.role", "辅助角色必须显式且已定义");
+        }
+        Category required = SUPPORT_CATEGORIES.get(hints.getRole());
+        if (required != null && category != required) {
+            throw TechniqueErrors.invalid("support.role", hints.getRole() + " 要求类别为 " + required);
+        }
+        if (hints.hasOrder() && (hints.getOrder() < 0 || hints.getOrder() > MAX_SUPPORT_ORDER)) {
+            throw TechniqueErrors.invalid("support.order", "顺序必须位于 [0, " + MAX_SUPPORT_ORDER + "]");
+        }
+        if (hints.hasMinimumFatigueRatio()) {
+            quantity(hints.getMinimumFatigueRatio(), Unit.RATIO, 0, 1, "minimum_fatigue_ratio");
+        }
+        if (hints.hasRefreshBeforeExpiryMillis()) {
+            millis(hints.getRefreshBeforeExpiryMillis(), "refresh_before_expiry_millis");
+        }
+    }
+
+    private static void validateCombatHints(CombatAiHints hints) {
+        // 情境权重允许零值排除候选，时长和距离门槛必须成对声明。
+        if (hints.hasTargetShieldingWeight()) {
+            quantity(hints.getTargetShieldingWeight(), Unit.RATIO, 0, MAX_WEIGHT, "target_shielding_weight");
+        }
+        if (hints.hasSurroundedWeight()) {
+            quantity(hints.getSurroundedWeight(), Unit.RATIO, 0, MAX_WEIGHT, "surrounded_weight");
+        }
+        if (hints.hasUnderAttackWeight()) {
+            quantity(hints.getUnderAttackWeight(), Unit.RATIO, 0, MAX_WEIGHT, "under_attack_weight");
+        }
+        if (hints.hasPursuedWeight()) {
+            quantity(hints.getPursuedWeight(), Unit.RATIO, 0, MAX_WEIGHT, "pursued_weight");
+        }
+        if (hints.hasMaximumWarmupUnderAttackMillis()) {
+            millis(hints.getMaximumWarmupUnderAttackMillis(), "maximum_warmup_under_attack_millis");
+        }
+        if (hints.hasMaximumLongWarmupDistance() != hints.hasLongWarmupMillis()) {
+            throw TechniqueErrors.invalid("combat", "长起手的距离和时长门槛须同时提供");
+        }
+        if (hints.hasLongWarmupMillis()) {
+            millis(hints.getLongWarmupMillis(), "long_warmup_millis");
+            quantity(hints.getMaximumLongWarmupDistance(), Unit.METER, 0, MAX_DISTANCE,
+                    "maximum_long_warmup_distance");
+        }
     }
 
     private static void validatePresentation(Presentation presentation) {
-        // 首版内容可以完全省略表现；提供资源身份时则必须格式合法。
-        for (String resource : new String[] {presentation.getIconId(), presentation.getParticleId(),
-                presentation.getSoundId()}) {
+        // 首版内容可以完全省略表现；提供资源身份时则必须格式合法。声音已改由效果时间线声明。
+        if (!presentation.getSoundId().isEmpty()) {
+            throw TechniqueErrors.invalid("presentation.sound_id", "已废弃，声音改用 effects.sound");
+        }
+        for (String resource : new String[] {presentation.getIconId(), presentation.getParticleId()}) {
             if (!resource.isEmpty()) {
                 id(resource, "presentation");
             }

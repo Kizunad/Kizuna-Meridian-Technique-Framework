@@ -1,0 +1,49 @@
+schema_version: 1
+namespace: "sample_scrolls"
+definitions {
+  id: "sample_scrolls:first"
+  version: 1
+  category: BUFF
+  minimum_realm: TRUE_QI
+  cost {}
+  phases {
+    warmup_millis: 0
+    active_millis: 1
+    recovery_millis: 0
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 0
+  presentation { description: "第一式" }
+}
+definitions {
+  id: "sample_scrolls:second"
+  version: 1
+  category: BUFF
+  minimum_realm: TRUE_QI
+  cost {}
+  phases {
+    warmup_millis: 0
+    active_millis: 1
+    recovery_millis: 0
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 0
+  presentation { description: "第二式" }
+}
+books {
+  id: "sample_scrolls:book"
+  display_name: "卷轴测试"
+}
+volumes {
+  id: "sample_scrolls:basic"
+  book_id: "sample_scrolls:book"
+  display_name: "基础卷"
+  techniques { id: "sample_scrolls:first" version: 1 }
+}
+volumes {
+  id: "sample_scrolls:advanced"
+  book_id: "sample_scrolls:book"
+  display_name: "进阶卷"
+  techniques { id: "sample_scrolls:second" version: 1 }
+  prerequisite_volume_ids: "sample_scrolls:basic"
+}

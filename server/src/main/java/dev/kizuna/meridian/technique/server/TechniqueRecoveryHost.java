@@ -13,4 +13,7 @@ public interface TechniqueRecoveryHost {
      * 返回实际提交版本；失败抛 TechniqueErrors.HostRejected，不发布部分结果。
      */
     long submitRecovery(String requestId, BodyCommand command);
+
+    /** 恢复时只提交停止表现与解锁；宿主以施放和效果身份幂等处理，允许死体清理。 */
+    TechniqueHost.EffectCommit submitEffect(TechniqueHost.EffectSubmission submission);
 }

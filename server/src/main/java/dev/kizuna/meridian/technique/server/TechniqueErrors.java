@@ -14,6 +14,11 @@ public final class TechniqueErrors {
         return new IllegalArgumentException(path + "：" + reason);
     }
 
+    static IllegalArgumentException at(String location, IllegalArgumentException cause) {
+        // 清单来源和条目位置附加在原始诊断之前，保留原因链。
+        return new IllegalArgumentException(location + "：" + cause.getMessage(), cause);
+    }
+
     static Rejected rejected(TechniqueFailure code) {
         // 运行拒绝只携带结构化原因码，玩家文本统一由 playerReason 生成。
         return new Rejected(code);
@@ -36,6 +41,11 @@ public final class TechniqueErrors {
             case FRAMEWORK_REJECTED -> "身体暂不听使唤";
             case INVALID_REQUEST -> "心意未定，无法运功";
             case NO_HOST -> "暂时无法运功";
+            case HELD_ITEM_REQUIRED -> "需要手持物品";
+            case HELD_ITEM_UNUSABLE -> "这件物品不能拿来劈";
+            case FOLLOW_UP_REQUIRED -> "这一式须借前一式的余势施展";
+            case FOLLOW_UP_UNAVAILABLE -> "承接的时机已过，先稳住架势";
+            case STAGGERED -> "僵直中";
             default -> "暂时无法运功";
         };
     }

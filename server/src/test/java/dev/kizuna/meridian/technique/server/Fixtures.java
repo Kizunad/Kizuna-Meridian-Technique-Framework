@@ -31,6 +31,9 @@ final class Fixtures {
     static final long ACTIVE = 200;
     static final long RECOVERY = 300;
     static final long COOLDOWN = 2000;
+    static final long STAGGER_MILLIS = 50;
+    static final double STAGGER_MOVEMENT = 0.5;
+    static final TechniqueService.Stagger HIT_STAGGER = new TechniqueService.Stagger(STAGGER_MILLIS, STAGGER_MOVEMENT);
     static final long CURVE_MIDDLE = 500;
     static final long CURVE_END = 1000;
     static final double PEAK = 1.3;

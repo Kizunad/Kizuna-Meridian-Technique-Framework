@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_technique_client_test",
+  "version": "1.0.0",
+  "name": "卷轴阅读客户端验收",
+  "environment": "client",
+  "mixins": ["meridian-technique-client-test.mixins.json"],
+  "entrypoints": {
+    "client": ["dev.kizuna.meridian.technique.fabric.client.TechniqueScrollClientTest",
+      "dev.kizuna.meridian.technique.fabric.client.TechniqueLeapClientTest"]
+  }
+}

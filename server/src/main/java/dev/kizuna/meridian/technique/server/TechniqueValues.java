@@ -92,25 +92,39 @@ final class TechniqueValues {
 
     static void knownFields(Message message) {
         // 未知 oneof 分支也会落入 unknown fields，递归拒绝可防止静默忽略新算子。
+        knownFields(message, message.getDescriptorForType().getName());
+    }
+
+    private static void knownFields(Message message, String location) {
+        // 嵌套消息保留完整字段路径和列表下标，清单错误能定位到具体条目。
         if (message.getSerializedSize() > TechniqueProtocol.MAX_PAYLOAD_BYTES) {
-            throw TechniqueErrors.invalid(message.getDescriptorForType().getName(), "消息大小超限");
+            throw TechniqueErrors.invalid(location, "消息大小超限");
         }
         if (!message.getUnknownFields().asMap().isEmpty()) {
-            throw TechniqueErrors.invalid(message.getDescriptorForType().getName(), "包含未知字段或算子");
+            throw TechniqueErrors.invalid(location, "包含未知字段或算子");
         }
-        for (Object value : message.getAllFields().values()) {
-            if (value instanceof Message nested) {
-                knownFields(nested);
-            } else if (value instanceof String text) {
-                validateText(text);
-            } else if (value instanceof List<?> values) {
-                for (Object item : values) {
-                    if (item instanceof Message nested) {
-                        knownFields(nested);
-                    } else if (item instanceof String text) {
-                        validateText(text);
-                    }
+        for (var field : message.getAllFields().entrySet()) {
+            String path = location + "." + field.getKey().getName();
+            Object value = field.getValue();
+            if (value instanceof List<?> values) {
+                for (int index = 0; index < values.size(); index++) {
+                    knownValue(values.get(index), path + "[" + index + "]");
                 }
+            } else {
+                knownValue(value, path);
+            }
+        }
+    }
+
+    private static void knownValue(Object value, String location) {
+        // 文本诊断与递归消息使用相同的位置约定。
+        if (value instanceof Message nested) {
+            knownFields(nested, location);
+        } else if (value instanceof String text) {
+            try {
+                validateText(text);
+            } catch (IllegalArgumentException exception) {
+                throw TechniqueErrors.at(location, exception);
             }
         }
     }

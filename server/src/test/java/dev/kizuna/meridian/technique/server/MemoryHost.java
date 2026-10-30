@@ -9,11 +9,17 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.*;
 import dev.kizuna.meridian.server.BodyCommandHandler;
 import dev.kizuna.meridian.server.InMemoryBodyStore;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItem;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Consumer;
 
 /** 假宿主负责内存持久化，费用结算仍由真实 Framework 处理器验证。 */
 final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
@@ -23,7 +29,15 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     long nowMillis;
     int activitySubmissions;
     final List<EffectIntent> effects = new ArrayList<>();
+    final Map<String, EffectIntent> effectReceipts = new LinkedHashMap<>();
+    HeldItems heldItems = HeldItems.newBuilder()
+            .setMainHand(HeldItem.getDefaultInstance())
+            .setOffHand(HeldItem.getDefaultInstance())
+            .setMainHandSide(HandSide.RIGHT)
+            .build();
     private FailureCode nextFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+    private FailureCode nextEffectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+    Consumer<EffectSubmission> effectObserver = submission -> { /* 默认不注入世界回调。 */ };
 
     MemoryHost(BodySnapshot body) {
         // 测试身份固定绑定一具身体，生产身份认证由具体宿主完成。
@@ -81,11 +95,11 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     }
 
     @Override
-    public BodySnapshot inspect() {
+    public Inspection inspect() {
         // 先按旧动作结时；TIME_NOT_ADVANCED 表示身体已经在同一时刻。
         BodySnapshot body = current();
         if (body.vitality().dead()) {
-            return body;
+            return new Inspection(body, heldItems);
         }
         BodyCommand command = BodyCommand.newBuilder()
                 .setBodyId(bodyId.value())
@@ -96,7 +110,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         if (response.hasFailure() && response.getFailure().getCode() != FailureCode.TIME_NOT_ADVANCED) {
             throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
         }
-        return current();
+        return new Inspection(current(), heldItems);
     }
 
     @Override
@@ -131,7 +145,20 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     @Override
     public EffectCommit submitEffect(EffectSubmission submission) {
         // 测试宿主只记录效果意图，实际世界变化仍由生产实体宿主负责。
+        if (nextEffectFailure != FailureCode.FAILURE_CODE_UNSPECIFIED) {
+            FailureCode failure = nextEffectFailure;
+            nextEffectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+            throw new TechniqueErrors.HostRejected(failure);
+        }
         TechniqueProtocol.validateEffect(submission.effect());
+        effectObserver.accept(submission);
+        EffectIntent previous = effectReceipts.putIfAbsent(submission.requestId(), submission.effect());
+        if (previous != null) {
+            if (!previous.equals(submission.effect())) {
+                throw new IllegalArgumentException("同一效果身份携带了不同意图");
+            }
+            return new EffectCommit(submission.requestId());
+        }
         effects.add(submission.effect());
         return new EffectCommit(submission.requestId());
     }
@@ -141,11 +168,19 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         nextFailure = FailureCode.ACCESS_DENIED;
     }
 
+    void rejectNextEffect() {
+        // 暂时拒绝世界效果用于验证服务不能越过尚未确认的前式批次。
+        nextEffectFailure = FailureCode.INTERNAL_ERROR;
+    }
+
     MemoryHost restore() {
         // 模拟快照二进制存档与回执恢复，释放账户也一起保留。
         BodySnapshot restored = BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(current()));
         var restoredStore = new InMemoryBodyStore(List.of(restored), store.receipts(), store.environmentQi());
-        return new MemoryHost(restoredStore, bodyId);
+        MemoryHost restoredHost = new MemoryHost(restoredStore, bodyId);
+        restoredHost.heldItems = heldItems;
+        restoredHost.effectReceipts.putAll(effectReceipts);
+        return restoredHost;
     }
 
     private TimeAdvancePlan timePlan(BodySnapshot body) {

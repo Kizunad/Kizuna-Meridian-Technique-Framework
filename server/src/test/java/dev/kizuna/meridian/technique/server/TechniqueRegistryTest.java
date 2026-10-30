@@ -93,14 +93,20 @@ public class TechniqueRegistryTest {
         // 等于冷却边界合法；第二条曲线或生效延迟超出边界都必须被逐项发现。
         TechniqueDefinition base = definition();
         TissueModifier curve = modifier();
-        TechniqueEffect atBoundary = effect(curve, COOLDOWN - CURVE_END);
-        // 让施放持续到效果时刻，以便只检验冷却约束。
-        CastPhases phases = base.getPhases().toBuilder().setRecoveryMillis(COOLDOWN).build();
-        TechniqueDefinition valid = base.toBuilder().setPhases(phases).addEffects(atBoundary).build();
+        long castDuration = WARMUP + ACTIVE + RECOVERY;
+        TechniqueEffect atBoundary = effect(curve, castDuration);
+        CurvePoint boundaryEnd = point(COOLDOWN, 0);
+        TissueModifier boundaryCurve = curve.toBuilder().setCurve(curve.getCurveCount() - 1, boundaryEnd).build();
+        TechniqueEffect boundaryEffect = atBoundary.toBuilder().setTissueModifier(boundaryCurve).build();
+        TechniqueDefinition valid = base.toBuilder().addEffects(boundaryEffect).build();
         assertTrue(registry(valid).find(TechniqueRegistry.reference(valid)).isPresent());
-        TechniqueEffect delayed = atBoundary.toBuilder().setAtMillis(atBoundary.getAtMillis() + 1).build();
+        CurvePoint pastBoundary = point(COOLDOWN + 1, 0);
+        TissueModifier delayedCurve = boundaryCurve.toBuilder()
+                .setCurve(boundaryCurve.getCurveCount() - 1, pastBoundary)
+                .build();
+        TechniqueEffect delayed = boundaryEffect.toBuilder().setTissueModifier(delayedCurve).build();
         assertRejected(valid.toBuilder().addEffects(delayed).build(), "晚于冷却");
-        CurvePoint lateEnd = point(COOLDOWN + 1, 0);
+        CurvePoint lateEnd = point(castDuration + COOLDOWN + 1, 0);
         TissueModifier late = curve.toBuilder().setCurve(curve.getCurveCount() - 1, lateEnd).build();
         TechniqueEffect lateEffect = effect(late, 0);
         assertRejected(base.toBuilder().addEffects(lateEffect).build(), "晚于冷却");

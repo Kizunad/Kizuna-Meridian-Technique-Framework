@@ -15,6 +15,11 @@ import static org.junit.Assert.*;
 /** 异常退出和死亡恢复必须通过 Framework 保存，不能重复施加世界效果或退费。 */
 public class TechniqueRecoveryTest {
     private static final UUID ENTITY_UUID = UUID.randomUUID();
+    private static final long EARLY_RECOVERY_MILLIS = 50;
+    private static final long LATE_RECOVERY_MILLIS = 4000;
+    private static final long EARLY_COOLDOWN_END = 2050;
+    private static final long LATE_COOLDOWN_END = 6000;
+    private static final long NORMAL_COOLDOWN_END = 2600;
 
     @Test
     public void unclaimedLivingSaveRecoversOnceAndCanCastAgainAfterCooldown() {
@@ -28,7 +33,8 @@ public class TechniqueRecoveryTest {
         BodySnapshot recovered = restored.current();
         assertFalse(TechniqueState.read(recovered).hasActiveCast());
         assertTrue(recovered.actions().isEmpty());
-        assertEquals(progress.toBuilder().clearActiveCast().build(), TechniqueState.read(recovered));
+        assertEquals(COOLDOWN, (long) TechniqueState.read(recovered).getCooldownsOrThrow(definition().getId()));
+        assertEquals(progress.getKnownList(), TechniqueState.read(recovered).getKnownList());
         assertEquals(before.totalQi(), recovered.totalQi(), 0);
         assertEquals(before.revision() + 1, recovered.revision());
         assertTrue(restored.effects.isEmpty());
@@ -50,13 +56,69 @@ public class TechniqueRecoveryTest {
         var released = restored.store.environmentQi();
         service().recoverOnLoad(ENTITY_UUID, restored);
         assertTrue(restored.current().vitality().dead());
-        assertEquals(progress.toBuilder().clearActiveCast().build(), TechniqueState.read(restored.current()));
+        var recoveredProgress = TechniqueState.read(restored.current());
+        assertEquals(COOLDOWN, (long) recoveredProgress.getCooldownsOrThrow(definition().getId()));
+        assertEquals(progress.getKnownList(), recoveredProgress.getKnownList());
+        assertEquals(progress.getCurveEndsMap(), recoveredProgress.getCurveEndsMap());
         assertEquals(before.vitality(), restored.current().vitality());
         assertEquals(before.structure(), restored.current().structure());
         assertEquals(released, restored.store.environmentQi());
         assertFalse(TechniqueState.read(restored.restore().current()).hasActiveCast());
         assertTrue(restored.effects.isEmpty());
     }
+
+    @Test
+    public void livingRecoveryBeforeOriginalFinishUsesActualTerminationTime() {
+        // 早于原收势的取消从实际恢复时刻开始计冷却。
+        assertRecoveryCooldown(EARLY_RECOVERY_MILLIS, EARLY_COOLDOWN_END, SavedVitality.LIVING);
+    }
+
+    @Test
+    public void livingRecoveryAfterOriginalFinishUsesActualTerminationTime() {
+        // 晚恢复不能借用已经过去的原收势边界缩短冷却。
+        assertRecoveryCooldown(LATE_RECOVERY_MILLIS, LATE_COOLDOWN_END, SavedVitality.LIVING);
+    }
+
+    @Test
+    public void deadRecoveryBeforeOriginalFinishUsesActualTerminationTime() {
+        // 死体可信进度替换沿用与活体相同的取消时钟。
+        assertRecoveryCooldown(EARLY_RECOVERY_MILLIS, EARLY_COOLDOWN_END, SavedVitality.DEAD);
+    }
+
+    @Test
+    public void deadRecoveryAfterOriginalFinishUsesActualTerminationTime() {
+        // 死体晚恢复也保留完整取消冷却，不退回原收势时刻。
+        assertRecoveryCooldown(LATE_RECOVERY_MILLIS, LATE_COOLDOWN_END, SavedVitality.DEAD);
+    }
+
+    @Test
+    public void lateNormalFinishKeepsOriginalRecoveryBoundary() {
+        // 正常推进即使晚处理，仍从固定收势边界计冷却。
+        MemoryHost host = activeHost();
+        host.nowMillis = LATE_RECOVERY_MILLIS;
+        var result = new TechniqueCasting(registry(definition())).advance(host, 0);
+        assertEquals(CastPhase.FINISHED, result.outcome().getPhase());
+        assertEquals(NORMAL_COOLDOWN_END,
+                (long) TechniqueState.read(host.current()).getCooldownsOrThrow(definition().getId()));
+    }
+
+    private static void assertRecoveryCooldown(long recoveredMillis, long cooldownEnd, SavedVitality vitality) {
+        // 先通过真实结时保存时刻，再以新服务恢复，期望值全部来自独立具名常量。
+        MemoryHost original = activeHost();
+        original.nowMillis = recoveredMillis;
+        original.inspect();
+        if (vitality == SavedVitality.DEAD) {
+            original.die();
+        }
+        MemoryHost restored = original.restore();
+        service().recoverOnLoad(ENTITY_UUID, restored);
+        var recovered = TechniqueState.read(restored.current());
+        assertFalse(recovered.hasActiveCast());
+        assertEquals(CastPhase.CANCELLED, recovered.getLastCast().getEnding());
+        assertEquals(cooldownEnd, (long) recovered.getCooldownsOrThrow(definition().getId()));
+    }
+
+    private enum SavedVitality { LIVING, DEAD }
 
     @Test
     public void rejectedRecoveryRetainsResidualAndCanRetry() {
@@ -74,6 +136,12 @@ public class TechniqueRecoveryTest {
             public long submitRecovery(String requestId, BodyCommand command) {
                 // 模拟宿主在事务中检测到版本已经变化。
                 throw new TechniqueErrors.HostRejected(FailureCode.REVISION_CONFLICT);
+            }
+
+            @Override
+            public TechniqueHost.EffectCommit submitEffect(TechniqueHost.EffectSubmission submission) {
+                // 恢复清理复用真实测试宿主的幂等效果入口。
+                return host.submitEffect(submission);
             }
         };
         TechniqueService service = service();

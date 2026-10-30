@@ -7,8 +7,10 @@
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",
+  "mixins": ["meridian-technique.mixins.json"],
   "entrypoints": {
-    "main": ["dev.kizuna.meridian.technique.fabric.TechniqueFabric"]
+    "main": ["dev.kizuna.meridian.technique.fabric.TechniqueFabric"],
+    "client": ["dev.kizuna.meridian.technique.fabric.client.TechniqueScrollClient"]
   },
   "depends": {
     "java": ">=17",

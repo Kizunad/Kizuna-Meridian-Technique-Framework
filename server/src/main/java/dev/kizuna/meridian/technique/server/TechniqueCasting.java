@@ -34,34 +34,19 @@ public final class TechniqueCasting {
     }
 
     public CastOutcome cast(TechniqueHost host, CastRequest request) {
-        // 请求边界错误与损坏存档分别报告，避免把非法输入写入进度。
+        // 没有僵直记录的调用方等同于从未受击。
+        return cast(host, request, NO_PREVIOUS_MILLIS);
+    }
+
+    public CastOutcome cast(TechniqueHost host, CastRequest request, long staggeredUntilMillis) {
+        // 请求边界错误与损坏存档分别报告，避免把非法输入写入进度；僵直到期时刻使用身体时钟。
         try {
             TechniqueProtocol.validateCast(request);
         } catch (IllegalArgumentException exception) {
             return failure(request.getCastId(), INVALID_REQUEST);
         }
         try {
-            Optional<CastOutcome> previous = replay(host, request);
-            if (previous.isPresent()) {
-                return previous.get();
-            }
-            BodySnapshot body = host.inspect();
-            if (!body.id().value().equals(request.getBodyId())) {
-                throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
-            }
-            TechniqueProgress progress = TechniqueState.read(body);
-            Optional<CastOutcome> activeReplay = replayActive(body, progress, request);
-            if (activeReplay.isPresent()) {
-                return activeReplay.get();
-            }
-            TechniqueDefinition definition = requireCastable(body, progress, request);
-            BindingOutcome result = TechniqueBinder.bind(body, definition);
-            if (!result.hasBinding()) {
-                throw TechniqueErrors.rejected(result.getFailure());
-            }
-            var start = new TechniqueActivities.Start(body, definition, request, progress, result.getBinding());
-            BodyActivity activity = TechniqueActivities.start(start);
-            return submitStart(host, start, activity);
+            return startOrReplay(host, request, staggeredUntilMillis);
         } catch (TechniqueErrors.Rejected exception) {
             return failure(request.getCastId(), exception.code);
         } catch (TechniqueErrors.HostRejected exception) {
@@ -75,8 +60,57 @@ public final class TechniqueCasting {
         }
     }
 
-    private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request) {
-        // 先检查生命、目录与可信知识记录，再检查当前占用和身体时钟冷却。
+    private CastOutcome startOrReplay(TechniqueHost host, CastRequest request, long staggeredUntilMillis) {
+        // 持久回执与活动施放优先重放；新请求基于同一次宿主查询完成校验、绑定和提交。
+        Optional<CastOutcome> previous = replay(host, request);
+        if (previous.isPresent()) {
+            return previous.get();
+        }
+        TechniqueHost.Inspection inspection = host.inspect();
+        BodySnapshot body = inspection.body();
+        if (!body.id().value().equals(request.getBodyId())) {
+            throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
+        }
+        TechniqueProgress progress = TechniqueState.read(body);
+        Optional<CastOutcome> activeReplay = replayActive(body, progress, request);
+        if (activeReplay.isPresent()) {
+            return activeReplay.get();
+        }
+        TechniqueDefinition definition = requireCastable(body, progress, request, staggeredUntilMillis);
+        long clipStart = TechniqueFollowUps.clipStart(definition, progress, request,
+                body.settledAt().elapsedMillis());
+        TechniqueActivities.CastBinding selection = bindCast(definition, inspection, clipStart);
+        var start = new TechniqueActivities.Start(body, definition, request, progress, selection);
+        BodyActivity activity = TechniqueActivities.start(start);
+        return submitStart(host, start, activity);
+    }
+
+    private TechniqueActivities.CastBinding bindCast(TechniqueDefinition definition,
+                                                      TechniqueHost.Inspection inspection, long clipStart) {
+        // 身体绑定与选手都基于同一次宿主查询，任一失败都不能生成扣费活动。
+        BindingOutcome result = TechniqueBinder.bind(inspection.body(), definition);
+        if (!result.hasBinding()) {
+            throw TechniqueErrors.rejected(result.getFailure());
+        }
+        Hand hand = selectHand(definition, inspection.heldItems());
+        HeldItemRules rules = registry.bookOf(TechniqueRegistry.reference(definition))
+                .map(TechniqueBook::getHeldItemRules).orElse(HeldItemRules.getDefaultInstance());
+        var entry = new TechniqueActivities.Entry(clipStart, rules);
+        return new TechniqueActivities.CastBinding(result.getBinding(), hand, entry);
+    }
+
+    private Hand selectHand(TechniqueDefinition definition, HeldItems items) {
+        // 无书级持物声明的功法沿用空手语义，持物规则只从当前目录获取。
+        Optional<TechniqueBook> book = registry.bookOf(TechniqueRegistry.reference(definition));
+        if (book.isEmpty() || !book.get().hasHeldItemRules()) {
+            return Hand.HAND_UNSPECIFIED;
+        }
+        return TechniqueHeldItems.select(book.get().getHeldItemRules(), items);
+    }
+
+    private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request,
+                                                long staggeredUntilMillis) {
+        // 先检查生命、目录与可信知识记录，再检查受击僵直和身体时钟冷却。
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
             throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
         }
@@ -85,11 +119,13 @@ public final class TechniqueCasting {
         if (progress.getKnownList().stream().noneMatch(known -> known.getTechnique().equals(request.getTechnique()))) {
             throw TechniqueErrors.rejected(NOT_KNOWN);
         }
-        if (progress.hasActiveCast()) {
-            throw TechniqueErrors.rejected(ALREADY_CASTING);
-        }
         long cooldownEnd = progress.getCooldownsOrDefault(definition.getId(), 0);
-        if (body.settledAt().elapsedMillis() < cooldownEnd) {
+        long curveEnd = progress.getCurveEndsOrDefault(definition.getId(), 0);
+        long nowMillis = body.settledAt().elapsedMillis();
+        if (nowMillis < staggeredUntilMillis) {
+            throw TechniqueErrors.rejected(STAGGERED);
+        }
+        if (nowMillis < cooldownEnd || nowMillis < curveEnd) {
             throw TechniqueErrors.rejected(COOLING_DOWN);
         }
         return definition;
@@ -189,7 +225,7 @@ public final class TechniqueCasting {
         // 先读取已结算身体时钟，再由纯调度器生成意图，最后按需提交收势活动。
         String castId = "";
         try {
-            BodySnapshot body = host.inspect();
+            BodySnapshot body = host.inspect().body();
             TechniqueProgress progress = TechniqueState.read(body);
             long nowMillis = body.settledAt().elapsedMillis();
             if (!progress.hasActiveCast()) {
@@ -217,9 +253,9 @@ public final class TechniqueCasting {
         }
     }
 
-    public AdvanceResult interruptByDamage(TechniqueHost host, long previousMillis) {
-        // 伤害事实必须由可信宿主提供，仅起手窗口内允许打断。
-        return transition(host, Signal.DAMAGE, previousMillis);
+    public AdvanceResult interruptByStagger(TechniqueHost host, long previousMillis) {
+        // 僵直由伤害附属按命中剂量判定后传入；仅起手窗口内的可打断式被打断。
+        return transition(host, Signal.STAGGER, previousMillis);
     }
 
     public AdvanceResult cancelOnUnload(TechniqueHost host, long previousMillis) {
@@ -236,7 +272,7 @@ public final class TechniqueCasting {
         // 每次从权威进度恢复状态，库对象重建不会影响边界或动作身份。
         String castId = "";
         try {
-            BodySnapshot body = host.inspect();
+            BodySnapshot body = host.inspect().body();
             TechniqueProgress progress = TechniqueState.read(body);
             long nowMillis = body.settledAt().elapsedMillis();
             if (!progress.hasActiveCast()) {
@@ -273,7 +309,7 @@ public final class TechniqueCasting {
         // 正常收势与提前取消提交同一种原子活动，并返回实际读取到的身体时刻。
         ActiveCast active = progress.getActiveCast();
         String castId = active.getRequest().getCastId();
-        BodyActivity activity = TechniqueActivities.stop(progress);
+        BodyActivity activity = TechniqueActivities.stopAt(progress, body.settledAt().elapsedMillis(), ending);
         var submission = new TechniqueHost.Submission("technique_end_" + castId, body.revision(), activity);
         TechniqueHost.Commit commit = host.submit(submission);
         validateCommit(body, activity, commit);
@@ -282,23 +318,19 @@ public final class TechniqueCasting {
     }
 
     private List<EffectIntent> stopEffects(ActiveCast active, long previousMillis, long currentMillis) {
-        // 目录卸载后仍可清动作，但没有定义可据以生成表现停止意图。
-        Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
-        if (definition.isEmpty()) {
-            return List.of();
-        }
-        return TechniqueScheduler.stopEffects(definition.get(), active, previousMillis, currentMillis);
+        // 表现声明与移动锁保存在施放状态中，目录卸载也能生成清理意图。
+        return TechniqueScheduler.stopEffects(active, previousMillis, currentMillis);
     }
 
     private static CastPhase ending(ActiveCast active, CastPhase current, Signal signal) {
-        // 收势边界优先于取消；可打断标志不影响卸载或下线清理。
+        // 收势边界优先于取消；可打断标志不影响卸载或下线清理，出手与收势中的僵直不打断。
         if (current == CastPhase.FINISHED) {
             return CastPhase.FINISHED;
         }
         if (signal == Signal.UNLOAD || signal == Signal.DISCONNECT) {
             return CastPhase.CANCELLED;
         }
-        if (signal == Signal.DAMAGE && current == CastPhase.WARMUP && active.getInterruptibleByDamage()) {
+        if (signal == Signal.STAGGER && current == CastPhase.WARMUP && active.getInterruptibleByDamage()) {
             return CastPhase.INTERRUPTED;
         }
         return CastPhase.CAST_PHASE_UNSPECIFIED;
@@ -312,7 +344,11 @@ public final class TechniqueCasting {
             if (currentMillis >= active.getRecoveryEndMillis()) {
                 endState = TechniqueScheduler.EndState.RECOVERY_DUE;
             }
-            return new TechniqueScheduler.Due(List.of(), endState);
+            List<EffectIntent> cleanup = List.of();
+            if (endState == TechniqueScheduler.EndState.RECOVERY_DUE) {
+                cleanup = TechniqueScheduler.stopEffects(active, previousMillis, currentMillis);
+            }
+            return new TechniqueScheduler.Due(cleanup, endState);
         }
         return TechniqueScheduler.due(definition.get(), active, previousMillis, currentMillis);
     }
@@ -357,5 +393,5 @@ public final class TechniqueCasting {
         }
     }
 
-    private enum Signal { CLOCK, DAMAGE, UNLOAD, DISCONNECT }
+    private enum Signal { CLOCK, STAGGER, UNLOAD, DISCONNECT }
 }

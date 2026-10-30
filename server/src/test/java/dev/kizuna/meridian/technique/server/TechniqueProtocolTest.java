@@ -18,6 +18,62 @@ public class TechniqueProtocolTest {
     private static final int EFFECT_FIELD = 12;
     private static final int OVERSIZE_KNOWN_COUNT = 400;
     private static final int LONG_SOURCE_LENGTH = 200;
+    private static final int UNKNOWN_ENUM = 99;
+
+    @Test
+    public void inspectionRoundTripsBothHandsAndRejectsIncompleteItemFacts() {
+        // 身体回执必须同时带双手事实，缺少接线不能被解释成空手。
+        HeldItem item = HeldTechniqueFixtures.durableItem("sample:axe", HeldTechniqueFixtures.AXES);
+        HeldItems hands = HeldTechniqueFixtures.hands(HeldItem.getDefaultInstance(), item);
+        TechniqueHostResponse response = TechniqueHostResponse.newBuilder()
+                .setRequestId("inspect_hands")
+                .setBody(BodyProtobuf.toMessage(body(Shape.TENDRIL)))
+                .setHeldItems(hands)
+                .build();
+        assertEquals(response, TechniqueProtocol.decodeHostResponse(TechniqueProtocol.encodeHostResponse(response)));
+        TechniqueHostResponse missingHands = response.toBuilder().clearHeldItems().build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.encodeHostResponse(missingHands));
+        HeldItem incomplete = item.toBuilder().clearContainsItems().build();
+        HeldItems invalid = hands.toBuilder().setOffHand(incomplete).build();
+        TechniqueHostResponse missingFact = response.toBuilder().setHeldItems(invalid).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.encodeHostResponse(missingFact));
+        HeldItems missingSide = hands.toBuilder().clearMainHandSide().build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueHeldItems.validate(missingSide));
+        HeldItem falseEmpty = HeldItem.newBuilder().setDamageable(false /* damageable */).build();
+        HeldItems invalidEmpty = hands.toBuilder().setMainHand(falseEmpty).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueHeldItems.validate(invalidEmpty));
+    }
+
+    @Test
+    public void movementAndClipIntentsRoundTripAndRejectInvalidActionsOrTimes() {
+        // 新效果保留独立身份、选手与起播时刻，非法动作及 STOP 偏移在字节边界拒绝。
+        MovementIntent lock = MovementIntent.newBuilder().setAction(MovementAction.LOCK).build();
+        EffectIntent movement = EffectIntent.newBuilder()
+                .setCastId("movement")
+                .setEffectId("movement_lock")
+                .setSelectedHand(Hand.OFF_HAND)
+                .setMovement(lock)
+                .build();
+        TechniqueHostRequest request = hostRequest().setEffect(movement).build();
+        assertEquals(request, TechniqueProtocol.decodeHost(TechniqueProtocol.encodeHost(request)));
+        MovementIntent unknown = lock.toBuilder().setActionValue(UNKNOWN_ENUM).build();
+        EffectIntent invalid = movement.toBuilder().setMovement(unknown).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.validateEffect(invalid));
+        PresentationIntent clip = PresentationIntent.newBuilder()
+                .setId("sample:clip")
+                .setAction(PresentationAction.START)
+                .setStartMillis(HeldTechniqueFixtures.CLIP_START)
+                .build();
+        EffectIntent display = movement.toBuilder().setPresentation(clip).build();
+        TechniqueHostRequest displayRequest = hostRequest().setEffect(display).build();
+        assertEquals(displayRequest, TechniqueProtocol.decodeHost(TechniqueProtocol.encodeHost(displayRequest)));
+        PresentationIntent stop = clip.toBuilder().setAction(PresentationAction.STOP).build();
+        EffectIntent invalidStop = display.toBuilder().setPresentation(stop).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.validateEffect(invalidStop));
+        PresentationIntent negative = clip.toBuilder().setStartMillis(-1).build();
+        EffectIntent invalidTime = display.toBuilder().setPresentation(negative).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.validateEffect(invalidTime));
+    }
 
     @Test
     public void hostOperationsUseStableFieldNumbersAndRoundTrip() {

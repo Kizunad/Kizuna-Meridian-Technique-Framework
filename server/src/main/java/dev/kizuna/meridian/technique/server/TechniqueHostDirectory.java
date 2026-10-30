@@ -81,14 +81,14 @@ public final class TechniqueHostDirectory {
         }
 
         @Override
-        public BodySnapshot inspect() {
+        public Inspection inspect() {
             // 初次探测的身体可直接使用，后续读取必须重新结算宿主时钟。
             TechniqueHostResponse response = initialResponse;
             initialResponse = null;
             if (response == null) {
                 response = exchange(entrypoint, inspectRequest(entityUuid));
             }
-            return body(response);
+            return inspection(response);
         }
 
         @Override
@@ -142,12 +142,13 @@ public final class TechniqueHostDirectory {
             return new EffectCommit(submission.requestId());
         }
 
-        private BodySnapshot body(TechniqueHostResponse response) {
+        private Inspection inspection(TechniqueHostResponse response) {
             // 只有身体回执能进入状态机，未认领响应统一作为身体不存在处理。
             if (response.getResultCase() != TechniqueHostResponse.ResultCase.BODY) {
                 throw rejected(response);
             }
-            return BodyProtobuf.fromMessage(response.getBody());
+            BodySnapshot body = BodyProtobuf.fromMessage(response.getBody());
+            return new Inspection(body, response.getHeldItems());
         }
 
         private TechniqueErrors.HostRejected rejected(TechniqueHostResponse response) {

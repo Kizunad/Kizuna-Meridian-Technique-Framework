@@ -4,9 +4,17 @@
   "version": "1.0.0",
   "name": "Meridian Technique Integration Test",
   "environment": "*",
+  "custom": {
+    "meridian_technique:catalogs": [
+      "data/sample_manifest/catalog.txtpb",
+      "data/sample_scrolls/catalog.txtpb"
+    ]
+  },
   "entrypoints": {
     "fabric-gametest": [
-      "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest"
+      "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest",
+      "dev.kizuna.meridian.technique.server.TechniqueScrollGameTest",
+      "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest"
     ],
     "meridian_technique_catalog": [
       "dev.kizuna.meridian.technique.server.TechniqueGameTestHost"

@@ -28,7 +28,21 @@ final class TechniqueActivities {
     }
 
     record Start(BodySnapshot body, TechniqueDefinition definition, CastRequest request,
-                 TechniqueProgress progress, TechniqueBinding binding) { }
+                 TechniqueProgress progress, CastBinding selection) {
+        TechniqueBinding binding() {
+            // 身体绑定与选手结果使用同一份起手事实。
+            return selection.binding();
+        }
+    }
+
+    record CastBinding(TechniqueBinding binding, Hand hand, Entry entry) {
+        CastBinding(TechniqueBinding binding, Hand hand) {
+            // 无持物和承接的既有调用保持零偏移语义。
+            this(binding, hand, new Entry(0, HeldItemRules.getDefaultInstance()));
+        }
+    }
+
+    record Entry(long clipStart, HeldItemRules heldRules) { }
 
     static BodyActivity start(Start start) {
         // 费用、动作和冷却都依据同一个快照 revision，任一校验失败都没有提交。
@@ -41,42 +55,82 @@ final class TechniqueActivities {
         ActiveCast active = activeCast(start);
         List<BodyMessages.CapabilityModifier> modifiers = TechniqueScheduler.modifiers(definition, active);
         List<ActivityEffort> efforts = efforts(start, slots, modifiers);
-        long cooldownEnd = addTime(active.getStartedMillis(), definition.getCooldownMillis());
-        TechniqueProgress progress = start.progress().toBuilder()
-                .setActiveCast(active)
-                .putCooldowns(definition.getId(), cooldownEnd)
-                .build();
+        TechniqueProgress progress = startedProgress(start, active, modifiers);
         Any payload = TechniqueState.pack(progress);
         ActivityAction action = action(definition, active, slots.values().stream().toList());
-        BodyActivity activity = BodyActivity.newBuilder()
+        var plan = BodyActivity.newBuilder()
                 .addAllAccounts(accounts.changes())
                 .setReleasedQi(BodyProtobuf.toInventory(accounts.released()))
                 .addAllEfforts(efforts)
                 .addStartActions(action)
                 .addAllAddModifiers(modifiers)
-                .putProgress(TechniqueState.KEY, payload)
-                .build();
+                .putProgress(TechniqueState.KEY, payload);
+        if (start.progress().hasActiveCast()) {
+            plan.addStopActions(start.progress().getActiveCast().getActionInstanceId());
+        }
+        BodyActivity activity = plan.build();
 
         // 预检使用 Framework 的纯计算器，失败抛异常；候选结果不写入任何存储。
         BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
         return activity;
     }
 
-    static BodyActivity stop(TechniqueProgress progress) {
-        // 结束只释放动作占用并清除当前施放，已付费用和冷却保持原值。
+    private static TechniqueProgress startedProgress(Start start, ActiveCast active,
+                                                     List<BodyMessages.CapabilityModifier> modifiers) {
+        // 承接保存前式原边界，新式独立记录正常冷却及完整曲线到期。
+        TechniqueDefinition definition = start.definition();
+        long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
+        var progress = start.progress().toBuilder()
+                .setActiveCast(active)
+                .putCooldowns(definition.getId(), cooldownEnd)
+                .putCurveEnds(definition.getId(), curveEnd(modifiers));
+        if (start.progress().hasActiveCast()) {
+            progress.setLastCast(TechniqueFollowUps.history(start.progress().getActiveCast(), CastPhase.FINISHED));
+        }
+        return progress.build();
+    }
+
+    static TechniqueProgress endedProgress(TechniqueProgress progress, long endedMillis) {
+        // 装载清理不赋予新的承接机会，取消事实仍保留以供诊断。
+        return endedProgress(progress, endedMillis, CastPhase.CANCELLED);
+    }
+
+    static TechniqueProgress endedProgress(TechniqueProgress progress, long endedMillis, CastPhase ending) {
+        // 提前终止从实际终止时刻计冷却；晚处理的正常收势仍从固定收势边界计时。
         ActiveCast active = progress.getActiveCast();
-        TechniqueProgress stopped = progress.toBuilder().clearActiveCast().build();
+        var stopped = progress.toBuilder()
+                .clearActiveCast()
+                .setLastCast(TechniqueFollowUps.history(active, ending));
+        if (active.hasCooldownMillis()) {
+            long cooldownStart = endedMillis;
+            if (ending == CastPhase.FINISHED) {
+                cooldownStart = active.getRecoveryEndMillis();
+            }
+            long cooldownEnd = addTime(cooldownStart, active.getCooldownMillis());
+            stopped.putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd);
+        }
+        return stopped.build();
+    }
+
+    static BodyActivity stopAt(TechniqueProgress progress, long endedMillis) {
+        // 恢复和卸载默认记为取消，不将中断误认作正常结束。
+        return stopAt(progress, endedMillis, CastPhase.CANCELLED);
+    }
+
+    static BodyActivity stopAt(TechniqueProgress progress, long endedMillis, CastPhase ending) {
+        // 曲线保持原到期时间，只原子更新施放、动作和实际冷却。
+        TechniqueProgress stopped = endedProgress(progress, endedMillis, ending);
         Any payload = TechniqueState.pack(stopped);
         return BodyActivity.newBuilder()
-                .addStopActions(active.getActionInstanceId())
+                .addStopActions(progress.getActiveCast().getActionInstanceId())
                 .putProgress(TechniqueState.KEY, payload)
                 .build();
     }
 
-    static BodyActivity learn(TechniqueProgress progress, KnownTechnique known) {
+    static BodyActivity learn(TechniqueProgress progress, List<KnownTechnique> known) {
         // 学会只改写本库附属进度，不触碰身体资源、动作或其他附属状态。
         TechniqueProgress learned = progress.toBuilder()
-                .addKnown(known)
+                .addAllKnown(known)
                 .build();
         Any payload = TechniqueState.pack(learned);
         return BodyActivity.newBuilder()
@@ -88,11 +142,12 @@ final class TechniqueActivities {
         // 固定本次边界与原始请求，目录卸载、升级和重启都不改变收势行为。
         long started = start.body().settledAt().elapsedMillis();
         CastPhases phases = start.definition().getPhases();
-        long warmupEnd = addTime(started, phases.getWarmupMillis());
+        long clipStart = start.selection().entry().clipStart();
+        long warmupEnd = addTime(started, phases.getWarmupMillis() - clipStart);
         long activeEnd = addTime(warmupEnd, phases.getActiveMillis());
         long recoveryEnd = addTime(activeEnd, phases.getRecoveryMillis());
         String encodedCastId = TechniqueValues.encodeCastId(start.request().getCastId());
-        return ActiveCast.newBuilder()
+        var active = ActiveCast.newBuilder()
                 .setRequest(start.request())
                 .setStartedMillis(started)
                 .setWarmupEndMillis(warmupEnd)
@@ -101,7 +156,34 @@ final class TechniqueActivities {
                 .setActionInstanceId("technique." + encodedCastId)
                 .setBinding(start.binding())
                 .setInterruptibleByDamage(phases.getInterruptibleByDamage())
-                .build();
+                .setSelectedHand(start.selection().hand())
+                .setMovementSpeedMultiplier(TechniqueMovement.multiplier(start.definition()))
+                .setCooldownMillis(start.definition().getCooldownMillis())
+                .setClipStartMillis(clipStart)
+                .setHeldItemRules(start.selection().entry().heldRules())
+                .addAllPresentations(TechniqueScheduler.presentations(start.definition(), clipStart))
+                .addAllPredecessorCleanup(predecessorCleanup(start.progress(), started));
+        return active.build();
+    }
+
+    private static List<EffectIntent> predecessorCleanup(TechniqueProgress progress, long started) {
+        // 服务已确认更早的清理回执，只保存直接前式以限制连续承接的存档大小。
+        if (!progress.hasActiveCast()) {
+            return List.of();
+        }
+        ActiveCast previous = progress.getActiveCast();
+        return TechniqueScheduler.stopEffects(previous, started, started).stream()
+                .filter(effect -> effect.getCastId().equals(previous.getRequest().getCastId())).toList();
+    }
+
+    private static long curveEnd(List<BodyMessages.CapabilityModifier> modifiers) {
+        // 修正从起手原子提交，打断也必须等最晚的完整曲线到期后才可重放同一功法。
+        long latest = 0;
+        for (BodyMessages.CapabilityModifier modifier : modifiers) {
+            long duration = modifier.getCurve(modifier.getCurveCount() - 1).getOffsetMillis();
+            latest = Math.max(latest, addTime(modifier.getStartMillis(), duration));
+        }
+        return latest;
     }
 
     private static ActivityAction action(TechniqueDefinition technique, ActiveCast active, List<BoundSlot> slots) {
@@ -128,6 +210,18 @@ final class TechniqueActivities {
                 .build();
     }
 
+    static boolean affordable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding) {
+        // 预检复用起手的费用分配和扣账计算，不提交账户或改变权威版本。
+        Map<String, BoundSlot> slots = binding.getSlotsList().stream()
+                .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
+        try {
+            accounts(body, definition.getCost().getQiList(), slots);
+            return true;
+        } catch (TechniqueErrors.Rejected rejected) {
+            return false;
+        }
+    }
+
     private static Accounts accounts(BodySnapshot body, List<QiCost> costs, Map<String, BoundSlot> slots) {
         // 多项费用可命中同一经脉，先在临时余额中连续扣除，最终只提交一个账户变更。
         Map<String, MeridianState> states = body.meridianStates().stream()
@@ -143,7 +237,7 @@ final class TechniqueActivities {
                     throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED);
                 }
                 QiInventory previous = replacements.getOrDefault(moduleId, state.lumenQi());
-                QiInventory debit = selectCost(previous, cost, allocation.amount());
+                QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount());
                 replacements.put(moduleId, QiAccounting.debit(previous, debit));
                 released.add(debit);
             }
@@ -184,22 +278,6 @@ final class TechniqueActivities {
             allocations.add(new CostAllocation(moduleIds.get(index), shares.get(index)));
         }
         return List.copyOf(allocations);
-    }
-
-    private static QiInventory selectCost(QiInventory inventory, QiCost cost, double amount) {
-        // 只匹配相态和属性，释放保持库存的实际密度，不发生隐式属性转换。
-        Qi.QiPhase phase = Qi.QiPhase.valueOf(cost.getPhase().name());
-        Qi entry = inventory.entries().stream()
-                .filter(qi -> qi.phase() == phase && qi.attribute().id().value().equals(cost.getAttribute()))
-                .findFirst()
-                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI));
-        if (entry.amount() < amount) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_QI);
-        }
-        Qi selected = entry.withAmount(amount);
-        QiInventory debit = new QiInventory(List.of(selected));
-        QiAccounting.validateTransferable(debit);
-        return debit;
     }
 
     private static List<ActivityEffort> efforts(Start start, Map<String, BoundSlot> slots,

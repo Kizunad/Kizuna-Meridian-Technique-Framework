@@ -1,0 +1,22 @@
+schema_version: 1
+namespace: "sample_manifest"
+definitions {
+  id: "sample_manifest:technique"
+  version: 1
+  category: BUFF
+  minimum_realm: TRUE_QI
+  cost {}
+  phases {
+    warmup_millis: 0
+    active_millis: 1
+    recovery_millis: 0
+    interruptible_by_damage: false
+  }
+  cooldown_millis: 0
+}
+books { id: "sample_manifest:book" }
+volumes {
+  id: "sample_manifest:volume"
+  book_id: "sample_manifest:book"
+  techniques { id: "sample_manifest:technique" version: 1 }
+}

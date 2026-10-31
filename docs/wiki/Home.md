@@ -36,7 +36,7 @@ git diff --check
 `TechniqueService` 通过 `TechniqueHostDirectory` 发现唯一宿主，按服务端 tick 分发 `EffectIntent`，并用 `BodyActivity` 写入学会记录。
 宿主通过 `TechniqueFabric.service()` 获取服务，内容目录通过 `custom["meridian_technique:catalogs"]`
 声明 `.txtpb` / `.binpb` 清单，也保留 `meridian_technique_catalog` entrypoint 供代码装配；所有来源整体校验。
-Fabric 模组注册 `/meridian_technique learn <targets> <id>`（权限 2）和 `KNOWN_CHANGED` 事件；实体宿主经 `meridian_technique_host` entrypoint 提供。
+Fabric 模组在 Framework 的 `/meridian` 注册点登记 `technique learn`（权限 2，用法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)），并发布 `KNOWN_CHANGED` 事件；实体宿主经 `meridian_technique_host` entrypoint 提供。
 ID 支持卷或单式；整卷原子学习并检查同书前置，已学记录仍按单式精确版本保存。
 初始化期可用的每卷自动生成卷轴，独立「功法」创造栏按书卷列出。右键由服务端确认学习，
 生存成功消耗 1 个，创造成功不消耗，失败不消耗；缺专用图标时使用内置通用卷轴。

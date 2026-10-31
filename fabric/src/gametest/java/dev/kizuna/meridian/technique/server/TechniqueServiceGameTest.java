@@ -74,7 +74,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         });
         MinecraftServer server = context.getLevel().getServer();
         int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                "meridian_technique learn " + entityUuid + " " + TECHNIQUE_ID);
+                "meridian technique learn " + entityUuid + " " + TECHNIQUE_ID);
         TechniqueService service = TechniqueFabric.service();
         context.assertTrue(learned == 1 && changes.size() == 1, "学会命令或 KNOWN_CHANGED 事件未生效");
         context.assertTrue(service.known(entityUuid).equals(changes), "known 没有返回已提交的学会记录");
@@ -124,7 +124,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         // 管理命令拒绝目录外 ID 和权限不足的调用，身体知识保持不变。
         Prepared prepared = prepare(context);
         MinecraftServer server = context.getLevel().getServer();
-        String command = "meridian_technique learn " + prepared.entity().getUUID() + " ";
+        String command = "meridian technique learn " + prepared.entity().getUUID() + " ";
         int unknown = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 command + "sample:missing");
         int denied = server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withPermission(1),
@@ -141,7 +141,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         // 真实命令按卷学会，字节 inspect 选副手，Fabric tick 在收势结束清理移动约束。
         Prepared prepared = prepare(context, TechniqueGameTestHost.HELD_TECHNIQUE_ID);
         MinecraftServer server = context.getLevel().getServer();
-        String command = "meridian_technique learn " + prepared.entity().getUUID() + " ";
+        String command = "meridian technique learn " + prepared.entity().getUUID() + " ";
         int rejected = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 command + HeldTechniqueFixtures.LOWER);
         context.assertTrue(rejected == 0, "未学前置卷仍学会了下卷");

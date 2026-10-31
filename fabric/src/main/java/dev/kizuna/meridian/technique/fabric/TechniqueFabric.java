@@ -1,6 +1,6 @@
 package dev.kizuna.meridian.technique.fabric;
 
-import com.mojang.brigadier.CommandDispatcher;
+import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapNetworking;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
@@ -14,7 +14,6 @@ import dev.kizuna.meridian.technique.server.TechniqueScrollCatalog;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueSoundCues;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
@@ -22,11 +21,9 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
-import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -88,7 +85,7 @@ public final class TechniqueFabric implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player.getUUID()));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
-        CommandRegistrationCallback.EVENT.register(this::registerCommands);
+        registerCommands();
     }
 
     private void start(MinecraftServer server) {
@@ -148,20 +145,16 @@ public final class TechniqueFabric implements ModInitializer {
         }
     }
 
-    private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher,
-                                  CommandBuildContext registryAccess,
-                                  Commands.CommandSelection environment) {
-        // 管理命令只开放给权限 2，功法 ID 从服务端不可变目录解析。
-        dispatcher.register(Commands.literal("meridian_technique")
-                .requires(source -> source.hasPermission(LEARN_PERMISSION_LEVEL))
-                .then(Commands.literal("learn")
-                        .then(Commands.argument("targets", EntityArgument.entities())
-                                .then(Commands.argument("id", ResourceLocationArgument.id())
-                                        .suggests((context, builder) ->
-                                                SharedSuggestionProvider.suggestResource(learnableIds(), builder))
-                                        .executes(context -> learn(context.getSource(),
-                                                EntityArgument.getEntities(context, "targets"),
-                                                ResourceLocationArgument.getId(context, "id").toString()))))));
+    private void registerCommands() {
+        // /meridian technique learn [<targets>] <id>：只开放给权限 2，省略目标时学给执行者本人；
+        // 功法 ID 从服务端不可变目录解析，书、卷和式都可补全。
+        MeridianCommands.register(MeridianCommands.Branch.TECHNIQUE, "learn", LEARN_PERMISSION_LEVEL, (node, context) ->
+                MeridianCommands.optionalEntities(node, (parent, targets) -> parent.then(
+                        Commands.argument("id", ResourceLocationArgument.id())
+                                .suggests((command, builder) ->
+                                        SharedSuggestionProvider.suggestResource(learnableIds(), builder))
+                                .executes(command -> learn(command.getSource(), targets.resolve(command),
+                                        ResourceLocationArgument.getId(command, "id").toString())))));
     }
 
     private static List<ResourceLocation> learnableIds() {

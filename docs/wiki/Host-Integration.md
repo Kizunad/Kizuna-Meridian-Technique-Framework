@@ -137,8 +137,8 @@ Framework 负责复核 `旧总量 = 新总量 + 释放`、余额、容量、功�
 直接调用低层 `TechniqueCasting` 的宿主必须自行保证同样的前式交付、确认及清理顺序。
 `known(entity)` 读取可信 `TechniqueProgress`，返回精确功法 ID 和目录名称。`learn(entity, technique)` 生成只含
 `progress` 的 `BodyActivity`，使用身体 revision 原子提交；成功后发布 `KNOWN_CHANGED`，重复学会保持幂等。
-Fabric 模组注册 `/meridian_technique learn <targets> <id>`，只允许权限 2；ID 可为书、卷或单式。
-目标使用原版实体选择器补全，ID 从当前服务器目录中的书、卷、式身份去重排序后补全，支持命名空间过滤。
+Fabric 模组在 Framework 的 `/meridian` 注册点登记 `technique learn`，只允许权限 2；ID 可为书、卷或单式，指令写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands)。
+ID 补全取当前服务器目录中的书、卷、式身份，去重排序，支持命名空间过滤。
 `learn(entity, volumeId)` 先检查同书前置卷的全部精确式版本已学会，再以一次活动学会整卷，一次发布 `KNOWN_CHANGED`。
 `learn(entity, bookId)` 将书内所有卷的精确式版本以一次活动原子学会；同次学习包含其同书前置卷，
 提交失败不留下部分知识，成功只增加一次 revision、发布一次通知；重复学习保持幂等。

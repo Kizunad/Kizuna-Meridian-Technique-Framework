@@ -5,5 +5,5 @@
   "screen.meridian_technique.learned": "You have learned this volume's techniques",
   "screen.meridian_technique.close": "Close",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / click outside to close; wheel to scroll",
-  "screen.meridian_technique.combat_help": "Press R to enter combat stance. Use /meridian_combat slot set <slot> <technique> to assign a slot; Tab completes learned techniques. Press the slot key to cast."
+  "screen.meridian_technique.combat_help": "Press R to enter combat stance. Use /meridian combat slot set <slot> <technique> to assign a slot; Tab completes learned techniques. Press the slot key to cast."
 }

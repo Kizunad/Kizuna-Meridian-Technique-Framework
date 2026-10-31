@@ -16,6 +16,7 @@
     "java": ">=17",
     "minecraft": "1.20.1",
     "fabricloader": ">=0.16.10",
-    "fabric-api": "*"
+    "fabric-api": "*",
+    "meridian_framework": "*"
   }
 }

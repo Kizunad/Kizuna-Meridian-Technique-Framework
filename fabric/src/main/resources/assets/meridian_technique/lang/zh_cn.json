@@ -5,5 +5,5 @@
   "screen.meridian_technique.learned": "已学会本卷所载招式",
   "screen.meridian_technique.close": "合上",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / 点击纸外：合上；滚轮翻阅",
-  "screen.meridian_technique.combat_help": "按 R 进入战斗架势。用 /meridian_combat slot set <槽号> <功法> 填槽，Tab 可补全已学功法；按对应槽位键施放。"
+  "screen.meridian_technique.combat_help": "按 R 进入战斗架势。用 /meridian combat slot set <槽号> <功法> 填槽，Tab 可补全已学功法；按对应槽位键施放。"
 }

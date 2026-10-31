@@ -53,7 +53,7 @@ public final class TechniqueScrollGameTest implements FabricGameTest {
         var host = prepared.host();
         var commands = player.getServer().getCommands();
         var dispatcher = commands.getDispatcher();
-        String prefix = "meridian_technique learn @s sample_scrolls:";
+        String prefix = "meridian technique learn @s sample_scrolls:";
         try {
             var suggestions = dispatcher.getCompletionSuggestions(dispatcher.parse(prefix, source)).join()
                     .getList()
@@ -64,7 +64,7 @@ public final class TechniqueScrollGameTest implements FabricGameTest {
                     "sample_scrolls:first", "sample_scrolls:second")), "学习命令缺少书、卷或式补全");
             long revision = host.current().revision();
             context.assertTrue(commands.performPrefixedCommand(source,
-                    "meridian_technique learn @s sample_scrolls:book") == 1, "补全的书 ID 不能执行");
+                    "meridian technique learn @s sample_scrolls:book") == 1, "补全的书 ID 不能执行");
             context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == BOTH_VOLUMES_KNOWN,
                     "整书学习遗漏书内功法");
             context.assertTrue(host.current().revision() == revision + 1, "整书没有一次提交");

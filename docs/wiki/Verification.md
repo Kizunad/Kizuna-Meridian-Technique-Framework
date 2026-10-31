@@ -441,5 +441,9 @@ GameTest 改用 Fabric 的 `@GameTest`。26.2 的 `performPrefixedCommand` 不�
 `fabric` 模块开 `testFixtures`，放下游 GameTest 共用的 26.2 假玩家，不进正式 JAR。
 `TestPlayers.detached` 按原版登录同一套 `CommonListenerCookie` 构造 `ServerPlayer` 与正式网络处理器，
 不进玩家列表；`TestConnection` 只换传输层，发往客户端的包直接丢弃。
+`TestPlayers.logIn` 走原版进服入口：先读同一 UUID 的玩家存档（26.2 的玩家列表不再自己读档），
+再进玩家列表、触发进服与 Fabric 网络事件，最后按客户端已加载完世界处理（上报前原版视玩家无敌并忽略交互）。
+配套的 `RecordingConnection` 记录发往客户端的包、照常执行发送回调，构造时预先声明客户端能收的通道；
+`disconnectFromClient` 模拟客户端退出，服务端已先踢出时不重复处理断线。
 下游在 GameTest 源码集写 `testFixtures('dev.kizuna.meridian.technique:fabric')`，经源码组合解析。
-夹具按实际用法逐步补充，第一个用户是 Vanilla Damage 的挥手包用例。
+夹具按实际用法逐步补充：Vanilla Damage 的挥手包用例用 `detached`，Human 的整套宿主用例用 `logIn`。

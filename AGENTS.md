@@ -1,7 +1,7 @@
 # 仓库协作约定
 
 - 简体中文沟通、文档与函数内意图注释；公开标识符用英文。遵守 `~/.codex/AGENTS.md` 的 Java 代码形状规则。
-- `shared/` 是独立 Protobuf 契约；`server/` 是 Java 17 纯 Java 库，面向 Minecraft 1.20.1 宿主。
+- `shared/` 是独立 Protobuf 契约；`server/` 是 Java 25 纯 Java 库，面向 Minecraft 26.2 宿主。
 - 只依赖相邻 Meridian Framework，不依赖 Human、Humanoid、寻路库或具体内容附属。
 - 正式源码不提供任何具体功法或身体模板；测试数据只放在测试源码集。
 - 身体、真元、做功、动作与附属进度只有 Framework 的权威状态；本库通过 `handleActivity` 提交。

@@ -7,11 +7,17 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.client.gui.GuiGraphics;
+import java.util.function.IntPredicate;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
 
 /** 学习成功后展示卷轴目录文字的只读界面。 */
@@ -31,7 +37,7 @@ final class TechniqueScrollScreen extends Screen {
     private static final int BUTTON_HEIGHT = 24;
     private final TechniqueScrollCatalog.Scroll scroll;
     private TechniqueScrollLayout.Geometry layout;
-    private ResourceLocation background;
+    private Identifier background;
     private List<ContentRow> contentRows = List.of();
     private int scrollOffset;
 
@@ -70,74 +76,88 @@ final class TechniqueScrollScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
         // 固定画布随窗口等比缩放，正文仅绘制在纸面中央视口内。
-        context.fill(0, 0, width, height, SCREEN_COLOR);
-        var matrices = context.pose();
-        matrices.pushPose();
-        matrices.translate(layout.originX(), layout.originY(), 0);
-        matrices.scale(layout.scale(), layout.scale(), 1);
-        drawBackground(context);
-        drawTitle(context);
-        drawContent(context);
-        drawFooter(context);
-        matrices.popPose();
-        super.render(context, mouseX, mouseY, delta);
+        // 26.2 在上一层先画原版背景，这里的不透明底色把它整个盖住，观感与 1.20.1 相同。
+        graphics.fill(0, 0, width, height, SCREEN_COLOR);
+        var matrices = graphics.pose();
+        matrices.pushMatrix();
+        matrices.translate(layout.originX(), layout.originY());
+        matrices.scale(layout.scale(), layout.scale());
+        drawBackground(graphics);
+        drawTitle(graphics);
+        drawContent(graphics);
+        drawFooter(graphics);
+        matrices.popMatrix();
+        super.extractRenderState(graphics, mouseX, mouseY, a);
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyEvent event) {
         // ESC 交给 Screen，背包与使用键按当前设置匹配。
-        if (TechniqueScrollInput.closesKey(keyCode, scanCode,
-                minecraft.options.keyInventory::matches, minecraft.options.keyUse::matches)) {
+        var options = minecraft.options;
+        if (TechniqueScrollInput.closesKey(event.key(), event.scancode(),
+                keyMatcher(options.keyInventory, event), keyMatcher(options.keyUse, event))) {
             onClose();
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(event);
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         // 按钮、右键和纸面外点击只关闭页面，不向服务端重复学习。
-        if (super.mouseClicked(mouseX, mouseY, button)) {
+        if (super.mouseClicked(event, doubleClick)) {
             return true;
         }
-        if (TechniqueScrollInput.closesMouse(mouseX, mouseY, button,
-                layout.background(), minecraft.options.keyUse::matchesMouse)) {
+        if (TechniqueScrollInput.closesMouse(event.x(), event.y(), event.button(),
+                layout.background(), mouseMatcher(minecraft.options.keyUse, event))) {
             onClose();
             return true;
         }
         return false;
     }
 
-    private void drawBackground(GuiGraphics context) {
+    private static TechniqueScrollInput.KeyMatcher keyMatcher(KeyMapping mapping, KeyEvent event) {
+        // 26.2 的按键匹配只收事件对象；规则层仍按键码和扫描码判断，这里沿用本次修饰键重建事件。
+        return (keyCode, scanCode) -> mapping.matches(new KeyEvent(keyCode, scanCode, event.modifiers()));
+    }
+
+    private static IntPredicate mouseMatcher(KeyMapping mapping, MouseButtonEvent event) {
+        // 同上：按规则层给出的鼠标键重建事件，位置和修饰键沿用本次点击。
+        return button -> mapping.matchesMouse(new MouseButtonEvent(event.x(), event.y(),
+                new MouseButtonInfo(button, event.modifiers())));
+    }
+
+    private void drawBackground(GuiGraphicsExtractor graphics) {
         // 按整张纹理等比缩放，避免把绘制尺寸误当成左上角的采样区域。
         TechniqueScrollLayout.Bounds bounds = TechniqueScrollLayout.BACKGROUND;
         int textureWidth = TechniqueScrollLayout.TEXTURE_WIDTH;
         int textureHeight = TechniqueScrollLayout.TEXTURE_HEIGHT;
-        var matrices = context.pose();
-        matrices.pushPose();
-        matrices.translate(bounds.left(), bounds.top(), 0);
-        matrices.scale(bounds.width() / (float) textureWidth, bounds.height() / (float) textureHeight, 1);
-        context.blit(background, 0, 0, 0, 0, textureWidth, textureHeight, textureWidth, textureHeight);
-        matrices.popPose();
+        var matrices = graphics.pose();
+        matrices.pushMatrix();
+        matrices.translate(bounds.left(), bounds.top());
+        matrices.scale(bounds.width() / (float) textureWidth, bounds.height() / (float) textureHeight);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, background, 0, 0, 0, 0,
+                textureWidth, textureHeight, textureWidth, textureHeight);
+        matrices.popMatrix();
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
-        // 滚轮只改变纸面正文的起始行，不影响目录数据。
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        // 滚轮只改变纸面正文的起始行，不影响目录数据；26.2 多传横向滚动，正文只看纵向。
         if (!layout.content().contains(mouseX, mouseY)) {
-            return super.mouseScrolled(mouseX, mouseY, verticalAmount);
+            return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
         }
-        int direction = (int) Math.signum(verticalAmount);
+        int direction = (int) Math.signum(scrollY);
         scrollOffset = Math.max(0, Math.min(maximumScrollOffset(),
                 scrollOffset - direction * SCROLL_STEP_ROWS));
         return true;
     }
 
-    private ResourceLocation background() {
+    private Identifier background() {
         // 缺图时使用库内通用纸面，并按原始卷资源 ID 去重告警。
-        ResourceLocation requested = TechniqueScrollClient.background(scroll);
+        Identifier requested = TechniqueScrollClient.background(scroll);
         return TechniqueScrollBackgrounds.resolve(requested,
                 resource -> minecraft.getResourceManager().getResource(resource).isPresent(),
                 resource -> LOG.warn("卷轴阅读背景缺失：{}，改用通用纸面", resource));
@@ -180,40 +200,45 @@ final class TechniqueScrollScreen extends Screen {
         }
     }
 
-    private void drawTitle(GuiGraphics context) {
+    private void drawTitle(GuiGraphicsExtractor graphics) {
         // 书名与卷名在标题区域内横向缩放，长标题仍完整保留。
         String key = TechniqueScrollText.key("item", scroll.itemId());
         String title = TechniqueScrollText.name(key, scroll.displayName(), Language.getInstance()::getOrDefault);
         int titleWidth = Math.max(1, font.width(title));
         TechniqueScrollLayout.Bounds paper = TechniqueScrollLayout.PAPER;
         float titleScale = Math.min(TITLE_SCALE, paper.width() / (float) titleWidth);
-        var matrices = context.pose();
-        matrices.pushPose();
-        matrices.translate(TechniqueScrollLayout.CANVAS_WIDTH / CENTER_DIVISOR, paper.top(), 0);
-        matrices.scale(titleScale, TITLE_SCALE, 1);
-        context.drawString(font, title, -titleWidth / CENTER_DIVISOR, 0, TITLE_COLOR, false /* shadow */);
-        matrices.popPose();
+        var matrices = graphics.pose();
+        matrices.pushMatrix();
+        matrices.translate(TechniqueScrollLayout.CANVAS_WIDTH / CENTER_DIVISOR, paper.top());
+        matrices.scale(titleScale, TITLE_SCALE);
+        graphics.text(font, title, -titleWidth / CENTER_DIVISOR, 0, TITLE_COLOR, false /* shadow */);
+        matrices.popMatrix();
     }
 
-    private void drawFooter(GuiGraphics context) {
+    private void drawFooter(GuiGraphicsExtractor graphics) {
         // 小字提示跟随背包与使用键改绑，常驻于纸面正文以外。
         Component hint = Component.translatable("screen.meridian_technique.close_hint",
                 minecraft.options.keyInventory.getTranslatedKeyMessage(),
                 minecraft.options.keyUse.getTranslatedKeyMessage());
         int textWidth = Math.max(1, font.width(hint));
         float fit = Math.min(HINT_SCALE, TechniqueScrollLayout.PAPER.width() / (float) textWidth);
-        var matrices = context.pose();
-        matrices.pushPose();
-        matrices.translate(TechniqueScrollLayout.CANVAS_WIDTH / CENTER_DIVISOR, HINT_Y, 0);
-        matrices.scale(fit, fit, 1);
-        context.drawString(font, hint, -textWidth / CENTER_DIVISOR, 0, DESCRIPTION_COLOR, false /* shadow */);
-        matrices.popPose();
+        var matrices = graphics.pose();
+        matrices.pushMatrix();
+        matrices.translate(TechniqueScrollLayout.CANVAS_WIDTH / CENTER_DIVISOR, HINT_Y);
+        matrices.scale(fit, fit);
+        graphics.text(font, hint, -textWidth / CENTER_DIVISOR, 0, DESCRIPTION_COLOR, false /* shadow */);
+        matrices.popMatrix();
     }
 
-    private void drawContent(GuiGraphics context) {
+    private void drawContent(GuiGraphicsExtractor graphics) {
         // Scissor 独立使用屏幕坐标，确保所有换行都留在纸面中区。
+        // 26.2 的 Scissor 会套用当前变换，这里临时回到单位变换，按已向外取整的屏幕边界登记。
         TechniqueScrollLayout.Bounds content = layout.content();
-        context.enableScissor(content.left(), content.top(), content.right(), content.bottom());
+        var matrices = graphics.pose();
+        matrices.pushMatrix();
+        matrices.identity();
+        graphics.enableScissor(content.left(), content.top(), content.right(), content.bottom());
+        matrices.popMatrix();
         int visibleRows = TechniqueScrollLayout.visibleRows(font.lineHeight);
         for (int row = 0; row < visibleRows; row++) {
             int contentIndex = scrollOffset + row;
@@ -222,10 +247,10 @@ final class TechniqueScrollScreen extends Screen {
             }
             int y = TechniqueScrollLayout.CONTENT.top() + row * TechniqueScrollLayout.LINE_HEIGHT;
             ContentRow rowContent = contentRows.get(contentIndex);
-            context.drawString(font, rowContent.text(),
+            graphics.text(font, rowContent.text(),
                     TechniqueScrollLayout.CONTENT.left(), y, rowContent.color(), false /* shadow */);
         }
-        context.disableScissor();
+        graphics.disableScissor();
     }
 
     private int maximumScrollOffset() {

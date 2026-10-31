@@ -1,18 +1,20 @@
 package dev.kizuna.meridian.technique.fabric.client;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.input.InputWithModifiers;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 /** 纸签图片按钮；只复用原版焦点和无障碍输入，不绘制原版控件皮肤。 */
 final class TechniqueScrollCloseButton extends AbstractButton {
-    private static final ResourceLocation TEXTURE =
-            new ResourceLocation("meridian_technique", "textures/gui/scroll/close_button.png");
+    private static final Identifier TEXTURE =
+            Identifier.fromNamespaceAndPath("meridian_technique", "textures/gui/scroll/close_button.png");
     private static final int FRAME_WIDTH = 96;
     private static final int FRAME_HEIGHT = 24;
     private static final int FRAME_COUNT = 3;
@@ -31,48 +33,45 @@ final class TechniqueScrollCloseButton extends AbstractButton {
     }
 
     @Override
-    protected void renderWidget(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
         // 先绘制图片状态，再居中叠加文字；不调用原版按钮背景。
+        // 26.2 的 GUI 纹理管线自带透明混合，不再手动开关混合状态。
         int frame = 0;
         if (pressed) {
             frame = PRESSED_FRAME;
         } else if (isHovered() || isFocused()) {
             frame = HOVER_FRAME;
         }
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        context.blit(TEXTURE, getX(), getY(), width, height,
-                0, frame * FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT * FRAME_COUNT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, TEXTURE, getX(), getY(), 0, frame * FRAME_HEIGHT,
+                width, height, FRAME_WIDTH, FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT * FRAME_COUNT);
         var renderer = Minecraft.getInstance().font;
         int textWidth = renderer.width(getMessage());
         int textX = getX() + (width - textWidth) / HALF;
         int textY = getY() + (height - renderer.lineHeight) / HALF;
-        context.drawString(renderer, getMessage(), textX, textY, LABEL_COLOR, false /* shadow */);
-        context.flush();
-        RenderSystem.disableBlend();
+        graphics.text(renderer, getMessage(), textX, textY, LABEL_COLOR, false /* shadow */);
     }
 
     @Override
-    public void onClick(double mouseX, double mouseY) {
+    public void onClick(MouseButtonEvent event, boolean doubleClick) {
         // 松开时再合卷，按住期间可见下压状态。
         pressed = true;
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+    public boolean mouseReleased(MouseButtonEvent event) {
         // 按下后拖出按钮可取消，键盘激活仍走 onPress。
-        if (!pressed || button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+        if (!pressed || event.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return false;
         }
         pressed = false;
-        if (isMouseOver(mouseX, mouseY)) {
-            onPress();
+        if (isMouseOver(event.x(), event.y())) {
+            onPress(event);
         }
         return true;
     }
 
     @Override
-    public void onPress() {
+    public void onPress(InputWithModifiers input) {
         // 合卷仅关闭客户端阅读页。
         close.run();
     }

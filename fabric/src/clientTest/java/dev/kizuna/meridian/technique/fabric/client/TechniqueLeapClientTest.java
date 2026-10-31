@@ -36,6 +36,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
     private static final double MAXIMUM_ERROR = 0.5;
     private static final double MAXIMUM_SNAP_BACK = 0.05;
     private static final double BLOCK_CENTER = 0.5;
+    private static final int SCREENSHOT_FULL_SIZE = 1;
     private enum Stage { PREPARE, PREPARING, SETTLE, AIM, LEAP, REST, DONE }
     private Stage stage = Stage.PREPARE;
     private int ticks;
@@ -70,7 +71,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
                 throw new IllegalStateException("客户端跃步验收超时");
             }
             if (ticks < READY_TICKS || client.player == null || client.getSingleplayerServer() == null
-                    || client.getOverlay() != null) {
+                    || client.gui.overlay() != null) {
                 return;
             }
             advance(client);
@@ -86,7 +87,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
             stage = Stage.PREPARING;
         } else if (stage == Stage.PREPARING && prepared.isDone()) {
             prepared.join();
-            client.setScreen(null);
+            client.gui.setScreen(null);
             stageTick = ticks;
             stage = Stage.SETTLE;
         } else if (stage == Stage.SETTLE && ticks - stageTick >= SETTLE_TICKS) {
@@ -105,7 +106,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         var server = client.getSingleplayerServer();
         return CompletableFuture.runAsync(() -> {
             var player = server.getPlayerList().getPlayer(client.player.getUUID());
-            var world = player.serverLevel();
+            var world = player.level();
             for (int x = -HALF_WIDTH; x <= HALF_WIDTH; x++) {
                 for (int z = -RUNWAY_BACK; z <= RUNWAY_LENGTH; z++) {
                     world.setBlockAndUpdate(new BlockPos(x, ARENA_Y - 1, z), Blocks.STONE.defaultBlockState());
@@ -140,8 +141,8 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
             throw new IllegalStateException("客户端缺少合法落点标记");
         }
         target = new Vec3(marker.point().x(), marker.point().y(), marker.point().z());
-        Screenshot.grab(client.gameDirectory, "light-body-marker.png", client.getMainRenderTarget(),
-                message -> { /* 截图文件由验收任务归档。 */ });
+        Screenshot.grab(client.gameDirectory, "light-body-marker.png", client.gameRenderer.mainRenderTarget(),
+                SCREENSHOT_FULL_SIZE, message -> { /* 截图文件由验收任务归档。 */ });
         previous = player.position();
         teleportsBefore = TechniqueTeleportCounter.count();
         client.options.keyJump.setDown(true /* pressed */);

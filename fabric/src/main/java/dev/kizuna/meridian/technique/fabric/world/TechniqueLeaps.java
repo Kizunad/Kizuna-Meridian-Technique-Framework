@@ -85,7 +85,7 @@ public final class TechniqueLeaps {
             return Jump.WAIT;
         }
         String castId = "leap_" + UUID.randomUUID().toString().replace("-", "");
-        if (actor.level().isClientSide) {
+        if (actor.level().isClientSide()) {
             launch(actor, registered, landing, castId);
             return Jump.LEAP;
         }
@@ -163,8 +163,8 @@ public final class TechniqueLeaps {
         // 连按仅提示一次，成功跃步后才允许下一次乏力提示。
         var access = (TechniqueLeapAccess) actor;
         if (actor instanceof ServerPlayer player && !access.meridian$getWeakNotice()) {
-            player.displayClientMessage(Component.translatable(registered.benefit().getLeap().getFailureTranslationKey()),
-                    true /* overlay */);
+            player.sendOverlayMessage(
+                    Component.translatable(registered.benefit().getLeap().getFailureTranslationKey()));
             access.meridian$markWeakNotice();
         }
     }
@@ -221,18 +221,18 @@ public final class TechniqueLeaps {
         return new Vec3(x, vertical, z);
     }
 
-    public static float fallDistance(LivingEntity actor, float vanillaDistance) {
-        // 安全落点以上的抛物线下降免伤；低于求解落点的额外落差照常结算。
+    public static double fallDistance(LivingEntity actor, double vanillaDistance) {
+        // 安全落点以上的抛物线下降免伤；低于求解落点的额外落差照常结算。26.2 的摔落距离是 double。
         TechniqueLeapFlight flight = ((TechniqueLeapAccess) actor).meridian$getLeap();
         if (flight == null) {
             return vanillaDistance;
         }
-        return (float) Math.min(vanillaDistance, Math.max(0, flight.landingY - actor.getY()));
+        return Math.min(vanillaDistance, Math.max(0, flight.landingY - actor.getY()));
     }
 
     private static void landed(LivingEntity actor, TechniqueLeapFlight flight) {
         // 落地声沿用脚下方块，只有服务端广播，避免预测双响。
-        if (!actor.level().isClientSide) {
+        if (!actor.level().isClientSide()) {
             var group = actor.level().getBlockState(actor.blockPosition().below()).getSoundType();
             actor.level().playSound(null, actor.getX(), actor.getY(), actor.getZ(), group.getStepSound(),
                     SoundSource.PLAYERS, group.getVolume() * STEP_VOLUME, group.getPitch());
@@ -247,7 +247,7 @@ public final class TechniqueLeaps {
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(null);
         flight.end = actor.position();
-        if (!actor.level().isClientSide) {
+        if (!actor.level().isClientSide()) {
             int delay = flight.registered.benefit().getLeap().getLandingDelayTicks();
             access.meridian$setLeapReadyTick(actor.level().getGameTime() + delay);
             present(actor, flight, PresentationAction.STOP);
@@ -264,7 +264,7 @@ public final class TechniqueLeaps {
         var effect = EffectIntent.newBuilder()
                 .setCastId(flight.castId)
                 .setEffectId(action.name().toLowerCase(Locale.ROOT))
-                .setScheduledMillis(actor.getServer().overworld().getGameTime() * MILLIS_PER_TICK)
+                .setScheduledMillis(actor.level().getServer().overworld().getGameTime() * MILLIS_PER_TICK)
                 .setPresentation(presentation)
                 .build();
         TechniqueFabric.service().presentLeap(actor.getUUID(), effect);
@@ -303,7 +303,7 @@ public final class TechniqueLeaps {
 
     public static void tickMob(Mob actor) {
         // 原版目标决定追击对象；已施放、无目标、未落地或由宿主大脑指挥的 tick 不绑定身体或寻找落点。
-        if (actor.level().isClientSide || actor.isNoAi() || !actor.onGround()) {
+        if (actor.level().isClientSide() || actor.isNoAi() || !actor.onGround()) {
             return;
         }
         LivingEntity target = actor.getTarget();

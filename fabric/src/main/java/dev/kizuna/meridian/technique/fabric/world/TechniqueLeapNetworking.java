@@ -1,20 +1,21 @@
 package dev.kizuna.meridian.technique.fabric.world;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapMotion;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import java.util.HashSet;
 
 /** 有界 Protobuf 请求只携带按键意图，客户端不能指定落点或速度。 */
 public final class TechniqueLeapNetworking {
-    public static final ResourceLocation CHANNEL = new ResourceLocation("meridian_technique", "leap");
-    public static final int MAX_PACKET_BYTES = 1024;
+    private static final int MAX_PACKET_BYTES = 1024;
+    public static final ProtobufChannel CHANNEL =
+            new ProtobufChannel(Identifier.fromNamespaceAndPath("meridian_technique", "leap"), MAX_PACKET_BYTES);
 
     private TechniqueLeapNetworking() {
         // 所有世界访问调度回服务端主线程。
@@ -22,24 +23,27 @@ public final class TechniqueLeapNetworking {
 
     public static void initialize() {
         // 原版玩家位置包不驱动权威飞行，每 tick 独立推进一次并保留原版碰撞；挂起的请求到时再决策。
+        // 两个方向都在公共初始化里登记，服务端和客户端用同一份通道定义编解码。
+        CHANNEL.registerServerbound();
+        CHANNEL.registerClientbound();
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 TechniqueLeaps.travel(player);
                 resume(player);
             }
         });
-        ServerPlayNetworking.registerGlobalReceiver(CHANNEL, (server, player, handler, buffer, sender) -> {
-            byte[] payload = buffer.readByteArray(MAX_PACKET_BYTES);
+        ServerPlayNetworking.registerGlobalReceiver(CHANNEL.type(), (payload, context) -> {
             LeapMotion message;
             try {
-                message = LeapMotion.parseFrom(payload);
+                message = LeapMotion.parseFrom(payload.bytes());
             } catch (InvalidProtocolBufferException invalid) {
                 return;
             }
             if (!message.equals(LeapMotion.newBuilder().setAction(LeapMotion.Action.REQUEST).build())) {
                 return;
             }
-            server.execute(() -> request(player));
+            // 26.2 的收包回调已经在服务端主线程上，直接决策。
+            request(context.player());
         });
     }
 
@@ -128,9 +132,7 @@ public final class TechniqueLeapNetworking {
     }
 
     private static void sendTo(ServerPlayer player, LeapMotion message) {
-        // 消息大小由本地有限字段固定，缓冲区不跨接收者复用读指针。
-        var buffer = PacketByteBufs.create();
-        buffer.writeByteArray(message.toByteArray());
-        ServerPlayNetworking.send(player, CHANNEL, buffer);
+        // 消息大小由本地有限字段固定，每个接收者一份新载荷。
+        ServerPlayNetworking.send(player, CHANNEL.payload(message.toByteArray()));
     }
 }

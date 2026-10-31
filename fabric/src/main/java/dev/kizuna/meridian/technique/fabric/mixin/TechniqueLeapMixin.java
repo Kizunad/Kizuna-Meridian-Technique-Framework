@@ -101,8 +101,9 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
     }
 
     @ModifyVariable(method = "causeFallDamage", at = @At("HEAD"), argsOnly = true, ordinal = 0)
-    private float meridian$fallDistance(float distance) {
+    private double meridian$fallDistance(double distance) {
         // 仅减去本次跃步本应覆盖的下降，不授予持续的摔落免疫。
+        // 26.2 的摔落距离是第一个 double 参数；按 float 取会改到第二个参数 damageModifier。
         return TechniqueLeaps.fallDistance((LivingEntity) (Object) this, distance);
     }
 }

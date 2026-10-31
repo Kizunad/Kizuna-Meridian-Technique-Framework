@@ -11,17 +11,16 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapMotion;
 import dev.kizuna.meridian.technique.server.TechniqueLeap;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /** 本地预测与无粒子落点描边；服务端回执只在偏差超过容差时纠正预测结果。 */
@@ -31,6 +30,7 @@ public final class TechniqueLeapClient {
     private static final double MARKER_HEIGHT = 0.02;
     private static final float MARKER_COLOR = 0.75F;
     private static final float MARKER_ALPHA = 0.35F;
+    private static final int MARKER_RINGS = 2;
     private static final double START_POSITION_TOLERANCE = 0.05;
     private static final double START_VELOCITY_TOLERANCE = 0.02;
     private static final double FINISH_TOLERANCE = 0.25;
@@ -44,19 +44,19 @@ public final class TechniqueLeapClient {
     }
 
     public static void initialize() {
-        // 接收有界 Protobuf 后回到渲染主线程，标记绘制不依赖 F3。
-        ClientPlayNetworking.registerGlobalReceiver(TechniqueLeapNetworking.CHANNEL,
-                (client, handler, buffer, sender) -> {
-                    byte[] payload = buffer.readByteArray(TechniqueLeapNetworking.MAX_PACKET_BYTES);
-                    try {
-                        LeapMotion message = LeapMotion.parseFrom(payload);
-                        client.execute(() -> receive(client, message));
-                    } catch (InvalidProtocolBufferException invalid) {
-                        throw new IllegalArgumentException("跃步同步消息非法", invalid);
-                    }
-                });
+        // 26.2 的收包回调已在客户端主线程上，解码后直接处理；消息非法时抛出，连接照旧断开。
+        // 标记绘制不依赖 F3，在 26.2 的收集阶段提交。
+        ClientPlayNetworking.registerGlobalReceiver(TechniqueLeapNetworking.CHANNEL.type(), (payload, context) -> {
+            LeapMotion message;
+            try {
+                message = LeapMotion.parseFrom(payload.bytes());
+            } catch (InvalidProtocolBufferException invalid) {
+                throw new IllegalArgumentException("跃步同步消息非法", invalid);
+            }
+            receive(context.client(), message);
+        });
         ClientTickEvents.END_CLIENT_TICK.register(TechniqueLeapClient::updateMarker);
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(TechniqueLeapClient::render);
+        LevelRenderEvents.COLLECT_SUBMITS.register(TechniqueLeapClient::render);
     }
 
     public static boolean jump(LocalPlayer player) {
@@ -73,15 +73,15 @@ public final class TechniqueLeapClient {
 
     private static void request(LocalPlayer player) {
         // 视线包先于请求到达，服务端按同一起点和准星求解；下一次间隔等服务端 FINISH 给出。
+        // 26.2 的位置包多带水平碰撞，照原版移动包取玩家当前值。
         var access = (TechniqueLeapAccess) player;
         prediction = access.meridian$getLeap();
         access.meridian$setLeapReadyTick(AWAITING_SERVER);
         var origin = prediction.origin;
         player.connection.send(new ServerboundMovePlayerPacket.PosRot(origin.x, origin.y, origin.z,
-                player.getYRot(), player.getXRot(), true /* onGround */));
+                player.getYRot(), player.getXRot(), true /* onGround */, player.horizontalCollision));
         var request = LeapMotion.newBuilder().setAction(LeapMotion.Action.REQUEST).build();
-        var buffer = PacketByteBufs.create().writeByteArray(request.toByteArray());
-        ClientPlayNetworking.send(TechniqueLeapNetworking.CHANNEL, buffer);
+        ClientPlayNetworking.send(TechniqueLeapNetworking.CHANNEL.payload(request.toByteArray()));
     }
 
     private static void receive(Minecraft client, LeapMotion message) {
@@ -202,20 +202,46 @@ public final class TechniqueLeapClient {
         return marker;
     }
 
-    private static void render(WorldRenderContext context) {
-        // 使用原版线框渲染器描一块薄地面框，无粒子、无文字、无调试层。
-        if (marker == null || !marker.supported() || context.consumers() == null) {
+    private static void render(LevelRenderContext context) {
+        // 使用原版线条管线描一块薄地面框，无粒子、无文字、无调试层。
+        // 26.2 先收集再统一绘制：这里只提交几何，坐标相对相机；线宽取原版描边同一个值。
+        if (marker == null || !marker.supported()) {
             return;
         }
         var point = marker.point();
-        var box = new AABB(point.x() - MARKER_RADIUS, point.y() + MARKER_HEIGHT, point.z() - MARKER_RADIUS,
-                point.x() + MARKER_RADIUS, point.y() + MARKER_HEIGHT, point.z() + MARKER_RADIUS);
-        var camera = context.camera().getPosition();
-        var matrices = context.matrixStack();
+        var camera = context.levelState().cameraRenderState.pos;
+        float width = Minecraft.getInstance().gameRenderer.gameRenderState().windowRenderState.appropriateLineWidth;
+        var matrices = context.poseStack();
         matrices.pushPose();
-        matrices.translate(-camera.x, -camera.y, -camera.z);
-        LevelRenderer.renderLineBox(matrices, context.consumers().getBuffer(RenderType.lines()), box,
-                MARKER_COLOR, MARKER_COLOR, MARKER_COLOR, MARKER_ALPHA);
+        matrices.translate(point.x() - camera.x, point.y() + MARKER_HEIGHT - camera.y, point.z() - camera.z);
+        context.submitNodeCollector().submitCustomGeometry(matrices, RenderTypes.lines(),
+                (pose, buffer) -> outline(pose, buffer, width));
         matrices.popPose();
+    }
+
+    private static void outline(PoseStack.Pose pose, VertexConsumer buffer, float width) {
+        // 1.20.1 的 renderLineBox 在 26.2 已删除。它画零高盒子时上下两圈重合、四条竖棱长度为零，
+        // 这里照样画两圈方框、不画竖棱，叠加后的不透明度与原来相同。
+        float radius = (float) MARKER_RADIUS;
+        float[][] corners = {{-radius, -radius}, {radius, -radius}, {radius, radius}, {-radius, radius}};
+        for (int ring = 0; ring < MARKER_RINGS; ring++) {
+            for (int side = 0; side < corners.length; side++) {
+                float[] from = corners[side];
+                float[] to = corners[(side + 1) % corners.length];
+                float normalX = Math.signum(to[0] - from[0]);
+                float normalZ = Math.signum(to[1] - from[1]);
+                vertex(pose, buffer, from, normalX, normalZ, width);
+                vertex(pose, buffer, to, normalX, normalZ, width);
+            }
+        }
+    }
+
+    private static void vertex(PoseStack.Pose pose, VertexConsumer buffer, float[] corner, float normalX,
+                               float normalZ, float width) {
+        // 线条顶点的法线是线段方向，着色器据此在屏幕上加宽。
+        buffer.addVertex(pose, corner[0], 0, corner[1])
+                .setColor(MARKER_COLOR, MARKER_COLOR, MARKER_COLOR, MARKER_ALPHA)
+                .setNormal(pose, normalX, 0, normalZ)
+                .setLineWidth(width);
     }
 }

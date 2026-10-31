@@ -1,12 +1,12 @@
 package dev.kizuna.meridian.technique.fabric.world;
 
+import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StaggerStatus;
 import dev.kizuna.meridian.technique.server.TechniqueService;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -14,7 +14,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -22,10 +21,10 @@ import java.util.function.Consumer;
 
 /** 服务端僵直判定的世界表现：临时移动减速，以及给本人和观察者的剩余时长副本。 */
 public final class TechniqueStaggers {
-    public static final ResourceLocation CHANNEL = new ResourceLocation("meridian_technique", "stagger");
-    public static final int MAX_PACKET_BYTES = 64;
-    private static final String MODIFIER_NAME = "meridian_technique:stagger";
-    private static final UUID MODIFIER_ID = UUID.nameUUIDFromBytes(MODIFIER_NAME.getBytes(StandardCharsets.UTF_8));
+    private static final int MAX_PACKET_BYTES = 64;
+    public static final ProtobufChannel CHANNEL =
+            new ProtobufChannel(Identifier.fromNamespaceAndPath("meridian_technique", "stagger"), MAX_PACKET_BYTES);
+    private static final Identifier MODIFIER_ID = Identifier.fromNamespaceAndPath("meridian_technique", "stagger");
 
     private TechniqueStaggers() {
         // 判定只在 TechniqueService；这里只做表现与同步。
@@ -74,8 +73,9 @@ public final class TechniqueStaggers {
         }
         speed.removeModifier(MODIFIER_ID);
         if (event.remainingMillis() > 0) {
-            var modifier = new AttributeModifier(MODIFIER_ID, MODIFIER_NAME,
-                    event.movementMultiplier() - 1, AttributeModifier.Operation.MULTIPLY_TOTAL);
+            // 26.2 的修饰按 ID 识别，不再有 UUID 和名字；ID 沿用原来的名字。
+            var modifier = new AttributeModifier(MODIFIER_ID,
+                    event.movementMultiplier() - 1, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
             speed.addTransientModifier(modifier);
         }
         if (entity instanceof ServerPlayer player) {
@@ -85,9 +85,7 @@ public final class TechniqueStaggers {
     }
 
     private static void sendTo(ServerPlayer player, StaggerStatus message) {
-        // 消息只有两个有界字段，缓冲区不跨接收者复用读指针。
-        var buffer = PacketByteBufs.create();
-        buffer.writeByteArray(message.toByteArray());
-        ServerPlayNetworking.send(player, CHANNEL, buffer);
+        // 消息只有两个有界字段，每个接收者一份新载荷。
+        ServerPlayNetworking.send(player, CHANNEL.payload(message.toByteArray()));
     }
 }

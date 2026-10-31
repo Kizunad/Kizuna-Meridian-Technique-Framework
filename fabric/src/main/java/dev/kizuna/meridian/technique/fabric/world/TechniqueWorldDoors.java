@@ -5,12 +5,12 @@ import java.util.Comparator;
 import java.util.HashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.LevelEvent;
@@ -28,11 +28,11 @@ final class TechniqueWorldDoors {
     }
 
     static void execute(LivingEntity actor, BreakBlocks intent, TechniqueWorldEffects.Policy policy) {
-        // 总开关与生物破坏规则先于任何方块副作用。
+        // 总开关与生物破坏规则先于任何方块副作用；26.2 的规则值按类型化规则读取。
         ServerLevel world = (ServerLevel) actor.level();
         if (policy == TechniqueWorldEffects.Policy.PLAYER_NO_BREAK
                 || policy == TechniqueWorldEffects.Policy.MOB
-                && !world.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
+                && !world.getGameRules().get(GameRules.MOB_GRIEFING)) {
             return;
         }
         double reach = intent.getForwardDistance().getValue();
@@ -70,7 +70,7 @@ final class TechniqueWorldDoors {
     private static boolean matches(BlockState state, BreakBlocks intent) {
         // 门的种类完全由数据包标签决定。
         return intent.getBlockTagsList().stream().anyMatch(id ->
-                state.is(TagKey.create(Registries.BLOCK, new ResourceLocation(id))));
+                state.is(TagKey.create(Registries.BLOCK, Identifier.parse(id))));
     }
 
     private static BlockPos base(BlockPos pos, BlockState state) {

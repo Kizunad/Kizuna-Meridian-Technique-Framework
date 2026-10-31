@@ -9,16 +9,19 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.Level;
 
 /** 卷身份由注册物品固定，右键学习和消耗仅由服务器确认。 */
@@ -26,9 +29,9 @@ public final class TechniqueScrollItem extends Item {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_technique/scroll");
     private final TechniqueScrollCatalog.Scroll scroll;
 
-    TechniqueScrollItem(TechniqueScrollCatalog.Scroll scroll) {
-        // 沿用原版默认叠放数量，单次学习只消耗一件。
-        super(new Item.Properties());
+    TechniqueScrollItem(TechniqueScrollCatalog.Scroll scroll, ResourceKey<Item> key) {
+        // 沿用原版默认叠放数量，单次学习只消耗一件；注册键决定语言键，与 1.20.1 的默认键相同。
+        super(new Item.Properties().setId(key));
         this.scroll = scroll;
     }
 
@@ -44,37 +47,39 @@ public final class TechniqueScrollItem extends Item {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Level world, List<Component> tooltip, TooltipFlag context) {
-        // 提示列出全部式和前置卷，客户端不根据本地进度猜测能否学习。
-        tooltip.add(Component.literal("功法：").append(techniqueNames()));
+    public void appendHoverText(ItemStack stack, Item.TooltipContext context, TooltipDisplay display,
+            Consumer<Component> tooltip, TooltipFlag flag) {
+        // 提示列出全部式和前置卷，客户端不根据本地进度猜测能否学习；26.2 逐行交给 tooltip 回调。
+        tooltip.accept(Component.literal("功法：").append(techniqueNames()));
         List<String> prerequisites = scroll.prerequisites();
         if (!prerequisites.isEmpty()) {
-            tooltip.add(Component.literal("前置卷：" + String.join("、", prerequisites)));
+            tooltip.accept(Component.literal("前置卷：" + String.join("、", prerequisites)));
         }
     }
 
     @Override
-    public InteractionResultHolder<ItemStack> use(Level world, Player player, InteractionHand hand) {
+    public InteractionResult use(Level world, Player player, InteractionHand hand) {
         // 客户端只预测使用动画；身体写入、提示与物品消耗均在服务端执行。
+        // 26.2 的结果不再携带物品：客户端 SUCCESS 照旧挥手，服务端 CONSUME 不挥手，物品原地减少。
         ItemStack stack = player.getItemInHand(hand);
-        if (world.isClientSide) {
-            return InteractionResultHolder.success(stack);
+        if (world.isClientSide()) {
+            return InteractionResult.SUCCESS;
         }
         if (!(player instanceof ServerPlayer serverPlayer)) {
-            return InteractionResultHolder.fail(stack);
+            return InteractionResult.FAIL;
         }
         Component rejection = learn(serverPlayer);
         if (rejection != null) {
-            serverPlayer.displayClientMessage(rejection, true /* overlay */);
-            return InteractionResultHolder.fail(stack);
+            serverPlayer.sendOverlayMessage(rejection);
+            return InteractionResult.FAIL;
         }
         if (!serverPlayer.getAbilities().instabuild) {
             stack.shrink(1);
         }
         Component message = Component.literal("学会《" + scroll.displayName() + "》：").append(techniqueNames());
-        serverPlayer.displayClientMessage(message, true /* overlay */);
+        serverPlayer.sendOverlayMessage(message);
         TechniqueScrollNetworking.learned(serverPlayer, scroll.volume().getId());
-        return InteractionResultHolder.consume(stack);
+        return InteractionResult.CONSUME;
     }
 
     private Component learn(ServerPlayer player) {

@@ -8,9 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -21,7 +22,7 @@ public final class TechniqueStatusBenefits {
     private static final long MILLIS_PER_TICK = 50;
     private static final Map<String, Registered> benefits = new LinkedHashMap<>();
 
-    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, MobEffect effect) { }
+    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, Holder<MobEffect> effect) { }
 
     private TechniqueStatusBenefits() {
         // 注册表在两个逻辑端以同一目录固定，不运行时制造新身份。
@@ -41,13 +42,13 @@ public final class TechniqueStatusBenefits {
     }
 
     private static void register(TechniqueDefinition technique, StatusBenefit benefit) {
-        // 先验证身份和范围，再注册为可被原版命令补全的有益状态。
+        // 先验证身份和范围，再注册为可被原版命令补全的有益状态；26.2 的效果实例按注册项引用效果。
         TechniqueBenefits.validate(benefit);
         if (benefits.containsKey(benefit.getId())) {
             throw new IllegalArgumentException("状态增益身份重复：" + benefit.getId());
         }
-        MobEffect effect = Registry.register(BuiltInRegistries.MOB_EFFECT, new ResourceLocation(benefit.getId()),
-                new QuietBenefit(benefit.getColorRgb()));
+        Holder<MobEffect> effect = Registry.registerForHolder(BuiltInRegistries.MOB_EFFECT,
+                Identifier.parse(benefit.getId()), new QuietBenefit(benefit.getColorRgb()));
         benefits.put(benefit.getId(), new Registered(benefit, technique, effect));
     }
 

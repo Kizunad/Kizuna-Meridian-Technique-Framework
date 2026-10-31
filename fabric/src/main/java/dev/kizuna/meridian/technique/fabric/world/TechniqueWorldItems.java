@@ -6,16 +6,16 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCateg
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import java.util.List;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ItemContainerContents;
 
 /** 玩家和生物共用的服务端持物事实与数据包规则匹配。 */
 public final class TechniqueWorldItems {
@@ -39,13 +39,13 @@ public final class TechniqueWorldItems {
     }
 
     private static HeldItem item(ItemStack stack) {
-        // 排序标签使重试时的事实具有稳定顺序。
+        // 排序标签使重试时的事实具有稳定顺序；26.2 的物品标签从物品注册项读取。
         if (stack.isEmpty()) {
             return HeldItem.getDefaultInstance();
         }
         return HeldItem.newBuilder()
                 .setItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
-                .addAllTags(stack.getTags().map(tag -> tag.location().toString()).sorted().toList())
+                .addAllTags(stack.typeHolder().tags().map(tag -> tag.location().toString()).sorted().toList())
                 .setDamageable(stack.getMaxDamage() > 0)
                 .setContainsItems(containsItems(stack))
                 .build();
@@ -57,13 +57,10 @@ public final class TechniqueWorldItems {
     }
 
     private static boolean containsItems(ItemStack stack) {
-        // 潜影盒和收纳袋分别使用方块实体库存与物品根库存。
-        return hasItems(BlockItem.getBlockEntityData(stack)) || hasItems(stack.getTag());
-    }
-
-    private static boolean hasItems(CompoundTag data) {
-        // 空库存仍允许参与持物选择。
-        return data != null && !data.getList("Items", Tag.TAG_COMPOUND).isEmpty();
+        // 潜影盒和收纳袋在 26.2 分别使用容器组件与收纳袋组件；空库存仍允许参与持物选择。
+        ItemContainerContents container = stack.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY);
+        BundleContents bundle = stack.getOrDefault(DataComponents.BUNDLE_CONTENTS, BundleContents.EMPTY);
+        return container.nonEmptyItems().iterator().hasNext() || !bundle.isEmpty();
     }
 
     public static HeldItemCategory category(HeldItemRules rules, ItemStack stack) {
@@ -83,6 +80,6 @@ public final class TechniqueWorldItems {
     private static boolean matches(List<String> tags, ItemStack stack) {
         // 同一项中的多个标签使用任一命中语义。
         return tags.isEmpty() || tags.stream().anyMatch(id ->
-                stack.is(TagKey.create(Registries.ITEM, new ResourceLocation(id))));
+                stack.is(TagKey.create(Registries.ITEM, Identifier.parse(id))));
     }
 }

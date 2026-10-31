@@ -12,6 +12,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
 import dev.kizuna.meridian.technique.server.TechniqueStrikeTargets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -20,10 +21,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -32,6 +36,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.phys.Vec3;
 
@@ -45,7 +50,9 @@ public final class TechniqueWorldEffects {
     }
 
     private static final long MILLIS_PER_TICK = 50;
-    private static final byte SHIELD_BREAK_STATUS = 30;
+    private static final float SHIELD_BREAK_VOLUME = 0.8F;
+    private static final float SHIELD_BREAK_PITCH = 0.8F;
+    private static final float SHIELD_BREAK_PITCH_SPREAD = 0.4F;
     private final LivingEntity actor;
     private final Supplier<Policy> policy;
     private final Predicate<LivingEntity> hostile;
@@ -90,7 +97,7 @@ public final class TechniqueWorldEffects {
     }
 
     private StrikeData strikeData(InteractionHand hand, ItemStack stack, HeldItemCategory category, WeaponStrike strike) {
-        // 双手只改变剂量和伤害类型标签，身体系数及做功由 Damage 读取。
+        // 双手只改变剂量和伤害类型标签，身体系数及做功由 Damage 读取；26.2 的伤害类型按注册表查找项取。
         boolean twoHanded = twoHanded(actor, hand, strike);
         String side = "main_hand";
         if (twoHanded) {
@@ -102,8 +109,9 @@ public final class TechniqueWorldEffects {
         if (injury(category, strike) == InjuryKind.BLUNT) {
             kind = "blunt";
         }
-        var key = ResourceKey.create(Registries.DAMAGE_TYPE, new ResourceLocation(damageNamespace, kind + "_" + side));
-        var type = actor.level().registryAccess().registryOrThrow(Registries.DAMAGE_TYPE).getHolderOrThrow(key);
+        var key = ResourceKey.create(Registries.DAMAGE_TYPE,
+                Identifier.fromNamespaceAndPath(damageNamespace, kind + "_" + side));
+        var type = actor.level().registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(key);
         double multiplier = strike.getMultiplier().getValue() * gripMultiplier(strike, twoHanded);
         return new StrikeData(stack, category, strike, multiplier, new DamageSource(type, actor));
     }
@@ -111,6 +119,7 @@ public final class TechniqueWorldEffects {
     public static Optional<DoseEstimate> estimate(LivingEntity actor, TechniqueMessages.Hand selected,
                                                   HeldItemRules rules, WeaponStrike strike, LivingEntity target) {
         // 与命中同一算法估算护甲前剂量；空手或装物容器不会命中。不含肌力系数、护甲和部位，由调用方按 Damage 规则补。
+        // 26.2 的附魔加成要一个伤害来源；估算没有功法的伤害类型，用生物近战来源，原版伤害附魔只看目标。
         InteractionHand hand = hand(selected);
         ItemStack stack = actor.getItemInHand(hand);
         if (rules.getCategoriesCount() == 0 || !TechniqueWorldItems.usable(stack)) {
@@ -119,7 +128,8 @@ public final class TechniqueWorldEffects {
         HeldItemCategory category = TechniqueWorldItems.category(rules, stack);
         boolean twoHanded = twoHanded(actor, hand, strike);
         double grip = gripMultiplier(strike, twoHanded);
-        double dose = baseDamage(stack, category, target) * strike.getMultiplier().getValue() * grip;
+        DamageSource source = actor.damageSources().mobAttack(actor);
+        double dose = baseDamage(stack, category, target, source) * strike.getMultiplier().getValue() * grip;
         return Optional.of(new DoseEstimate(dose, injury(category, strike), twoHanded));
     }
 
@@ -151,6 +161,7 @@ public final class TechniqueWorldEffects {
     private void hitTargets(List<LivingEntity> candidates, List<String> selected, CastHits hits, StrikeData data,
                             List<SoundCue> hitSounds) {
         // 先登记本次尝试命中，盾挡或目标免疫也不能让同组再击中同一目标；目标声音只在真正受伤的目标处响。
+        // 26.2 的服务端受伤入口是 hurtServer，击退也带上本次来源和剂量。
         Set<String> group = hits.groups.computeIfAbsent(data.strike().getDedupGroup(), id -> new HashSet<>());
         group.addAll(selected);
         for (LivingEntity target : candidates) {
@@ -162,15 +173,15 @@ public final class TechniqueWorldEffects {
                     && data.category().getShieldInteraction() == ShieldInteraction.BREAK_BEFORE_HIT) {
                 disableShield(target, data.strike().getShieldBreakMillis());
             }
-            float dose = (float) (baseDamage(data.stack(), data.category(), target) * data.multiplier());
-            boolean damaged = target.hurt(data.source(), dose);
+            float dose = (float) (baseDamage(data.stack(), data.category(), target, data.source()) * data.multiplier());
+            boolean damaged = target.hurtServer((ServerLevel) target.level(), data.source(), dose);
             if (blocked && data.strike().getBreakShield()
                     && data.category().getShieldInteraction() == ShieldInteraction.COOLDOWN_AFTER_BLOCK) {
                 disableShield(target, data.strike().getShieldCooldownMillis());
             }
             if (damaged && data.strike().getKnockback().getValue() > 0) {
                 Vec3 delta = actor.position().subtract(target.position());
-                target.knockback(data.strike().getKnockback().getValue(), delta.x, delta.z);
+                target.knockback(data.strike().getKnockback().getValue(), delta.x, delta.z, data.source(), dose);
             }
             if (damaged) {
                 TechniqueSounds.playAll(target, hitSounds);
@@ -178,32 +189,40 @@ public final class TechniqueWorldEffects {
         }
     }
 
-    private static double baseDamage(ItemStack stack, HeldItemCategory category, LivingEntity target) {
+    private static double baseDamage(ItemStack stack, HeldItemCategory category, LivingEntity target,
+                                     DamageSource source) {
         // 物品按放在主手时的属性计算，忽略玩家总攻击属性、暴击与原版攻击冷却。
+        // 26.2 的物品属性在组件里，只取物品自身的修饰；附魔加成由原版在总值上叠加，原版伤害附魔都是加法。
         if (category.getBaseDamageSource() == BaseDamageSource.FIXED_DAMAGE) {
             return category.getBaseDamage().getValue();
         }
+        List<AttributeModifier> modifiers = new ArrayList<>();
+        stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY)
+                .forEach(EquipmentSlot.MAINHAND, (attribute, modifier) -> {
+                    if (attribute.is(Attributes.ATTACK_DAMAGE)) {
+                        modifiers.add(modifier);
+                    }
+                });
         double attack = 1;
-        var modifiers = stack.getAttributeModifiers(EquipmentSlot.MAINHAND)
-                .get(Attributes.ATTACK_DAMAGE);
         for (AttributeModifier modifier : modifiers) {
-            if (modifier.getOperation() == AttributeModifier.Operation.ADDITION) {
-                attack += modifier.getAmount();
+            if (modifier.operation() == AttributeModifier.Operation.ADD_VALUE) {
+                attack += modifier.amount();
             }
         }
         double scaledBase = attack;
         for (AttributeModifier modifier : modifiers) {
-            if (modifier.getOperation() == AttributeModifier.Operation.MULTIPLY_BASE) {
-                scaledBase += attack * modifier.getAmount();
+            if (modifier.operation() == AttributeModifier.Operation.ADD_MULTIPLIED_BASE) {
+                scaledBase += attack * modifier.amount();
             }
         }
         double total = scaledBase;
         for (AttributeModifier modifier : modifiers) {
-            if (modifier.getOperation() == AttributeModifier.Operation.MULTIPLY_TOTAL) {
-                total *= 1 + modifier.getAmount();
+            if (modifier.operation() == AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL) {
+                total *= 1 + modifier.amount();
             }
         }
-        double enchanted = total + EnchantmentHelper.getDamageBonus(stack, target.getMobType());
+        double enchanted = EnchantmentHelper.modifyDamage((ServerLevel) target.level(), stack, target, source,
+                (float) total);
         return enchanted * category.getBaseDamage().getValue();
     }
 
@@ -215,26 +234,31 @@ public final class TechniqueWorldEffects {
 
     private static void disableShield(LivingEntity target, long millis) {
         // 玩家冷却同步交给原版物品冷却器，其他生物至少停止当前格挡。
+        // 26.2 没有盾破实体事件，改由服务端在目标处播放同一盾破声，音量与音高取原事件的取值。
         if (target instanceof ServerPlayer player) {
             int ticks = (int) ((millis + MILLIS_PER_TICK - 1) / MILLIS_PER_TICK);
-            player.getCooldowns().addCooldown(Items.SHIELD, ticks);
+            player.getCooldowns().addCooldown(Items.SHIELD.getDefaultInstance(), ticks);
         }
         target.releaseUsingItem();
-        target.level().broadcastEntityEvent(target, SHIELD_BREAK_STATUS);
+        float pitch = SHIELD_BREAK_PITCH + target.level().getRandom().nextFloat() * SHIELD_BREAK_PITCH_SPREAD;
+        target.level().playSound(null /* except */, target.getX(), target.getY(), target.getZ(),
+                SoundEvents.SHIELD_BREAK, target.getSoundSource(), SHIELD_BREAK_VOLUME, pitch);
     }
 
     private void consume(ItemStack stack, InteractionHand hand, WeaponStrikeIntent intent) {
         // 生物与创造玩家不磨损；末击挥空仍消耗，耐久附魔和无法破坏由原版处理。
+        // 26.2 的磨损入口按手自行广播损坏；不可磨损物品照原版磨坏的顺序，先减少再广播损坏。
         if (!(actor instanceof ServerPlayer player) || player.isCreative()) {
             return;
         }
         if (stack.getMaxDamage() > 0) {
             double multiplier = TechniqueWorldItems.durabilityMultiplier(intent.getHeldItemRules(), stack);
             int amount = (int) Math.ceil(intent.getStrike().getDurabilityBase() * multiplier);
-            stack.hurtAndBreak(amount, actor, entity -> entity.broadcastBreakEvent(hand));
+            stack.hurtAndBreak(amount, actor, hand);
         } else {
-            actor.broadcastBreakEvent(hand);
+            var item = stack.getItem();
             stack.shrink(1);
+            actor.onEquippedItemBroken(item, hand.asEquipmentSlot());
         }
     }
 

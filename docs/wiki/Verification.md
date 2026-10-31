@@ -419,3 +419,19 @@ T2 只有正常 FINISHED 沿用原收势边界；取消与中断恢复按实际�
 
 本轮最终验证命令与结果、服务端测试和 GameTest 计数见
 `~/Code/Kizuna-remote-session/handoff/cross-review-rework-2026-10-28-result.md`。
+
+## 迁移到 Minecraft 26.2（2026-10-31）
+
+工具链改为 Java 25、Gradle 9.8.0 与不重映射的 Loom 1.19.3；Fabric 依赖改用 `implementation`，
+本地运行依赖由 `modLocalRuntime` 改为 `localRuntime`。玩法行为不变，只按 26.2 的接口改写：
+网络改走 Framework 的 `ProtobufChannel`，物品、声音、状态效果与实体类型改用 `Identifier`、`Holder`
+与 `EntityTypes`，卷轴阅读界面改为 26.2 的绘制收集阶段，跃步落点描边改在 `COLLECT_SUBMITS` 提交。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build :fabric:runGametest --console=plain` | JUnit 196/196（服务端 180、fabric 16）；GameTest 18/18，另有原版 `always_pass` |
+| `python3 scripts/check_docs.py` | 通过 |
+
+GameTest 改用 Fabric 的 `@GameTest`。26.2 的 `performPrefixedCommand` 不再返回结果，测试经
+`GameTestCommands` 从来源的结果回调取得；物品使用成功会附带手中物品，断言改为判断服务端成功且不挥手。
+客户端验收需要整合装配与 Human 客户端，待装配脚本迁移后补跑。

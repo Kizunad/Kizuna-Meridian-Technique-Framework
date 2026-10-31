@@ -2,7 +2,7 @@
 
 本库定义通用功法契约、加载校验、标签绑定、施放状态机、效果调度、AI 选择和服务端入口，
 并支持阶段 6a 的书卷、持物选手和移动限速，以及 6b 的带时刻打击/劈门意图、承接和战斗情境 AI。
-Java 目标为 17，Fabric 宿主目标为 Minecraft 1.20.1；身体与世界效果仍由宿主附属提供。
+Java 目标为 25，Fabric 宿主目标为 Minecraft 26.2；身体与世界效果仍由宿主附属提供。
 
 | 目录 | 职责 |
 |---|---|
@@ -10,7 +10,7 @@ Java 目标为 17，Fabric 宿主目标为 Minecraft 1.20.1；身体与世界效
 | `server/src/main/java/` | 不可变目录、定义校验、槽位绑定、施放状态机、效果意图调度和 AI 选择 |
 | `server/src/test/java/` | 必要整体回归、内存假宿主、仅用于测试的功法与身体构型 |
 | `fabric/src/main/java/` | 目录与宿主发现、主线程调度、学会命令、卷轴物品、创造栏、客户端模型和阅读钩子 |
-| `gradle/wrapper/` | Gradle 8.14.6，保留原始许可和下载校验和 |
+| `gradle/wrapper/` | Gradle 9.8.0，保留原始许可和下载校验和；守护进程 JDK 由 `gradle/gradle-daemon-jvm.properties` 指定为 25 |
 | `docs/wiki/` | 文档唯一编辑源 |
 | `scripts/check_docs.py` | README 与 Wiki 本地链接检查 |
 

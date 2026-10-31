@@ -7,7 +7,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
@@ -58,9 +58,9 @@ public final class TechniqueSounds {
 
     private static Holder<SoundEvent> event(SoundCue cue) {
         // 已注册的按注册表编号下发；未注册的随包内联 ID，客户端有该资源就能播放。
-        ResourceLocation id = new ResourceLocation(cue.getSoundId());
+        Identifier id = Identifier.parse(cue.getSoundId());
         ResourceKey<SoundEvent> key = ResourceKey.create(Registries.SOUND_EVENT, id);
-        Optional<Holder.Reference<SoundEvent>> registered = BuiltInRegistries.SOUND_EVENT.getHolder(key);
+        Optional<Holder.Reference<SoundEvent>> registered = BuiltInRegistries.SOUND_EVENT.get(key);
         if (registered.isPresent()) {
             return registered.get();
         }

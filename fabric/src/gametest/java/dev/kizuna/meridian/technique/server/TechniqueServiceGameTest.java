@@ -15,12 +15,12 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefi
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProgress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.gametest.framework.GameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -29,7 +29,7 @@ import static dev.kizuna.meridian.technique.server.Fixtures.*;
 import static dev.kizuna.meridian.technique.server.CombatTechniqueFixtures.*;
 
 /** Fabric 服务端主线程上的功法服务旅程与生命周期取消。 */
-public final class TechniqueServiceGameTest implements FabricGameTest {
+public final class TechniqueServiceGameTest {
     private static final long FINISHED_MILLIS = WARMUP + ACTIVE + RECOVERY;
     private static final long EVENT_WAIT_TICKS = 2;
     private static final int START_AND_IMPULSE_COUNT = 2;
@@ -44,7 +44,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
     private static final long NEXT_END = WINDOW_START + CAST_END - CLIP_OFFSET;
     private static final int SWEEP_HIT_COUNT = 2;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void discoversManifestAlongsideEntrypointAndLearnsItsVolume(GameTestHelper context) {
         // 清单仅由测试模组元数据声明，服务启动后与旧入口目录一起可学习。
         Prepared prepared = prepare(context, "sample_manifest:technique");
@@ -61,7 +61,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void learnCommandPublishesKnownChangedAndTicksToFinish(GameTestHelper context) {
         // 管理命令、公开服务入口、Fabric tick 与宿主效果使用同一服务器服务。
         Prepared prepared = prepare(context);
@@ -73,7 +73,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
             }
         });
         MinecraftServer server = context.getLevel().getServer();
-        int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
+        int learned = GameTestCommands.run(server.createCommandSourceStack(),
                 "meridian technique learn " + entityUuid + " " + TECHNIQUE_ID);
         TechniqueService service = TechniqueFabric.service();
         context.assertTrue(learned == 1 && changes.size() == 1, "学会命令或 KNOWN_CHANGED 事件未生效");
@@ -85,7 +85,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.runAfterDelay(EVENT_WAIT_TICKS, () -> assertEffectsAndFinish(context, prepared));
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void staggerInterruptCancels(GameTestHelper context) {
         // 伤害附属可从公开访问点取得服务，以僵直判定打断起手。
         Prepared prepared = prepare(context);
@@ -101,7 +101,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void discardTriggersEntityUnloadAndClearsSession(GameTestHelper context) {
         // discard 触发真实 ENTITY_UNLOAD，不能用直接调用服务来代替事件接线。
         Prepared prepared = prepare(context);
@@ -119,15 +119,15 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void learnCommandRejectsUnknownIdAndInsufficientPermission(GameTestHelper context) {
         // 管理命令拒绝目录外 ID 和权限不足的调用，身体知识保持不变。
         Prepared prepared = prepare(context);
         MinecraftServer server = context.getLevel().getServer();
         String command = "meridian technique learn " + prepared.entity().getUUID() + " ";
-        int unknown = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                command + "sample:missing");
-        int denied = server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withPermission(1),
+        int unknown = GameTestCommands.run(server.createCommandSourceStack(), command + "sample:missing");
+        int denied = GameTestCommands.run(
+                server.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR),
                 command + TECHNIQUE_ID);
         context.assertTrue(unknown == 0 && denied == 0, "非法学会命令没有拒绝");
         context.assertTrue(TechniqueFabric.service().known(prepared.entity().getUUID()).isEmpty(),
@@ -136,17 +136,15 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void volumeCommandSelectsOffHandLocksAndUnlocksOnServerTick(GameTestHelper context) {
         // 真实命令按卷学会，字节 inspect 选副手，Fabric tick 在收势结束清理移动约束。
         Prepared prepared = prepare(context, TechniqueGameTestHost.HELD_TECHNIQUE_ID);
         MinecraftServer server = context.getLevel().getServer();
         String command = "meridian technique learn " + prepared.entity().getUUID() + " ";
-        int rejected = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                command + HeldTechniqueFixtures.LOWER);
+        int rejected = GameTestCommands.run(server.createCommandSourceStack(), command + HeldTechniqueFixtures.LOWER);
         context.assertTrue(rejected == 0, "未学前置卷仍学会了下卷");
-        int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
-                command + HeldTechniqueFixtures.UPPER);
+        int learned = GameTestCommands.run(server.createCommandSourceStack(), command + HeldTechniqueFixtures.UPPER);
         TechniqueService service = TechniqueFabric.service();
         context.assertTrue(learned == 1 && service.known(prepared.entity().getUUID()).size()
                 == VOLUME_TECHNIQUE_COUNT, "按卷学习没有保存全部单式");
@@ -171,7 +169,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void unclaimedSavedCastRecoversWithCleanupOnly(GameTestHelper context) {
         // 身体已经从实体目录撤销，公开服务仍可经可信恢复入口取消旧档中的施放。
         Prepared prepared = prepare(context);
@@ -185,7 +183,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void unclaimedDeadCastRecoversWithoutRefund(GameTestHelper context) {
         // Framework 死亡清空动作后仍可恢复附属进度，死体不再永久保留施放和会话。
         Prepared prepared = prepare(context);
@@ -202,7 +200,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest
     public void combatFollowUpDispatchesTimedStrikesAndDoorsOnServerTicks(GameTestHelper context) {
         // 真实 Fabric tick 交付前式效果后原子承接，后式不重放预备冲量。
         Prepared prepared = prepare(context, TechniqueGameTestHost.COMBAT_ID);
@@ -332,7 +330,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
 
     private static Prepared prepare(GameTestHelper context, String techniqueId) {
         // 测试实体与具体目录引用分离，保持命令和施放使用同一个版本。
-        Entity entity = context.spawnWithNoFreeWill(EntityType.PIG, 1, 1, 1);
+        Entity entity = context.spawnWithNoFreeWill(EntityTypes.PIG, 1, 1, 1);
         BodySnapshot initial = withProgress(body(Shape.TENDRIL), TechniqueState.empty());
         MemoryHost host = new MemoryHost(initial);
         TechniqueGameTestHost.bind(entity.getUUID(), host);

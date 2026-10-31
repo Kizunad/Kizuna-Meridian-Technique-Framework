@@ -8,7 +8,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 /** 学习成功后的只读阅读钩子；展示端不决定学习结果或发送确认。 */
 public final class TechniqueScrollClient implements ClientModInitializer {
@@ -21,27 +21,24 @@ public final class TechniqueScrollClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // 收包线程只解码卷身份，界面回调始终在客户端主线程执行。
-        TechniqueScrollModels.register();
+        // 26.2 的收包回调已在客户端主线程上，界面回调直接执行；卷轴模型改由客户端混入在资源加载时补齐。
+        // 26.2 的界面切换移到 Gui 上。
         TechniqueLeapClient.initialize();
         TechniqueStaggerClient.initialize();
-        LEARNED.register(scroll -> Minecraft.getInstance().setScreen(new TechniqueScrollScreen(scroll)));
+        LEARNED.register(scroll -> Minecraft.getInstance().gui.setScreen(new TechniqueScrollScreen(scroll)));
         ClientPlayNetworking.registerGlobalReceiver(TechniqueScrollNetworking.LEARNED,
-                (client, handler, buffer, sender) -> {
-                    ResourceLocation volume = buffer.readResourceLocation();
-                    client.execute(() -> notifyLearned(volume));
-                });
+                (payload, context) -> notifyLearned(payload.volume()));
     }
 
-    public static ResourceLocation background(TechniqueScrollCatalog.Scroll scroll) {
+    public static Identifier background(TechniqueScrollCatalog.Scroll scroll) {
         // 阅读背景沿用卷路径，不依赖物品模型或物品的 _scroll 后缀。
-        ResourceLocation volume = new ResourceLocation(scroll.volume().getId());
-        return new ResourceLocation(volume.getNamespace(), "textures/gui/scroll/" + volume.getPath() + ".png");
+        Identifier volume = Identifier.parse(scroll.volume().getId());
+        return volume.withPath("textures/gui/scroll/" + volume.getPath() + ".png");
     }
 
-    private static void notifyLearned(ResourceLocation volume) {
+    private static void notifyLearned(Identifier volume) {
         // 只转发本地同一份清单已登记的卷，晚到目录没有卷轴展示通知。
-        ResourceLocation itemId = new ResourceLocation(volume.getNamespace(), volume.getPath() + "_scroll");
+        Identifier itemId = volume.withSuffix("_scroll");
         var item = TechniqueScrollItems.scrolls().get(itemId);
         if (item != null) {
             LEARNED.invoker().onLearned(item.scroll());

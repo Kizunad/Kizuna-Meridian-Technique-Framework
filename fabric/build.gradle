@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom'
+    id 'net.fabricmc.fabric-loom'
 }
 
 description = 'Fabric 服务端装配；实体身体和世界效果由 meridian_technique_host 提供。'
@@ -9,12 +9,12 @@ repositories {
 }
 
 dependencies {
+    // 26.x 不混淆：直接用官方名编译，没有映射，模组依赖也不经重映射。
     minecraft libs.minecraft
-    mappings loom.officialMojangMappings()
-    modImplementation libs.fabric.loader
-    modImplementation libs.fabric.api
+    implementation libs.fabric.loader
+    implementation libs.fabric.api
     // /meridian 指令统一注册点（Framework 的 Fabric 模组 meridian_framework），Framework 组合时自动替换为源码工程。
-    modImplementation 'dev.kizuna.meridian:fabric'
+    implementation 'dev.kizuna.meridian:fabric'
     implementation project(':server')
     include project(':server')
     include project(':shared')

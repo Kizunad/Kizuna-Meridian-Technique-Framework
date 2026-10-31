@@ -11,8 +11,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class TechniqueQuietEffectMixin {
     @Inject(method = "isVisible", at = @At("HEAD"), cancellable = true)
     private void meridian$quiet(CallbackInfoReturnable<Boolean> callback) {
-        // 原版命令与保存读取也遵守无粒子，不改变其他药水显示。
-        var effect = ((MobEffectInstance) (Object) this).getEffect();
+        // 原版命令与保存读取也遵守无粒子，不改变其他药水显示；26.2 的 getEffect 返回注册项，取其值判断。
+        var effect = ((MobEffectInstance) (Object) this).getEffect().value();
         if (TechniqueStatusBenefits.quiet(effect)) {
             callback.setReturnValue(false /* showParticles */);
         }
@@ -20,8 +20,8 @@ public abstract class TechniqueQuietEffectMixin {
 
     @Inject(method = "isAmbient", at = @At("HEAD"), cancellable = true)
     private void meridian$ambient(CallbackInfoReturnable<Boolean> callback) {
-        // 同一内容效果的显示属性不由命令的可选参数改变。
-        var effect = ((MobEffectInstance) (Object) this).getEffect();
+        // 同一内容效果的显示属性不由命令的可选参数改变；判断取注册项的值。
+        var effect = ((MobEffectInstance) (Object) this).getEffect().value();
         if (TechniqueStatusBenefits.quiet(effect)) {
             callback.setReturnValue(true /* ambient */);
         }
@@ -29,8 +29,8 @@ public abstract class TechniqueQuietEffectMixin {
 
     @Inject(method = "showIcon", at = @At("HEAD"), cancellable = true)
     private void meridian$icon(CallbackInfoReturnable<Boolean> callback) {
-        // 隐藏粒子不连带隐藏物品栏与 HUD 图标。
-        var effect = ((MobEffectInstance) (Object) this).getEffect();
+        // 隐藏粒子不连带隐藏物品栏与 HUD 图标；判断取注册项的值。
+        var effect = ((MobEffectInstance) (Object) this).getEffect().value();
         if (TechniqueStatusBenefits.quiet(effect)) {
             callback.setReturnValue(true /* showIcon */);
         }

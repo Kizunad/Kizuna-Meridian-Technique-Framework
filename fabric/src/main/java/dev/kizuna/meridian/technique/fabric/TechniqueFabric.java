@@ -24,10 +24,10 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
-import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -80,6 +80,9 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
         TechniqueLeapNetworking.initialize();
+        // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
+        TechniqueStaggers.CHANNEL.registerClientbound();
+        TechniqueScrollNetworking.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
@@ -110,7 +113,7 @@ public final class TechniqueFabric implements ModInitializer {
 
     private static void warnUnregisteredSounds(TechniqueRegistry registry) {
         // 纯数据功法书可在客户端资源里声明声音事件；服务端注册表没有时只提示，播放时照常内联下发。
-        Predicate<String> registered = id -> BuiltInRegistries.SOUND_EVENT.containsKey(new ResourceLocation(id));
+        Predicate<String> registered = id -> BuiltInRegistries.SOUND_EVENT.containsKey(Identifier.parse(id));
         for (String id : TechniqueSoundCues.unregistered(registry.definitions(), registered)) {
             LOG.warn("功法目录引用的声音 {} 不在服务端声音注册表中，将以内联事件下发；客户端缺少该资源时无声", id);
         }
@@ -150,14 +153,14 @@ public final class TechniqueFabric implements ModInitializer {
         // 功法 ID 从服务端不可变目录解析，书、卷和式都可补全。
         MeridianCommands.register(MeridianCommands.Branch.TECHNIQUE, "learn", LEARN_PERMISSION_LEVEL, (node, context) ->
                 MeridianCommands.optionalEntities(node, (parent, targets) -> parent.then(
-                        Commands.argument("id", ResourceLocationArgument.id())
+                        Commands.argument("id", IdentifierArgument.id())
                                 .suggests((command, builder) ->
                                         SharedSuggestionProvider.suggestResource(learnableIds(), builder))
                                 .executes(command -> learn(command.getSource(), targets.resolve(command),
-                                        ResourceLocationArgument.getId(command, "id").toString())))));
+                                        IdentifierArgument.getId(command, "id").toString())))));
     }
 
-    private static List<ResourceLocation> learnableIds() {
+    private static List<Identifier> learnableIds() {
         // 从当前服务器目录同时提供书、卷和式，命名空间过滤交给原版补全器。
         if (service == null) {
             return List.of();
@@ -169,7 +172,7 @@ public final class TechniqueFabric implements ModInitializer {
                 .flatMap(ids -> ids)
                 .distinct()
                 .sorted()
-                .map(ResourceLocation::new)
+                .map(Identifier::parse)
                 .toList();
     }
 

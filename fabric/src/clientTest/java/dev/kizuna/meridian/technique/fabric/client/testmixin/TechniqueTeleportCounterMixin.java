@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class TechniqueTeleportCounterMixin {
     @Inject(method = "handleMovePlayer", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
             target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;"
-                    + "Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V"))
+                    + "Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V"))
     private void meridian$countTeleport(ClientboundPlayerPositionPacket packet, CallbackInfo callback) {
         // 网络线程调度时 ensureRunningOnSameThread 会抛出并重入，
         // 只有主线程执行能越过该调用。

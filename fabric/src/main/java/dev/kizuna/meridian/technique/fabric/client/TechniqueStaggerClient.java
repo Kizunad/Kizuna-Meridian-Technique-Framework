@@ -19,17 +19,15 @@ public final class TechniqueStaggerClient {
     }
 
     public static void initialize() {
-        // 收包线程只解码，记录回到客户端主线程更新；断线清空旧世界的实体编号。
-        ClientPlayNetworking.registerGlobalReceiver(TechniqueStaggers.CHANNEL,
-                (client, handler, buffer, sender) -> {
-                    byte[] payload = buffer.readByteArray(TechniqueStaggers.MAX_PACKET_BYTES);
-                    try {
-                        StaggerStatus message = StaggerStatus.parseFrom(payload);
-                        client.execute(() -> receive(message));
-                    } catch (InvalidProtocolBufferException invalid) {
-                        throw new IllegalArgumentException("僵直同步消息非法", invalid);
-                    }
-                });
+        // 26.2 的收包回调已在客户端主线程上，解码后直接更新记录；消息非法时抛出，连接照旧断开。
+        // 断线清空旧世界的实体编号。
+        ClientPlayNetworking.registerGlobalReceiver(TechniqueStaggers.CHANNEL.type(), (payload, context) -> {
+            try {
+                receive(StaggerStatus.parseFrom(payload.bytes()));
+            } catch (InvalidProtocolBufferException invalid) {
+                throw new IllegalArgumentException("僵直同步消息非法", invalid);
+            }
+        });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(endNanos::clear));
     }
 

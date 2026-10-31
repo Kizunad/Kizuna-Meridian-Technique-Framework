@@ -1,5 +1,7 @@
 plugins {
     id 'net.fabricmc.fabric-loom'
+    // 下游 GameTest 共用的假玩家夹具放在 testFixtures，不进正式 JAR。
+    id 'java-test-fixtures'
 }
 
 description = 'Fabric 服务端装配；实体身体和世界效果由 meridian_technique_host 提供。'
@@ -44,6 +46,10 @@ loom {
 }
 
 sourceSets {
+    // 夹具直接使用 Minecraft 类，编译类路径沿用正式源码集。
+    testFixtures {
+        compileClasspath += sourceSets.main.compileClasspath
+    }
     clientTest {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output

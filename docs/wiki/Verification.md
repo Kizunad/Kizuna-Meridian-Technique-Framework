@@ -435,3 +435,11 @@ T2 只有正常 FINISHED 沿用原收势边界；取消与中断恢复按实际�
 GameTest 改用 Fabric 的 `@GameTest`。26.2 的 `performPrefixedCommand` 不再返回结果，测试经
 `GameTestCommands` 从来源的结果回调取得；物品使用成功会附带手中物品，断言改为判断服务端成功且不挥手。
 客户端验收需要整合装配与 Human 客户端，待装配脚本迁移后补跑。
+
+### 下游共用的 GameTest 夹具
+
+`fabric` 模块开 `testFixtures`，放下游 GameTest 共用的 26.2 假玩家，不进正式 JAR。
+`TestPlayers.detached` 按原版登录同一套 `CommonListenerCookie` 构造 `ServerPlayer` 与正式网络处理器，
+不进玩家列表；`TestConnection` 只换传输层，发往客户端的包直接丢弃。
+下游在 GameTest 源码集写 `testFixtures('dev.kizuna.meridian.technique:fabric')`，经源码组合解析。
+夹具按实际用法逐步补充，第一个用户是 Vanilla Damage 的挥手包用例。

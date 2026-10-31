@@ -6,15 +6,14 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Identifier;
-
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 import java.util.HashSet;
 
 /** 有界 Protobuf 请求只携带按键意图，客户端不能指定落点或速度。 */
 public final class TechniqueLeapNetworking {
-    public static final Identifier CHANNEL = new Identifier("meridian_technique", "leap");
+    public static final ResourceLocation CHANNEL = new ResourceLocation("meridian_technique", "leap");
     public static final int MAX_PACKET_BYTES = 1024;
 
     private TechniqueLeapNetworking() {
@@ -24,7 +23,7 @@ public final class TechniqueLeapNetworking {
     public static void initialize() {
         // 原版玩家位置包不驱动权威飞行，每 tick 独立推进一次并保留原版碰撞；挂起的请求到时再决策。
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-            for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 TechniqueLeaps.travel(player);
                 resume(player);
             }
@@ -44,7 +43,7 @@ public final class TechniqueLeapNetworking {
         });
     }
 
-    private static void request(ServerPlayerEntity player) {
+    private static void request(ServerPlayer player) {
         // 只有地面新起跳能够收费；重复请求不会重新决策或重扣体力。
         TechniqueLeaps.Jump result = TechniqueLeaps.jump(player);
         if (result == TechniqueLeaps.Jump.ORDINARY) {
@@ -69,25 +68,25 @@ public final class TechniqueLeapNetworking {
         }
     }
 
-    private static boolean early(ServerPlayerEntity player) {
+    private static boolean early(ServerPlayer player) {
         // 客户端世界时间在服务端变慢时会超前；站在地上只差落地间隔的请求挂起到时刻，不回拉预测。
         long readyTick = ((TechniqueLeapAccess) player).meridian$getLeapReadyTick();
-        return player.isOnGround() && player.getWorld().getTime() < readyTick;
+        return player.onGround() && player.level().getGameTime() < readyTick;
     }
 
-    private static void resume(ServerPlayerEntity player) {
+    private static void resume(ServerPlayer player) {
         // 挂起期间位置和视线包都不被采纳，到时按请求那一刻的状态起跳，与客户端预测一致。
         var access = (TechniqueLeapAccess) player;
         if (access.meridian$getLeapPending()
-                && player.getWorld().getTime() >= access.meridian$getLeapReadyTick()) {
+                && player.level().getGameTime() >= access.meridian$getLeapReadyTick()) {
             access.meridian$clearLeapPending();
             request(player);
         }
     }
 
-    private static void correctGrounded(ServerPlayerEntity player) {
+    private static void correctGrounded(ServerPlayer player) {
         // 落地间隔内拒绝预测时，回传当前位置、速度和可起跳时刻，避免客户端残留飞行状态。
-        var velocity = player.getVelocity();
+        var velocity = player.getDeltaMovement();
         var correction = LeapMotion.newBuilder()
                 .setAction(LeapMotion.Action.FINISH)
                 .setEntityId(player.getId())
@@ -104,8 +103,8 @@ public final class TechniqueLeapNetworking {
 
     public static void send(LivingEntity actor, LeapMotion.Action action, TechniqueLeapFlight flight) {
         // 起点、速度和可起跳时刻来自当前服务端实体，观察者和本人收到同一权威结果。
-        var position = actor.getPos();
-        var velocity = actor.getVelocity();
+        var position = actor.position();
+        var velocity = actor.getDeltaMovement();
         var message = LeapMotion.newBuilder()
                 .setAction(action)
                 .setEntityId(actor.getId())
@@ -120,15 +119,15 @@ public final class TechniqueLeapNetworking {
                 .setReadyTick(((TechniqueLeapAccess) actor).meridian$getLeapReadyTick())
                 .build();
         var recipients = new HashSet<>(PlayerLookup.tracking(actor));
-        if (actor instanceof ServerPlayerEntity player) {
+        if (actor instanceof ServerPlayer player) {
             recipients.add(player);
         }
-        for (ServerPlayerEntity player : recipients) {
+        for (ServerPlayer player : recipients) {
             sendTo(player, message);
         }
     }
 
-    private static void sendTo(ServerPlayerEntity player, LeapMotion message) {
+    private static void sendTo(ServerPlayer player, LeapMotion message) {
         // 消息大小由本地有限字段固定，缓冲区不跨接收者复用读指针。
         var buffer = PacketByteBufs.create();
         buffer.writeByteArray(message.toByteArray());

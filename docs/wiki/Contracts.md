@@ -172,7 +172,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 不存在两套声音声明。
 
 合法但不在服务端声音注册表里的 ID，例如纯数据功法书在自己的 `assets/<ns>/sounds.json` 里声明的事件，
-在服务器启动、目录合并后各记一行 WARN。播放时以 `RegistryEntry.of(SoundEvent.of(id))` 直接下发，
+在服务器启动、目录合并后各记一行 WARN。播放时以 `Holder.direct(SoundEvent.createVariableRangeEvent(id))` 直接下发，
 客户端有该资源就能听到。
 
 `TechniqueDefinition.follow_up` 由后式声明精确前式版本，最多 32 条，不重复、不自引且引用必须存在。

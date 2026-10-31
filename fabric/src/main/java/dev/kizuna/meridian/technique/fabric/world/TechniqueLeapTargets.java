@@ -2,15 +2,14 @@ package dev.kizuna.meridian.technique.fabric.world;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
 import dev.kizuna.meridian.technique.server.TechniqueLeap;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
-
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /** 世界采样适配；玩家准星和 AI 目标均使用相同的站立判定。 */
 public final class TechniqueLeapTargets {
@@ -25,21 +24,21 @@ public final class TechniqueLeapTargets {
 
     public static TechniqueLeap.Landing aimed(LivingEntity actor, LeapProfile profile) {
         // 射线从眼睛出发，长度包括上下坡的高度差，选择器再把命中点投影进直线预算。
-        Vec3d eye = actor.getEyePos();
-        Vec3d direction = Vec3d.fromPolar(actor.getPitch(), actor.getYaw());
+        Vec3 eye = actor.getEyePosition();
+        Vec3 direction = Vec3.directionFromRotation(actor.getXRot(), actor.getYRot());
         double reach = profile.getMaximumPath() + profile.getMaximumRise() + profile.getMaximumDrop();
-        var hit = actor.getWorld().raycast(new RaycastContext(eye, eye.add(direction.multiply(reach)),
-                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, actor));
+        var hit = actor.level().clip(new ClipContext(eye, eye.add(direction.scale(reach)),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, actor));
         Optional<TechniqueLeap.Point> pointed = Optional.empty();
         if (hit.getType() != HitResult.Type.MISS) {
-            pointed = Optional.of(point(hit.getPos()));
+            pointed = Optional.of(point(hit.getLocation()));
         }
-        return select(actor, profile, new TechniqueLeap.Aim(point(actor.getPos()), point(direction), pointed));
+        return select(actor, profile, new TechniqueLeap.Aim(point(actor.position()), point(direction), pointed));
     }
 
-    public static TechniqueLeap.Landing toward(LivingEntity actor, LeapProfile profile, Vec3d target) {
+    public static TechniqueLeap.Landing toward(LivingEntity actor, LeapProfile profile, Vec3 target) {
         // AI 使用当前目标脚下位置，不复用过期导航节点。
-        Vec3d origin = actor.getPos();
+        Vec3 origin = actor.position();
         var aim = new TechniqueLeap.Aim(point(origin), point(target.subtract(origin)),
                 Optional.of(point(target)));
         return select(actor, profile, aim);
@@ -52,33 +51,33 @@ public final class TechniqueLeapTargets {
 
     private static Optional<TechniqueLeap.Point> standing(LivingEntity actor, int x, int y, int z) {
         // 支撑必须有实体碰撞顶面，落点的完整宽度和至少两格高度均不可含流体。
-        var world = actor.getWorld();
+        var world = actor.level();
         var support = new BlockPos(x, y - 1, z);
-        if (!world.isChunkLoaded(support) || !world.getFluidState(support).isEmpty()) {
+        if (!world.hasChunkAt(support) || !world.getFluidState(support).isEmpty()) {
             return Optional.empty();
         }
         var shape = world.getBlockState(support).getCollisionShape(world, support);
         if (shape.isEmpty()) {
             return Optional.empty();
         }
-        double top = support.getY() + shape.getMax(Direction.Axis.Y);
-        double halfWidth = actor.getWidth() * HALF_WIDTH;
-        double height = Math.max(MINIMUM_CLEARANCE, actor.getHeight());
-        var box = new Box(x + CENTER - halfWidth, top + SURFACE_EPSILON, z + CENTER - halfWidth,
+        double top = support.getY() + shape.max(Direction.Axis.Y);
+        double halfWidth = actor.getBbWidth() * HALF_WIDTH;
+        double height = Math.max(MINIMUM_CLEARANCE, actor.getBbHeight());
+        var box = new AABB(x + CENTER - halfWidth, top + SURFACE_EPSILON, z + CENTER - halfWidth,
                 x + CENTER + halfWidth, top + height, z + CENTER + halfWidth);
-        if (!world.isSpaceEmpty(actor, box) || world.containsFluid(box)) {
+        if (!world.noCollision(actor, box) || world.containsAnyLiquid(box)) {
             return Optional.empty();
         }
         return Optional.of(new TechniqueLeap.Point(x + CENTER, top, z + CENTER));
     }
 
-    public static TechniqueLeap.Point point(Vec3d vector) {
+    public static TechniqueLeap.Point point(Vec3 vector) {
         // 纯求解器不依赖 Minecraft 的向量类。
         return new TechniqueLeap.Point(vector.x, vector.y, vector.z);
     }
 
-    public static Vec3d vector(TechniqueLeap.Point point) {
+    public static Vec3 vector(TechniqueLeap.Point point) {
         // 实体宿主只在求解完成后转换速度和位置。
-        return new Vec3d(point.x(), point.y(), point.z());
+        return new Vec3(point.x(), point.y(), point.z());
     }
 }

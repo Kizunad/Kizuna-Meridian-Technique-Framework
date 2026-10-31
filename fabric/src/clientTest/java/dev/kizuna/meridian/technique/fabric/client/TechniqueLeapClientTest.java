@@ -4,14 +4,13 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapAccess;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Screenshot;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -42,14 +41,14 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
     private int ticks;
     private int stageTick;
     private CompletableFuture<Void> prepared;
-    private Vec3d target;
-    private Vec3d previous;
+    private Vec3 target;
+    private Vec3 previous;
     private boolean flying;
     private int teleportsBefore;
     private double snapBack;
     private int snapTick = -1;
-    private final List<Vec3d> takeoffs = new ArrayList<>();
-    private final List<Vec3d> landings = new ArrayList<>();
+    private final List<Vec3> takeoffs = new ArrayList<>();
+    private final List<Vec3> landings = new ArrayList<>();
     private final List<String> trace = new ArrayList<>();
 
     @Override
@@ -61,7 +60,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
     }
 
-    private void tick(MinecraftClient client) {
+    private void tick(Minecraft client) {
         // 客户端和服务端各自线程准备场地，不操作用户世界。
         if (stage == Stage.DONE) {
             return;
@@ -70,7 +69,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
             if (++ticks > TIMEOUT) {
                 throw new IllegalStateException("客户端跃步验收超时");
             }
-            if (ticks < READY_TICKS || client.player == null || client.getServer() == null
+            if (ticks < READY_TICKS || client.player == null || client.getSingleplayerServer() == null
                     || client.getOverlay() != null) {
                 return;
             }
@@ -80,7 +79,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         }
     }
 
-    private void advance(MinecraftClient client) {
+    private void advance(Minecraft client) {
         // 场地、瞄准、连跳、静置四步依次推进，每步只等待自己的条件。
         if (stage == Stage.PREPARE) {
             prepared = prepare(client);
@@ -101,61 +100,61 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         }
     }
 
-    private CompletableFuture<Void> prepare(MinecraftClient client) {
+    private CompletableFuture<Void> prepare(Minecraft client) {
         // 仅在复制出来的测试世界铺一条直跑道，通过正式状态入口给予轻身。
-        var server = client.getServer();
+        var server = client.getSingleplayerServer();
         return CompletableFuture.runAsync(() -> {
-            var player = server.getPlayerManager().getPlayer(client.player.getUuid());
-            var world = player.getServerWorld();
+            var player = server.getPlayerList().getPlayer(client.player.getUUID());
+            var world = player.serverLevel();
             for (int x = -HALF_WIDTH; x <= HALF_WIDTH; x++) {
                 for (int z = -RUNWAY_BACK; z <= RUNWAY_LENGTH; z++) {
-                    world.setBlockState(new BlockPos(x, ARENA_Y - 1, z), Blocks.STONE.getDefaultState());
+                    world.setBlockAndUpdate(new BlockPos(x, ARENA_Y - 1, z), Blocks.STONE.defaultBlockState());
                 }
             }
-            player.changeGameMode(GameMode.SURVIVAL);
-            player.networkHandler.requestTeleport(BLOCK_CENTER, ARENA_Y, BLOCK_CENTER, 0, 0);
+            player.setGameMode(GameType.SURVIVAL);
+            player.connection.teleport(BLOCK_CENTER, ARENA_Y, BLOCK_CENTER, 0, 0);
             var benefit = TechniqueStatusBenefits.get("meridian_basic_techniques:light_body");
             TechniqueStatusBenefits.apply(player, benefit.benefit());
         }, server);
     }
 
-    private void aim(ClientPlayerEntity player) {
+    private void aim(LocalPlayer player) {
         // 视线与地面交于前方六格，落点标记按自身间隔刷新后再读取。
-        double pitch = Math.toDegrees(Math.atan2(player.getStandingEyeHeight(), AIM_DISTANCE));
-        player.setYaw(0);
-        player.setPitch((float) pitch);
+        double pitch = Math.toDegrees(Math.atan2(player.getEyeHeight(), AIM_DISTANCE));
+        player.setYRot(0);
+        player.setXRot((float) pitch);
         stageTick = ticks;
         stage = Stage.AIM;
     }
 
-    private void start(MinecraftClient client) {
+    private void start(Minecraft client) {
         // 原版跳跃键保持按下，标记必须来自实际渲染缓存。
         var player = client.player;
         var effect = TechniqueStatusBenefits.active(player).orElseThrow();
-        var status = player.getStatusEffect(effect.effect());
-        if (status.shouldShowParticles() || !status.shouldShowIcon()) {
+        var status = player.getEffect(effect.effect());
+        if (status.isVisible() || !status.showIcon()) {
             throw new IllegalStateException("客户端轻身显示属性错误");
         }
         var marker = TechniqueLeapClient.marker();
         if (marker == null || !marker.supported()) {
             throw new IllegalStateException("客户端缺少合法落点标记");
         }
-        target = new Vec3d(marker.point().x(), marker.point().y(), marker.point().z());
-        ScreenshotRecorder.saveScreenshot(client.runDirectory, "light-body-marker.png", client.getFramebuffer(),
+        target = new Vec3(marker.point().x(), marker.point().y(), marker.point().z());
+        Screenshot.grab(client.gameDirectory, "light-body-marker.png", client.getMainRenderTarget(),
                 message -> { /* 截图文件由验收任务归档。 */ });
-        previous = player.getPos();
+        previous = player.position();
         teleportsBefore = TechniqueTeleportCounter.count();
-        client.options.jumpKey.setPressed(true /* pressed */);
+        client.options.keyJump.setDown(true /* pressed */);
         stageTick = ticks;
         stage = Stage.LEAP;
     }
 
-    private void record(ClientPlayerEntity player) {
+    private void record(LocalPlayer player) {
         // 逐 tick 比较本地位置，沿跑道方向倒退即为一次回拉。
         if (ticks - stageTick > SEQUENCE_TIMEOUT) {
-            throw new IllegalStateException("客户端没有完成连跳：" + landings.size() + " " + player.getPos());
+            throw new IllegalStateException("客户端没有完成连跳：" + landings.size() + " " + player.position());
         }
-        Vec3d position = player.getPos();
+        Vec3 position = player.position();
         double backward = previous.z - position.z;
         if (backward > snapBack) {
             snapBack = backward;
@@ -163,7 +162,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         }
         boolean leaping = ((TechniqueLeapAccess) player).meridian$getLeap() != null;
         trace.add(String.format(Locale.ROOT, "%d %.4f %.4f %.4f leap=%s ground=%s teleports=%d",
-                ticks - stageTick, position.x, position.y, position.z, leaping, player.isOnGround(),
+                ticks - stageTick, position.x, position.y, position.z, leaping, player.onGround(),
                 TechniqueTeleportCounter.count() - teleportsBefore));
         if (leaping && !flying) {
             takeoffs.add(previous);
@@ -173,13 +172,13 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         flying = leaping;
         previous = position;
         if (landings.size() == LEAPS) {
-            MinecraftClient.getInstance().options.jumpKey.setPressed(false /* pressed */);
+            Minecraft.getInstance().options.keyJump.setDown(false /* pressed */);
             stageTick = ticks;
             stage = Stage.REST;
         }
     }
 
-    private void verify(MinecraftClient client) {
+    private void verify(Minecraft client) {
         // 静置后没有迟到的传送或回拉，每跳都落在前方六格的方块中心附近。
         int teleports = TechniqueTeleportCounter.count() - teleportsBefore;
         if (teleports != 0) {
@@ -192,7 +191,7 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
             throw new IllegalStateException("客户端落点偏离：" + landings.get(0) + " target=" + target);
         }
         for (int index = 0; index < LEAPS; index++) {
-            double distance = landings.get(index).subtract(takeoffs.get(index)).horizontalLength();
+            double distance = landings.get(index).subtract(takeoffs.get(index)).horizontalDistance();
             if (Math.abs(distance - AIM_DISTANCE) > MAXIMUM_ERROR) {
                 throw new IllegalStateException("第 " + (index + 1) + " 跳距离：" + distance);
             }
@@ -200,10 +199,10 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         finish(client, null);
     }
 
-    private void finish(MinecraftClient client, String failure) {
+    private void finish(Minecraft client, String failure) {
         // 无论成功失败都写出轨迹并结束本验收客户端，不留下后台游戏进程。
         stage = Stage.DONE;
-        client.options.jumpKey.setPressed(false /* pressed */);
+        client.options.keyJump.setDown(false /* pressed */);
         String summary = String.format(Locale.ROOT, "maximumSnapBack=%.4f snapTick=%d teleports=%d landings=%s",
                 snapBack, snapTick, TechniqueTeleportCounter.count() - teleportsBefore, landings);
         try {
@@ -212,6 +211,6 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
         } catch (Exception writeFailure) {
             throw new IllegalStateException(writeFailure);
         }
-        client.scheduleStop();
+        client.stop();
     }
 }

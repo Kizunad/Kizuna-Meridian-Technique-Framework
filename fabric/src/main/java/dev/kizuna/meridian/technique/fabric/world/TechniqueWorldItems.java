@@ -5,18 +5,17 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItem;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Arm;
-import net.minecraft.util.Identifier;
-
 import java.util.List;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
 
 /** 玩家和生物共用的服务端持物事实与数据包规则匹配。 */
 public final class TechniqueWorldItems {
@@ -26,10 +25,10 @@ public final class TechniqueWorldItems {
 
     public static HeldItems inspect(LivingEntity entity) {
         // 空手也提供消息，主手侧决定 Damage 的实际出力手臂。
-        HeldItem main = item(entity.getMainHandStack());
-        HeldItem off = item(entity.getOffHandStack());
+        HeldItem main = item(entity.getMainHandItem());
+        HeldItem off = item(entity.getOffhandItem());
         HandSide side = HandSide.RIGHT;
-        if (entity.getMainArm() == Arm.LEFT) {
+        if (entity.getMainArm() == HumanoidArm.LEFT) {
             side = HandSide.LEFT;
         }
         return HeldItems.newBuilder()
@@ -45,8 +44,8 @@ public final class TechniqueWorldItems {
             return HeldItem.getDefaultInstance();
         }
         return HeldItem.newBuilder()
-                .setItemId(Registries.ITEM.getId(stack.getItem()).toString())
-                .addAllTags(stack.streamTags().map(tag -> tag.id().toString()).sorted().toList())
+                .setItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
+                .addAllTags(stack.getTags().map(tag -> tag.location().toString()).sorted().toList())
                 .setDamageable(stack.getMaxDamage() > 0)
                 .setContainsItems(containsItems(stack))
                 .build();
@@ -59,12 +58,12 @@ public final class TechniqueWorldItems {
 
     private static boolean containsItems(ItemStack stack) {
         // 潜影盒和收纳袋分别使用方块实体库存与物品根库存。
-        return hasItems(BlockItem.getBlockEntityNbt(stack)) || hasItems(stack.getNbt());
+        return hasItems(BlockItem.getBlockEntityData(stack)) || hasItems(stack.getTag());
     }
 
-    private static boolean hasItems(NbtCompound data) {
+    private static boolean hasItems(CompoundTag data) {
         // 空库存仍允许参与持物选择。
-        return data != null && !data.getList("Items", NbtElement.COMPOUND_TYPE).isEmpty();
+        return data != null && !data.getList("Items", Tag.TAG_COMPOUND).isEmpty();
     }
 
     public static HeldItemCategory category(HeldItemRules rules, ItemStack stack) {
@@ -84,6 +83,6 @@ public final class TechniqueWorldItems {
     private static boolean matches(List<String> tags, ItemStack stack) {
         // 同一项中的多个标签使用任一命中语义。
         return tags.isEmpty() || tags.stream().anyMatch(id ->
-                stack.isIn(TagKey.of(RegistryKeys.ITEM, new Identifier(id))));
+                stack.is(TagKey.create(Registries.ITEM, new ResourceLocation(id))));
     }
 }

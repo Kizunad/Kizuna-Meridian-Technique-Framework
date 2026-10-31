@@ -4,25 +4,24 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StatusBenefit
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.server.TechniqueBenefits;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogSource;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.effect.StatusEffect;
-import net.minecraft.entity.effect.StatusEffectCategory;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-import net.minecraft.util.Identifier;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectCategory;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.LivingEntity;
 
 /** 初始化目录驱动原版效果注册，内容包只提供数据、语言与贴图。 */
 public final class TechniqueStatusBenefits {
     private static final long MILLIS_PER_TICK = 50;
     private static final Map<String, Registered> benefits = new LinkedHashMap<>();
 
-    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, StatusEffect effect) { }
+    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, MobEffect effect) { }
 
     private TechniqueStatusBenefits() {
         // 注册表在两个逻辑端以同一目录固定，不运行时制造新身份。
@@ -47,7 +46,7 @@ public final class TechniqueStatusBenefits {
         if (benefits.containsKey(benefit.getId())) {
             throw new IllegalArgumentException("状态增益身份重复：" + benefit.getId());
         }
-        StatusEffect effect = Registry.register(Registries.STATUS_EFFECT, new Identifier(benefit.getId()),
+        MobEffect effect = Registry.register(BuiltInRegistries.MOB_EFFECT, new ResourceLocation(benefit.getId()),
                 new QuietBenefit(benefit.getColorRgb()));
         benefits.put(benefit.getId(), new Registered(benefit, technique, effect));
     }
@@ -63,10 +62,10 @@ public final class TechniqueStatusBenefits {
 
     public static Optional<Registered> active(LivingEntity actor) {
         // 没有自建持续时间副本，权威有效期只取原版状态容器。
-        return benefits.values().stream().filter(value -> actor.hasStatusEffect(value.effect())).findFirst();
+        return benefits.values().stream().filter(value -> actor.hasEffect(value.effect())).findFirst();
     }
 
-    public static boolean quiet(StatusEffect effect) {
+    public static boolean quiet(MobEffect effect) {
         // 命令给予同种效果也保持无粒子。
         return effect instanceof QuietBenefit;
     }
@@ -78,15 +77,15 @@ public final class TechniqueStatusBenefits {
             throw new IllegalArgumentException("状态增益与初始化配置不一致");
         }
         int ticks = Math.toIntExact((benefit.getDurationMillis() + MILLIS_PER_TICK - 1) / MILLIS_PER_TICK);
-        actor.removeStatusEffect(registered.effect());
-        actor.addStatusEffect(new StatusEffectInstance(registered.effect(), ticks, 0,
+        actor.removeEffect(registered.effect());
+        actor.addEffect(new MobEffectInstance(registered.effect(), ticks, 0,
                 true /* ambient */, false /* showParticles */, true /* showIcon */));
     }
 
-    private static final class QuietBenefit extends StatusEffect {
+    private static final class QuietBenefit extends MobEffect {
         private QuietBenefit(int color) {
             // 图标和颜色来自内容，行为由共享跃步宿主执行。
-            super(StatusEffectCategory.BENEFICIAL, color);
+            super(MobEffectCategory.BENEFICIAL, color);
         }
     }
 }

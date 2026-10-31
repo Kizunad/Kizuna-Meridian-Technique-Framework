@@ -118,7 +118,7 @@ Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧�
 | 僵直时长 [0, 60000]、倍率 (0, 1] | `TechniqueStaggerTest.staggerRejectsDurationAndSpeedupOutsideContract` |
 
 Fabric GameTest 全部使用真实服务器启动的 `TechniqueFabric.service()`，目录由清单和 entrypoint 合并，
-测试宿主由 entrypoint 发现；卷轴测试走服务端玩家的 `interactionManager.interactItem`：
+测试宿主由 entrypoint 发现；卷轴测试走服务端玩家的 `gameMode.useItem`：
 
 | 验收 | `TechniqueServiceGameTest` 测试名 |
 |---|---|
@@ -158,7 +158,7 @@ KISS/DRY/YAGNI 的落点是复用 Framework 库存算术、有效能力、原子
 | 命令或检查 | 结果 |
 |---|---|
 | `./gradlew :server:test :fabric:compileGametestJava --console=plain` | 服务端测试与 GameTest 编译通过 |
-| `./gradlew :fabric:runGametest --console=plain` | 首轮发现命令无法解析命名空间 ID；改用 `IdentifierArgumentType` 后 4 条全部通过 |
+| `./gradlew :fabric:runGametest --console=plain` | 首轮发现命令无法解析命名空间 ID；改用 `ResourceLocationArgument` 后 4 条全部通过 |
 | `./gradlew test build --console=plain` | 最终构建通过，包含共享协议、服务端测试、Fabric 模组和打包 |
 | 测试 XML 汇总 | 64 项，0 失败、0 错误、0 跳过；阶段 5 共 17 项 |
 | `python3 "scripts/check_docs.py"` | 7 个页面链接全部通过；构建的 `checkDocs` 也通过 |

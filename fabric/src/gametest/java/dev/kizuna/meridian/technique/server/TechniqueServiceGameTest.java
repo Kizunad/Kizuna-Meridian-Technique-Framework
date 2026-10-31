@@ -16,12 +16,11 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProg
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.test.GameTest;
-import net.minecraft.test.TestContext;
-
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -45,8 +44,8 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
     private static final long NEXT_END = WINDOW_START + CAST_END - CLIP_OFFSET;
     private static final int SWEEP_HIT_COUNT = 2;
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void discoversManifestAlongsideEntrypointAndLearnsItsVolume(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void discoversManifestAlongsideEntrypointAndLearnsItsVolume(GameTestHelper context) {
         // 清单仅由测试模组元数据声明，服务启动后与旧入口目录一起可学习。
         Prepared prepared = prepare(context, "sample_manifest:technique");
         TechniqueService service = TechniqueFabric.service();
@@ -55,26 +54,26 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
                         "meridian_technique_test:data/sample_manifest/catalog.txtpb"));
         context.assertTrue(discovered, "清单未通过模组元数据发现");
         context.assertTrue(service.registry().findLatest(TECHNIQUE_ID).isPresent(), "旧 Java 入口目录未合并");
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         var learned = service.learn(entityUuid, "sample_manifest:volume");
         context.assertTrue(learned.size() == 1 && service.known(entityUuid).size() == 1, "清单卷未写入已学进度");
         release(prepared);
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void learnCommandPublishesKnownChangedAndTicksToFinish(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void learnCommandPublishesKnownChangedAndTicksToFinish(GameTestHelper context) {
         // 管理命令、公开服务入口、Fabric tick 与宿主效果使用同一服务器服务。
         Prepared prepared = prepare(context);
         List<TechniqueService.KnownEntry> changes = new ArrayList<>();
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         TechniqueFabric.KNOWN_CHANGED.register((changedUuid, known) -> {
             if (changedUuid.equals(entityUuid)) {
                 changes.addAll(known);
             }
         });
-        MinecraftServer server = context.getWorld().getServer();
-        int learned = server.getCommandManager().executeWithPrefix(server.getCommandSource(),
+        MinecraftServer server = context.getLevel().getServer();
+        int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 "meridian_technique learn " + entityUuid + " " + TECHNIQUE_ID);
         TechniqueService service = TechniqueFabric.service();
         context.assertTrue(learned == 1 && changes.size() == 1, "学会命令或 KNOWN_CHANGED 事件未生效");
@@ -83,14 +82,14 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
                         .getPhase() == CastPhase.WARMUP,
                 "学会后施放未进入起手");
         prepared.host().nowMillis = WARMUP;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> assertEffectsAndFinish(context, prepared));
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> assertEffectsAndFinish(context, prepared));
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void staggerInterruptCancels(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void staggerInterruptCancels(GameTestHelper context) {
         // 伤害附属可从公开访问点取得服务，以僵直判定打断起手。
         Prepared prepared = prepare(context);
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         TechniqueService service = TechniqueFabric.service();
         service.learn(entityUuid, prepared.reference());
         CastOutcome cast = service.cast(entityUuid, request(prepared.host().current(), "gametest_stagger"));
@@ -99,57 +98,57 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.assertTrue(interrupted.getPhase() == CastPhase.INTERRUPTED, "僵直没有打断起手");
         assertCancelledWithoutRefund(context, prepared);
         release(prepared);
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void discardTriggersEntityUnloadAndClearsSession(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void discardTriggersEntityUnloadAndClearsSession(GameTestHelper context) {
         // discard 触发真实 ENTITY_UNLOAD，不能用直接调用服务来代替事件接线。
         Prepared prepared = prepare(context);
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         TechniqueService service = TechniqueFabric.service();
         service.learn(entityUuid, prepared.reference());
         CastOutcome cast = service.cast(entityUuid, request(prepared.host().current(), "gametest_unload"));
         context.assertTrue(cast.getPhase() == CastPhase.WARMUP, "卸载测试未进入起手");
         prepared.entity().discard();
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> {
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> {
             assertCancelledWithoutRefund(context, prepared);
             context.assertTrue(service.cancelOnUnload(entityUuid).isEmpty(), "卸载事件没有移除会话");
             TechniqueGameTestHost.unbind(entityUuid);
-            context.complete();
+            context.succeed();
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void learnCommandRejectsUnknownIdAndInsufficientPermission(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void learnCommandRejectsUnknownIdAndInsufficientPermission(GameTestHelper context) {
         // 管理命令拒绝目录外 ID 和权限不足的调用，身体知识保持不变。
         Prepared prepared = prepare(context);
-        MinecraftServer server = context.getWorld().getServer();
-        String command = "meridian_technique learn " + prepared.entity().getUuid() + " ";
-        int unknown = server.getCommandManager().executeWithPrefix(server.getCommandSource(),
+        MinecraftServer server = context.getLevel().getServer();
+        String command = "meridian_technique learn " + prepared.entity().getUUID() + " ";
+        int unknown = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 command + "sample:missing");
-        int denied = server.getCommandManager().executeWithPrefix(server.getCommandSource().withLevel(1),
+        int denied = server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withPermission(1),
                 command + TECHNIQUE_ID);
         context.assertTrue(unknown == 0 && denied == 0, "非法学会命令没有拒绝");
-        context.assertTrue(TechniqueFabric.service().known(prepared.entity().getUuid()).isEmpty(),
+        context.assertTrue(TechniqueFabric.service().known(prepared.entity().getUUID()).isEmpty(),
                 "非法命令写入了知识");
         release(prepared);
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void volumeCommandSelectsOffHandLocksAndUnlocksOnServerTick(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void volumeCommandSelectsOffHandLocksAndUnlocksOnServerTick(GameTestHelper context) {
         // 真实命令按卷学会，字节 inspect 选副手，Fabric tick 在收势结束清理移动约束。
         Prepared prepared = prepare(context, TechniqueGameTestHost.HELD_TECHNIQUE_ID);
-        MinecraftServer server = context.getWorld().getServer();
-        String command = "meridian_technique learn " + prepared.entity().getUuid() + " ";
-        int rejected = server.getCommandManager().executeWithPrefix(server.getCommandSource(),
+        MinecraftServer server = context.getLevel().getServer();
+        String command = "meridian_technique learn " + prepared.entity().getUUID() + " ";
+        int rejected = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 command + HeldTechniqueFixtures.LOWER);
         context.assertTrue(rejected == 0, "未学前置卷仍学会了下卷");
-        int learned = server.getCommandManager().executeWithPrefix(server.getCommandSource(),
+        int learned = server.getCommands().performPrefixedCommand(server.createCommandSourceStack(),
                 command + HeldTechniqueFixtures.UPPER);
         TechniqueService service = TechniqueFabric.service();
-        context.assertTrue(learned == 1 && service.known(prepared.entity().getUuid()).size()
+        context.assertTrue(learned == 1 && service.known(prepared.entity().getUUID()).size()
                 == VOLUME_TECHNIQUE_COUNT, "按卷学习没有保存全部单式");
         MemoryHost host = prepared.host();
         host.heldItems = HeldTechniqueFixtures.hands(HeldItem.getDefaultInstance(),
@@ -157,41 +156,41 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         var castRequest = request(host.current(), "gametest_held").toBuilder()
                 .setTechnique(prepared.reference())
                 .build();
-        context.assertTrue(service.cast(prepared.entity().getUuid(), castRequest).getPhase() == CastPhase.WARMUP,
+        context.assertTrue(service.cast(prepared.entity().getUUID(), castRequest).getPhase() == CastPhase.WARMUP,
                 "副手持物没有进入起手");
         context.assertTrue(host.effects.get(0).getSelectedHand() == Hand.OFF_HAND
                 && host.effects.get(0).getMovement().getAction() == MovementAction.LOCK, "起手未立即锁移动");
         context.assertTrue(host.effects.get(1).getPresentation().getStartMillis() > 0, "剪辑起播时刻丢失");
         host.nowMillis = FINISHED_MILLIS;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> {
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> {
             context.assertTrue(host.effects.size() == LOCKED_EFFECTS_COUNT
                     && host.effects.get(LOCKED_EFFECTS_COUNT - 1).getMovement().getAction() == MovementAction.UNLOCK,
                     "收势结束未解锁移动");
             release(prepared);
-            context.complete();
+            context.succeed();
         });
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void unclaimedSavedCastRecoversWithCleanupOnly(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void unclaimedSavedCastRecoversWithCleanupOnly(GameTestHelper context) {
         // 身体已经从实体目录撤销，公开服务仍可经可信恢复入口取消旧档中的施放。
         Prepared prepared = prepare(context);
         TechniqueService service = TechniqueFabric.service();
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         service.learn(entityUuid, prepared.reference());
         context.assertTrue(service.cast(entityUuid, request(prepared.host().current(), "saved_live"))
                 .getPhase() == CastPhase.WARMUP, "没有开始施放");
         MemoryHost restored = prepared.host().restore();
         assertRecovered(context, prepared, restored);
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void unclaimedDeadCastRecoversWithoutRefund(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void unclaimedDeadCastRecoversWithoutRefund(GameTestHelper context) {
         // Framework 死亡清空动作后仍可恢复附属进度，死体不再永久保留施放和会话。
         Prepared prepared = prepare(context);
         TechniqueService service = TechniqueFabric.service();
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         service.learn(entityUuid, prepared.reference());
         context.assertTrue(service.cast(entityUuid, request(prepared.host().current(), "saved_dead"))
                 .getPhase() == CastPhase.WARMUP, "没有开始施放");
@@ -200,15 +199,15 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.assertTrue(TechniqueState.read(restored.current()).hasActiveCast(), "没有形成死体残留");
         assertRecovered(context, prepared, restored);
         context.assertTrue(restored.current().vitality().dead(), "恢复改变了死亡事实");
-        context.complete();
+        context.succeed();
     }
 
-    @GameTest(templateName = FabricGameTest.EMPTY_STRUCTURE)
-    public void combatFollowUpDispatchesTimedStrikesAndDoorsOnServerTicks(TestContext context) {
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void combatFollowUpDispatchesTimedStrikesAndDoorsOnServerTicks(GameTestHelper context) {
         // 真实 Fabric tick 交付前式效果后原子承接，后式不重放预备冲量。
         Prepared prepared = prepare(context, TechniqueGameTestHost.COMBAT_ID);
         TechniqueService service = TechniqueFabric.service();
-        service.learn(prepared.entity().getUuid(), TechniqueGameTestHost.COMBAT_VOLUME_ID);
+        service.learn(prepared.entity().getUUID(), TechniqueGameTestHost.COMBAT_VOLUME_ID);
         MemoryHost host = prepared.host();
         host.heldItems = HeldTechniqueFixtures.hands(
                 HeldTechniqueFixtures.durableItem("minecraft:iron_axe", HeldTechniqueFixtures.AXES),
@@ -216,13 +215,13 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         var request = request(host.current(), COMBAT_FIRST_CAST).toBuilder()
                 .setTechnique(prepared.reference())
                 .build();
-        context.assertTrue(service.cast(prepared.entity().getUuid(), request).getPhase() == CastPhase.WARMUP,
+        context.assertTrue(service.cast(prepared.entity().getUUID(), request).getPhase() == CastPhase.WARMUP,
                 "前式未开始");
         host.nowMillis = WINDOW_START;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> startCombatFollowUp(context, prepared));
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> startCombatFollowUp(context, prepared));
     }
 
-    private static void startCombatFollowUp(TestContext context, Prepared prepared) {
+    private static void startCombatFollowUp(GameTestHelper context, Prepared prepared) {
         // 起播偏移改变后式边界，前式曲线与正常冷却保持原时刻。
         TechniqueService service = TechniqueFabric.service();
         MemoryHost host = prepared.host();
@@ -231,7 +230,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
                 .setTechnique(TechniqueRegistry.reference(next))
                 .setEntry(CastEntry.FOLLOW_UP)
                 .build();
-        context.assertTrue(service.cast(prepared.entity().getUuid(), request).getPhase() == CastPhase.WARMUP,
+        context.assertTrue(service.cast(prepared.entity().getUUID(), request).getPhase() == CastPhase.WARMUP,
                 "窗口内没有承接");
         BodySnapshot body = host.current();
         TechniqueProgress progress = TechniqueState.read(body);
@@ -244,10 +243,10 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
                 && progress.getCurveEndsOrThrow(TechniqueGameTestHost.COMBAT_ID) == CURVE_END,
                 "承接改变了前式冷却或曲线");
         host.nowMillis = NEXT_HIT;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> assertCombatFirstHit(context, prepared));
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> assertCombatFirstHit(context, prepared));
     }
 
-    private static void assertCombatFirstHit(TestContext context, Prepared prepared) {
+    private static void assertCombatFirstHit(GameTestHelper context, Prepared prepared) {
         // 缩短起手后的首击在五百毫秒交付，并保留原时刻和完整持物规则。
         MemoryHost host = prepared.host();
         List<EffectIntent> effects = followUpEffects(host);
@@ -264,10 +263,10 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.assertTrue(effects.stream().noneMatch(EffectIntent::hasImpulse),
                 "重放了后式预备冲量");
         host.nowMillis = NEXT_SECOND_HIT;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> assertCombatLastHit(context, prepared));
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> assertCombatLastHit(context, prepared));
     }
 
-    private static void assertCombatLastHit(TestContext context, Prepared prepared) {
+    private static void assertCombatLastHit(GameTestHelper context, Prepared prepared) {
         // 后半圈末击和劈门共享正确时刻；真实 tick 随后清理新式动作与移动锁。
         MemoryHost host = prepared.host();
         List<EffectIntent> effects = followUpEffects(host);
@@ -284,7 +283,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.assertTrue(doors.getScheduledMillis() == NEXT_SECOND_HIT
                 && doors.getBreakBlocks().getBlocks().getMaximumDoors() == DOOR_LIMIT, "劈门参数或时刻错误");
         host.nowMillis = NEXT_END;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> {
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> {
             BodySnapshot body = host.current();
             context.assertTrue(!TechniqueState.read(body).hasActiveCast()
                     && body.actions().isEmpty(), "后式未收势");
@@ -292,7 +291,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
             EffectIntent last = finished.get(finished.size() - 1);
             context.assertTrue(last.getMovement().getAction() == MovementAction.UNLOCK, "后式未解锁");
             release(prepared);
-            context.complete();
+            context.succeed();
         });
     }
 
@@ -301,9 +300,9 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         return host.effects.stream().filter(effect -> effect.getCastId().equals(COMBAT_NEXT_CAST)).toList();
     }
 
-    private static void assertRecovered(TestContext context, Prepared prepared, MemoryHost restored) {
+    private static void assertRecovered(GameTestHelper context, Prepared prepared, MemoryHost restored) {
         // 存档恢复保留费用与知识，提前终止按恢复身体时刻重算冷却且只提交一次。
-        UUID entityUuid = prepared.entity().getUuid();
+        UUID entityUuid = prepared.entity().getUUID();
         TechniqueGameTestHost.unbind(entityUuid);
         var before = TechniqueState.read(restored.current());
         var released = restored.store.environmentQi();
@@ -326,22 +325,22 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         release(prepared);
     }
 
-    private static Prepared prepare(TestContext context) {
+    private static Prepared prepare(GameTestHelper context) {
         // 每项测试生成独立实体并经测试 entrypoint 绑定空知识身体。
         return prepare(context, TECHNIQUE_ID);
     }
 
-    private static Prepared prepare(TestContext context, String techniqueId) {
+    private static Prepared prepare(GameTestHelper context, String techniqueId) {
         // 测试实体与具体目录引用分离，保持命令和施放使用同一个版本。
-        Entity entity = context.spawnMob(EntityType.PIG, 1, 1, 1);
+        Entity entity = context.spawnWithNoFreeWill(EntityType.PIG, 1, 1, 1);
         BodySnapshot initial = withProgress(body(Shape.TENDRIL), TechniqueState.empty());
         MemoryHost host = new MemoryHost(initial);
-        TechniqueGameTestHost.bind(entity.getUuid(), host);
+        TechniqueGameTestHost.bind(entity.getUUID(), host);
         TechniqueDefinition definition = TechniqueFabric.service().registry().findLatest(techniqueId).orElseThrow();
         return new Prepared(entity, host, TechniqueRegistry.reference(definition));
     }
 
-    private static void assertEffectsAndFinish(TestContext context, Prepared prepared) {
+    private static void assertEffectsAndFinish(GameTestHelper context, Prepared prepared) {
         // 真实服务端 tick 应下发持续表现与冲量，随后再跨 tick 完成收势和 STOP。
         MemoryHost host = prepared.host();
         context.assertTrue(host.effects.size() == START_AND_IMPULSE_COUNT, "tick 未下发全部到期意图");
@@ -350,19 +349,19 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
         context.assertTrue(host.effects.get(1).getImpulse().getDirection() == ImpulseDirection.FORWARD,
                 "零输入没有按朝向解释");
         host.nowMillis = FINISHED_MILLIS;
-        context.waitAndRun(EVENT_WAIT_TICKS, () -> {
+        context.runAfterDelay(EVENT_WAIT_TICKS, () -> {
             context.assertTrue(!TechniqueState.read(host.current()).hasActiveCast(), "收势没有清除当前施放");
             context.assertTrue(host.effects.size() == ALL_EFFECTS_COUNT, "收势没有下发停止意图");
             context.assertTrue(host.effects.get(ALL_EFFECTS_COUNT - 1).getPresentation().getAction()
                     == PresentationAction.STOP, "持续表现没有停止");
-            context.assertTrue(TechniqueFabric.service().cancelOnUnload(prepared.entity().getUuid()).isEmpty(),
+            context.assertTrue(TechniqueFabric.service().cancelOnUnload(prepared.entity().getUUID()).isEmpty(),
                     "收势后仍保留会话");
             release(prepared);
-            context.complete();
+            context.succeed();
         });
     }
 
-    private static void assertCancelledWithoutRefund(TestContext context, Prepared prepared) {
+    private static void assertCancelledWithoutRefund(GameTestHelper context, Prepared prepared) {
         // 取消必须清施放和动作，同时保留起手费用及冷却。
         MemoryHost host = prepared.host();
         TechniqueProgress progress = TechniqueState.read(host.current());
@@ -375,7 +374,7 @@ public final class TechniqueServiceGameTest implements FabricGameTest {
     private static void release(Prepared prepared) {
         // 先经真实卸载路径清理实体，再撤销宿主认领。
         prepared.entity().discard();
-        TechniqueGameTestHost.unbind(prepared.entity().getUuid());
+        TechniqueGameTestHost.unbind(prepared.entity().getUUID());
     }
 
     private record Prepared(Entity entity, MemoryHost host, TechniqueReference reference) { }

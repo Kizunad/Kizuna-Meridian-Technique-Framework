@@ -66,7 +66,7 @@ Human 已导出的 `human.pb` 可直接使用，功法库不依赖 Human Java �
 
 ```java
 TechniqueService service = TechniqueFabric.service();
-service.stagger(entity.getUuid(), new TechniqueService.Stagger(durationMillis, movementMultiplier));
+service.stagger(entity.getUUID(), new TechniqueService.Stagger(durationMillis, movementMultiplier));
 ```
 
 玩家、类人和以后的宿主都经过这一入口，宿主自己不再判定受伤打断。服务为每个宿主记一份僵直到期时刻
@@ -79,7 +79,7 @@ Fabric 层据此给实体加临时 `MULTIPLY_TOTAL` 移动修饰，并把 `merid
 （`StaggerStatus` protobuf）发给追踪者和本人，客户端 `TechniqueStaggerClient.remainingMillis` 只供界面读取。
 卸载、下线清除僵直记录。
 
-施放与查询同样调用 `service.cast(entity.getUuid(), request)`、`service.known(entity.getUuid())`；
+施放与查询同样调用 `service.cast(entity.getUUID(), request)`、`service.known(entity.getUUID())`；
 目录使用 `service.registry()`，与命令、状态机共享启动时的同一份不可变目录。
 
 | 宿主方法 | 必须履行的行为 |
@@ -264,7 +264,7 @@ GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何�
 | 末击耐久 | 仅 `last_strike=true` 时结算一次，命中或挥空都算；基数乘当前物品书级耐久倍率。有耐久走原版耐久附魔、无法破坏和损坏，无耐久消耗一叠中的 1 个；创造玩家及生物不扣，只扣选定手 |
 | 原版攻击/表现 | 施放时屏蔽原版左键攻击，每击调用挥手，结束重置攻击冷却；动画、另一手覆盖层、物品耗尽及破门声效由宿主处理 |
 | 劈门类别与范围 | 只有当前匹配类别 `can_break_doors=true` 才执行；按前方距离、宽度和任一方块标签选取，门上下两半合并为一扇，合计不超过 `maximum_doors` |
-| 劈门权限 | 玩家检查 `world.canPlayerModifyAt` 与服主总开关，出生点保护可阻止；生物检查 `mobGriefing`。两者统一通过 `world.breakBlock(pos, true, actor)` 破坏并掉落，使用原版声音和粒子 |
+| 劈门权限 | 玩家检查 `world.mayInteract` 与服主总开关，出生点保护可阻止；生物检查 `mobGriefing`。两者统一通过 `world.destroyBlock(pos, true, actor)` 破坏并掉落，使用原版声音和粒子 |
 
 Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作的共享实现，
 由 Human、Threatening 等宿主主动调用；功法服务仍只交付意图，不自行操作世界。
@@ -280,9 +280,9 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 
 - `CASTER`：`TechniqueService` 分发到期效果时，把 `sound` 意图交给声音监听者（`addSoundListener`），
   不提交给宿主。Fabric 层 `TechniqueSounds` 在服务器启动时注册监听，按实体 UUID 找到施放者，
-  在其位置调用 `world.playSound(null, pos, event, SoundCategory.PLAYERS, volume, pitch, seed)`。
+  在其位置调用 `world.playSeededSound(null, pos, event, SoundSource.PLAYERS, volume, pitch, seed)`。
   同一施放的批次重试按效果身份去重，不会重复播放。
-- `TARGET`：随 `weapon_strike` 意图的 `hit_sounds` 下发。`TechniqueWorldEffects` 对 `damage` 返回 true 的每个目标
+- `TARGET`：随 `weapon_strike` 意图的 `hit_sounds` 下发。`TechniqueWorldEffects` 对 `hurt` 返回 true 的每个目标
   在其位置播放；宿主照常调用共享打击实现即可。
 - 跃步起跳：`TechniqueLeaps` 在服务端付费成功、施加初速度后播放 `takeoff_sound`；客户端预测不播，
   施放者本人只听到服务端下发的一次。落地仍是原版方块脚步声。
@@ -291,7 +291,7 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 
 ## 数据驱动状态与跃步
 
-初始化目录的 `status_benefit` 在注册表冻结前创建原版有益 `StatusEffect`，因此原版 `/effect give`
+初始化目录的 `status_benefit` 在注册表冻结前创建原版有益 `MobEffect`，因此原版 `/effect give`
 和补全均可使用内容身份。效果固定 ambient、无粒子、显示内容图标；重复施放只刷新同一状态，不叠加。
 宿主调用 `TechniqueStatusBenefits.apply`，不在人体或类人里硬编码具体功法 ID。
 

@@ -22,18 +22,18 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.command.CommandRegistryAccess;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.argument.EntityArgumentType;
-import net.minecraft.command.argument.IdentifierArgumentType;
-import net.minecraft.entity.Entity;
-import net.minecraft.registry.Registries;
+import net.minecraft.commands.CommandBuildContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,7 +86,7 @@ public final class TechniqueFabric implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player.getUuid()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player.getUUID()));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
         CommandRegistrationCallback.EVENT.register(this::registerCommands);
     }
@@ -113,7 +113,7 @@ public final class TechniqueFabric implements ModInitializer {
 
     private static void warnUnregisteredSounds(TechniqueRegistry registry) {
         // 纯数据功法书可在客户端资源里声明声音事件；服务端注册表没有时只提示，播放时照常内联下发。
-        Predicate<String> registered = id -> Registries.SOUND_EVENT.containsId(new Identifier(id));
+        Predicate<String> registered = id -> BuiltInRegistries.SOUND_EVENT.containsKey(new ResourceLocation(id));
         for (String id : TechniqueSoundCues.unregistered(registry.definitions(), registered)) {
             LOG.warn("功法目录引用的声音 {} 不在服务端声音注册表中，将以内联事件下发；客户端缺少该资源时无声", id);
         }
@@ -143,28 +143,28 @@ public final class TechniqueFabric implements ModInitializer {
 
     private void unload(Entity entity) {
         // 玩家断线由 DISCONNECT 处理，实体卸载事件只取消其他实体，避免重复提交。
-        if (service != null && !(entity instanceof ServerPlayerEntity)) {
-            service.cancelOnUnload(entity.getUuid());
+        if (service != null && !(entity instanceof ServerPlayer)) {
+            service.cancelOnUnload(entity.getUUID());
         }
     }
 
-    private void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher,
-                                  CommandRegistryAccess registryAccess,
-                                  CommandManager.RegistrationEnvironment environment) {
+    private void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher,
+                                  CommandBuildContext registryAccess,
+                                  Commands.CommandSelection environment) {
         // 管理命令只开放给权限 2，功法 ID 从服务端不可变目录解析。
-        dispatcher.register(CommandManager.literal("meridian_technique")
-                .requires(source -> source.hasPermissionLevel(LEARN_PERMISSION_LEVEL))
-                .then(CommandManager.literal("learn")
-                        .then(CommandManager.argument("targets", EntityArgumentType.entities())
-                                .then(CommandManager.argument("id", IdentifierArgumentType.identifier())
+        dispatcher.register(Commands.literal("meridian_technique")
+                .requires(source -> source.hasPermission(LEARN_PERMISSION_LEVEL))
+                .then(Commands.literal("learn")
+                        .then(Commands.argument("targets", EntityArgument.entities())
+                                .then(Commands.argument("id", ResourceLocationArgument.id())
                                         .suggests((context, builder) ->
-                                                CommandSource.suggestIdentifiers(learnableIds(), builder))
+                                                SharedSuggestionProvider.suggestResource(learnableIds(), builder))
                                         .executes(context -> learn(context.getSource(),
-                                                EntityArgumentType.getEntities(context, "targets"),
-                                                IdentifierArgumentType.getIdentifier(context, "id").toString()))))));
+                                                EntityArgument.getEntities(context, "targets"),
+                                                ResourceLocationArgument.getId(context, "id").toString()))))));
     }
 
-    private static List<Identifier> learnableIds() {
+    private static List<ResourceLocation> learnableIds() {
         // 从当前服务器目录同时提供书、卷和式，命名空间过滤交给原版补全器。
         if (service == null) {
             return List.of();
@@ -176,33 +176,33 @@ public final class TechniqueFabric implements ModInitializer {
                 .flatMap(ids -> ids)
                 .distinct()
                 .sorted()
-                .map(Identifier::new)
+                .map(ResourceLocation::new)
                 .toList();
     }
 
-    private int learn(ServerCommandSource source, Collection<? extends Entity> entities, String id) {
+    private int learn(CommandSourceStack source, Collection<? extends Entity> entities, String id) {
         // 每个目标单独经过宿主认领和 Framework 原子进度活动，部分失败不影响其他目标。
         if (service == null) {
-            source.sendError(Text.literal("功法目录尚未就绪"));
+            source.sendFailure(Component.literal("功法目录尚未就绪"));
             return 0;
         }
         var registry = service.registry();
         if (registry.findVolume(id).isEmpty() && registry.findLatest(id).isEmpty()
                 && registry.books().stream().noneMatch(book -> book.getId().equals(id))) {
-            source.sendError(Text.literal("目录中没有这本书、卷或式"));
+            source.sendFailure(Component.literal("目录中没有这本书、卷或式"));
             return 0;
         }
         int learned = 0;
         for (Entity entity : entities) {
             try {
-                service.learn(entity.getUuid(), id);
+                service.learn(entity.getUUID(), id);
                 learned++;
             } catch (TechniqueService.PrerequisiteVolumeException exception) {
-                source.sendError(Text.literal(exception.getMessage()));
+                source.sendFailure(Component.literal(exception.getMessage()));
             } catch (TechniqueService.NoHostException exception) {
-                source.sendError(Text.literal("目标没有可用的功法宿主"));
+                source.sendFailure(Component.literal("目标没有可用的功法宿主"));
             } catch (RuntimeException exception) {
-                source.sendError(Text.literal("这门功法暂时无法学会"));
+                source.sendFailure(Component.literal("这门功法暂时无法学会"));
             }
         }
         return learned;

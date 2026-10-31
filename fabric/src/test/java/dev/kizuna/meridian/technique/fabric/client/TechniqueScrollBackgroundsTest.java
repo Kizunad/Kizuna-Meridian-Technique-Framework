@@ -1,9 +1,9 @@
 package dev.kizuna.meridian.technique.fabric.client;
 
-import net.minecraft.util.Identifier;
 import org.junit.Test;
 
 import javax.imageio.ImageIO;
+import net.minecraft.resources.ResourceLocation;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,10 +15,10 @@ public final class TechniqueScrollBackgroundsTest {
     @Test
     public void missingVolumeBackgroundUsesBundledPaperAndWarnsOnce() throws IOException {
         // 缺失同一背景多次时始终回退，告警只记录第一次。
-        Identifier missing = new Identifier("scroll_test", "textures/gui/scroll/absent.png");
-        var warnings = new ArrayList<Identifier>();
-        Identifier first = TechniqueScrollBackgrounds.resolve(missing, resource -> false, warnings::add);
-        Identifier second = TechniqueScrollBackgrounds.resolve(missing, resource -> false, warnings::add);
+        ResourceLocation missing = new ResourceLocation("scroll_test", "textures/gui/scroll/absent.png");
+        var warnings = new ArrayList<ResourceLocation>();
+        ResourceLocation first = TechniqueScrollBackgrounds.resolve(missing, resource -> false, warnings::add);
+        ResourceLocation second = TechniqueScrollBackgrounds.resolve(missing, resource -> false, warnings::add);
 
         assertEquals(TechniqueScrollBackgrounds.FALLBACK, first);
         assertEquals(TechniqueScrollBackgrounds.FALLBACK, second);
@@ -35,9 +35,9 @@ public final class TechniqueScrollBackgroundsTest {
     @Test
     public void availableVolumeBackgroundIsKeptWithoutWarning() {
         // 已存在的卷专属图直接返回，不触发缺图警告。
-        Identifier background = new Identifier("scroll_test", "textures/gui/scroll/upper.png");
-        var warnings = new ArrayList<Identifier>();
-        Identifier selected = TechniqueScrollBackgrounds.resolve(
+        ResourceLocation background = new ResourceLocation("scroll_test", "textures/gui/scroll/upper.png");
+        var warnings = new ArrayList<ResourceLocation>();
+        ResourceLocation selected = TechniqueScrollBackgrounds.resolve(
                 background, background::equals, warnings::add);
 
         assertEquals(background, selected);
@@ -47,9 +47,9 @@ public final class TechniqueScrollBackgroundsTest {
     @Test
     public void restoredResourceOverridesFallbackAndMissingWarningsStayPerResource() {
         // 重载补图后立即选回专属图；另一个缺失资源仍有自己的首次告警。
-        Identifier restored = new Identifier("scroll_test", "textures/gui/scroll/book/restored.png");
-        Identifier missing = new Identifier("scroll_test", "textures/gui/scroll/book/other.png");
-        var warnings = new ArrayList<Identifier>();
+        ResourceLocation restored = new ResourceLocation("scroll_test", "textures/gui/scroll/book/restored.png");
+        ResourceLocation missing = new ResourceLocation("scroll_test", "textures/gui/scroll/book/other.png");
+        var warnings = new ArrayList<ResourceLocation>();
         assertEquals(TechniqueScrollBackgrounds.FALLBACK,
                 TechniqueScrollBackgrounds.resolve(restored, resource -> false, warnings::add));
         assertEquals(restored,

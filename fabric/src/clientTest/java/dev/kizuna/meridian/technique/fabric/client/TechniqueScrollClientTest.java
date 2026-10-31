@@ -1,14 +1,14 @@
 package dev.kizuna.meridian.technique.fabric.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.kizuna.meridian.technique.fabric.TechniqueScrollItems;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
@@ -62,7 +62,7 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         });
     }
 
-    private void tick(MinecraftClient client) {
+    private void tick(Minecraft client) {
         // 只在隔离测试世界运行，语言资源完成重载后才打开第一卷。
         if (finished) {
             return;
@@ -77,9 +77,9 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         try {
             if (reload == null) {
                 client.options.pauseOnLostFocus = false;
-                client.options.language = "zh_cn";
-                client.getLanguageManager().setLanguage("zh_cn");
-                reload = client.reloadResources();
+                client.options.languageCode = "zh_cn";
+                client.getLanguageManager().setSelected("zh_cn");
+                reload = client.reloadResourcePacks();
                 Files.createDirectories(SCREENS);
                 return;
             }
@@ -98,10 +98,10 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         }
     }
 
-    private void prepare(MinecraftClient client, Scene scene) {
+    private void prepare(Minecraft client, Scene scene) {
         // GUI 变更调用真实 resize，长卷滚动使用实际纸面坐标。
-        client.options.getGuiScale().setValue(scene.scale());
-        client.onResolutionChanged();
+        client.options.guiScale().set(scene.scale());
+        client.resizeDisplay();
         shown = open(scene.item());
         var layout = TechniqueScrollLayout.calculate(shown.width, shown.height);
         var content = layout.content();
@@ -113,18 +113,18 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         frames = 0;
     }
 
-    private void capture(DrawContext context) {
+    private void capture(GuiGraphics context) {
         // 保留原始帧缓冲，截图不做 OCR 或合成文字替换。
         if (finished || shown == null || ++frames < SETTLE_FRAMES) {
             return;
         }
-        var client = MinecraftClient.getInstance();
+        var client = Minecraft.getInstance();
         try {
-            context.draw();
-            try (var image = ScreenshotRecorder.takeScreenshot(client.getFramebuffer())) {
-                image.writeTo(SCREENS.resolve(SCENES.get(sceneIndex).name() + ".png"));
+            context.flush();
+            try (var image = Screenshot.takeScreenshot(client.getMainRenderTarget())) {
+                image.writeToFile(SCREENS.resolve(SCENES.get(sceneIndex).name() + ".png"));
             }
-            shown.close();
+            shown.onClose();
             shown = null;
             sceneIndex++;
         } catch (Exception failure) {
@@ -132,13 +132,13 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         }
     }
 
-    private void verifyCloseInputs(MinecraftClient client) {
+    private void verifyCloseInputs(Minecraft client) {
         // 真正调用 Screen 输入入口，覆盖 ESC、改绑后的键盘/鼠标、纸外和按钮。
-        client.options.inventoryKey.setBoundKey(InputUtil.fromKeyCode(GLFW.GLFW_KEY_I, 0));
-        client.options.useKey.setBoundKey(InputUtil.fromKeyCode(GLFW.GLFW_KEY_U, 0));
+        client.options.keyInventory.setKey(InputConstants.getKey(GLFW.GLFW_KEY_I, 0));
+        client.options.keyUse.setKey(InputConstants.getKey(GLFW.GLFW_KEY_U, 0));
         var screen = open(LIGHT);
         screen.keyPressed(GLFW.GLFW_KEY_E, 0, 0);
-        if (client.currentScreen != screen) {
+        if (client.screen != screen) {
             throw new IllegalStateException("背包改键后旧 E 键仍关闭页面");
         }
         screen.keyPressed(GLFW.GLFW_KEY_I, 0, 0);
@@ -147,12 +147,12 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         assertClosed(client);
         open(LIGHT).keyPressed(GLFW.GLFW_KEY_U, 0, 0);
         assertClosed(client);
-        open(LIGHT).mouseClicked(client.getWindow().getScaledWidth() / HALF,
-                client.getWindow().getScaledHeight() / HALF, GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+        open(LIGHT).mouseClicked(client.getWindow().getGuiScaledWidth() / HALF,
+                client.getWindow().getGuiScaledHeight() / HALF, GLFW.GLFW_MOUSE_BUTTON_RIGHT);
         assertClosed(client);
-        client.options.useKey.setBoundKey(InputUtil.Type.MOUSE.createFromCode(EXTRA_MOUSE_BUTTON));
-        open(LIGHT).mouseClicked(client.getWindow().getScaledWidth() / HALF,
-                client.getWindow().getScaledHeight() / HALF, EXTRA_MOUSE_BUTTON);
+        client.options.keyUse.setKey(InputConstants.Type.MOUSE.getOrCreate(EXTRA_MOUSE_BUTTON));
+        open(LIGHT).mouseClicked(client.getWindow().getGuiScaledWidth() / HALF,
+                client.getWindow().getGuiScaledHeight() / HALF, EXTRA_MOUSE_BUTTON);
         assertClosed(client);
         open(LIGHT).mouseClicked(0, 0, GLFW.GLFW_MOUSE_BUTTON_LEFT);
         assertClosed(client);
@@ -166,17 +166,17 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
 
     private static TechniqueScrollScreen open(String itemId) {
         // 复用正式学习成功回调，不在测试中另写页面构造流程。
-        var item = TechniqueScrollItems.scrolls().get(new Identifier(itemId));
+        var item = TechniqueScrollItems.scrolls().get(new ResourceLocation(itemId));
         if (item == null) {
             throw new IllegalStateException("完整装配缺少卷轴：" + itemId);
         }
         TechniqueScrollClient.LEARNED.invoker().onLearned(item.scroll());
-        return (TechniqueScrollScreen) MinecraftClient.getInstance().currentScreen;
+        return (TechniqueScrollScreen) Minecraft.getInstance().screen;
     }
 
-    private void assertClosed(MinecraftClient client) {
+    private void assertClosed(Minecraft client) {
         // 页面必须回到游戏，不能只是消费了事件但仍留在阅读页。
-        if (client.currentScreen != null) {
+        if (client.screen != null) {
             throw new IllegalStateException("关闭输入未关闭卷轴页面");
         }
         closeChecks++;
@@ -191,6 +191,6 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
         } catch (Exception reportFailure) {
             throw new IllegalStateException(reportFailure);
         }
-        MinecraftClient.getInstance().scheduleStop();
+        Minecraft.getInstance().stop();
     }
 }

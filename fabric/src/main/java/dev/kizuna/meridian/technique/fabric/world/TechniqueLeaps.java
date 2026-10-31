@@ -9,13 +9,6 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationA
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationIntent;
 import dev.kizuna.meridian.technique.server.TechniqueLeap;
 import dev.kizuna.meridian.technique.server.TechniqueService;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.MovementType;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +20,13 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.phys.Vec3;
 
 /** 玩家与类人共用的起跳、真实做功、碰撞和落地宿主。 */
 public final class TechniqueLeaps {
@@ -35,11 +35,11 @@ public final class TechniqueLeaps {
     private static final long MILLIS_PER_TICK = 50;
     private static final int MAX_FLIGHT_TICKS = 200;
     private static final float STEP_VOLUME = 0.15F;
-    private static final List<Predicate<MobEntity>> directors = new CopyOnWriteArrayList<>();
+    private static final List<Predicate<Mob>> directors = new CopyOnWriteArrayList<>();
     private static final List<Consumer<LeapAttempt>> leapListeners = new CopyOnWriteArrayList<>();
 
     /** 大脑预估的一次跃步：求解出的落点与飞行毫秒。 */
-    public record Preview(Vec3d landing, long flightMillis) { }
+    public record Preview(Vec3 landing, long flightMillis) { }
 
     /** 服务端一次付费起跳的结果：成功为 LEAP 并带实际做功，被拒为 ORDINARY 并带原因；调试用途，不进正式玩法。 */
     public record LeapAttempt(LivingEntity actor, TechniqueLeap.Landing landing, Jump result,
@@ -60,7 +60,7 @@ public final class TechniqueLeaps {
     public static Jump jump(LivingEntity actor) {
         // 潜行、液体和骑乘使用原版跳跃，不消费额外体力。
         var registered = TechniqueStatusBenefits.active(actor).orElse(null);
-        if (registered == null || actor.isSneaking() || actor.hasVehicle() || actor.isTouchingWater()
+        if (registered == null || actor.isShiftKeyDown() || actor.isPassenger() || actor.isInWater()
                 || actor.isInLava() || !actor.isAlive()) {
             return Jump.ORDINARY;
         }
@@ -74,8 +74,8 @@ public final class TechniqueLeaps {
     private static boolean ready(LivingEntity actor) {
         // 落地间隔按服务端世界时间计，本地玩家使用服务端回执里的同一刻度。
         var access = (TechniqueLeapAccess) actor;
-        return access.meridian$getLeap() == null && actor.isOnGround()
-                && actor.getWorld().getTime() >= access.meridian$getLeapReadyTick();
+        return access.meridian$getLeap() == null && actor.onGround()
+                && actor.level().getGameTime() >= access.meridian$getLeapReadyTick();
     }
 
     public static Jump start(LivingEntity actor, TechniqueStatusBenefits.Registered registered,
@@ -85,7 +85,7 @@ public final class TechniqueLeaps {
             return Jump.WAIT;
         }
         String castId = "leap_" + UUID.randomUUID().toString().replace("-", "");
-        if (actor.getWorld().isClient) {
+        if (actor.level().isClientSide) {
             launch(actor, registered, landing, castId);
             return Jump.LEAP;
         }
@@ -110,15 +110,15 @@ public final class TechniqueLeaps {
     private static TechniqueLeapFlight launch(LivingEntity actor, TechniqueStatusBenefits.Registered registered,
                                               TechniqueLeap.Landing landing, String castId) {
         // 两端按同一落点求解初速度并挂上飞行状态，服务端随后广播权威起点。
-        var origin = TechniqueLeapTargets.point(actor.getPos());
+        var origin = TechniqueLeapTargets.point(actor.position());
         var target = landing.point();
         int ticks = TechniqueLeap.flightTicks(registered.benefit().getLeap(), origin, target);
-        Vec3d velocity = TechniqueLeapTargets.vector(TechniqueLeap.velocity(origin, target, ticks));
-        var flight = new TechniqueLeapFlight(registered, target.y(), actor.getPos(), velocity, castId);
+        Vec3 velocity = TechniqueLeapTargets.vector(TechniqueLeap.velocity(origin, target, ticks));
+        var flight = new TechniqueLeapFlight(registered, target.y(), actor.position(), velocity, castId);
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(flight);
         access.meridian$clearWeakNotice();
-        actor.setVelocity(velocity);
+        actor.setDeltaMovement(velocity);
         actor.setOnGround(false /* onGround */);
         actor.fallDistance = 0;
         return flight;
@@ -128,12 +128,12 @@ public final class TechniqueLeaps {
                                                      String requestId) {
         // 拒绝不会制造速度或局部扣费，异常留日志以便发现宿主接线故障。
         try {
-            return TechniqueFabric.service().submitLeap(actor.getUuid(), registered.technique(),
+            return TechniqueFabric.service().submitLeap(actor.getUUID(), registered.technique(),
                     registered.benefit().getLeap(), requestId);
         } catch (IllegalArgumentException | CapabilityRejected rejected) {
             return TechniqueService.LeapExertion.rejected(String.valueOf(rejected.getMessage()));
         } catch (RuntimeException failure) {
-            LOG.warn("跃步做功被宿主拒绝：{}", actor.getUuid(), failure);
+            LOG.warn("跃步做功被宿主拒绝：{}", actor.getUUID(), failure);
             return TechniqueService.LeapExertion.rejected(failure.getClass().getSimpleName());
         }
     }
@@ -154,7 +154,7 @@ public final class TechniqueLeaps {
             try {
                 listener.accept(attempt);
             } catch (RuntimeException failure) {
-                LOG.warn("跃步观察者处理失败：{}", attempt.actor().getUuid(), failure);
+                LOG.warn("跃步观察者处理失败：{}", attempt.actor().getUUID(), failure);
             }
         }
     }
@@ -162,8 +162,8 @@ public final class TechniqueLeaps {
     private static void weakNotice(LivingEntity actor, TechniqueStatusBenefits.Registered registered) {
         // 连按仅提示一次，成功跃步后才允许下一次乏力提示。
         var access = (TechniqueLeapAccess) actor;
-        if (actor instanceof ServerPlayerEntity player && !access.meridian$getWeakNotice()) {
-            player.sendMessage(Text.translatable(registered.benefit().getLeap().getFailureTranslationKey()),
+        if (actor instanceof ServerPlayer player && !access.meridian$getWeakNotice()) {
+            player.displayClientMessage(Component.translatable(registered.benefit().getLeap().getFailureTranslationKey()),
                     true /* overlay */);
             access.meridian$markWeakNotice();
         }
@@ -177,31 +177,31 @@ public final class TechniqueLeaps {
         if (flight == null) {
             return false;
         }
-        if (!actor.isAlive() || actor.hasVehicle() || actor.isTouchingWater() || actor.isInLava()
+        if (!actor.isAlive() || actor.isPassenger() || actor.isInWater() || actor.isInLava()
                 || flight.ticks >= MAX_FLIGHT_TICKS) {
             finish(actor, flight);
             return false;
         }
-        Vec3d before = actor.getPos();
-        actor.setVelocity(flight.velocity);
-        actor.move(MovementType.SELF, flight.velocity);
+        Vec3 before = actor.position();
+        actor.setDeltaMovement(flight.velocity);
+        actor.move(MoverType.SELF, flight.velocity);
         flight.ticks++;
-        Vec3d moved = actor.getPos().subtract(before);
-        if (actor instanceof ServerPlayerEntity player) {
-            player.handleFall(moved.x, moved.y, moved.z, actor.isOnGround());
-            player.networkHandler.syncWithPlayerPosition();
+        Vec3 moved = actor.position().subtract(before);
+        if (actor instanceof ServerPlayer player) {
+            player.doCheckFallDamage(moved.x, moved.y, moved.z, actor.onGround());
+            player.connection.resetPosition();
         }
-        if (actor.isOnGround()) {
+        if (actor.onGround()) {
             landed(actor, flight);
             return true;
         }
         flight.velocity = nextVelocity(actor, flight.velocity);
-        actor.setVelocity(flight.velocity);
-        actor.updateLimbs(false /* flutter */);
+        actor.setDeltaMovement(flight.velocity);
+        actor.calculateEntityAnimation(false /* flutter */);
         return true;
     }
 
-    private static Vec3d nextVelocity(LivingEntity actor, Vec3d current) {
+    private static Vec3 nextVelocity(LivingEntity actor, Vec3 current) {
         // 碰墙消除水平速度，顶头从零速度开始下降，其余情况延续离散重力。
         double x;
         double z;
@@ -218,7 +218,7 @@ public final class TechniqueLeaps {
         } else {
             vertical = TechniqueLeap.nextVertical(current.y);
         }
-        return new Vec3d(x, vertical, z);
+        return new Vec3(x, vertical, z);
     }
 
     public static float fallDistance(LivingEntity actor, float vanillaDistance) {
@@ -232,12 +232,12 @@ public final class TechniqueLeaps {
 
     private static void landed(LivingEntity actor, TechniqueLeapFlight flight) {
         // 落地声沿用脚下方块，只有服务端广播，避免预测双响。
-        if (!actor.getWorld().isClient) {
-            var group = actor.getWorld().getBlockState(actor.getBlockPos().down()).getSoundGroup();
-            actor.getWorld().playSound(null, actor.getX(), actor.getY(), actor.getZ(), group.getStepSound(),
-                    SoundCategory.PLAYERS, group.getVolume() * STEP_VOLUME, group.getPitch());
+        if (!actor.level().isClientSide) {
+            var group = actor.level().getBlockState(actor.blockPosition().below()).getSoundType();
+            actor.level().playSound(null, actor.getX(), actor.getY(), actor.getZ(), group.getStepSound(),
+                    SoundSource.PLAYERS, group.getVolume() * STEP_VOLUME, group.getPitch());
         }
-        actor.setVelocity(Vec3d.ZERO);
+        actor.setDeltaMovement(Vec3.ZERO);
         actor.fallDistance = 0;
         finish(actor, flight);
     }
@@ -246,10 +246,10 @@ public final class TechniqueLeaps {
         // 先停止本次动画再释放轨迹；间隔只从服务端真实落地或中断时刻计，玩家由 FINISH 回执自行对账。
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(null);
-        flight.end = actor.getPos();
-        if (!actor.getWorld().isClient) {
+        flight.end = actor.position();
+        if (!actor.level().isClientSide) {
             int delay = flight.registered.benefit().getLeap().getLandingDelayTicks();
-            access.meridian$setLeapReadyTick(actor.getWorld().getTime() + delay);
+            access.meridian$setLeapReadyTick(actor.level().getGameTime() + delay);
             present(actor, flight, PresentationAction.STOP);
             TechniqueLeapNetworking.send(actor, LeapMotion.Action.FINISH, flight);
         }
@@ -264,18 +264,18 @@ public final class TechniqueLeaps {
         var effect = EffectIntent.newBuilder()
                 .setCastId(flight.castId)
                 .setEffectId(action.name().toLowerCase(Locale.ROOT))
-                .setScheduledMillis(actor.getServer().getOverworld().getTime() * MILLIS_PER_TICK)
+                .setScheduledMillis(actor.getServer().overworld().getGameTime() * MILLIS_PER_TICK)
                 .setPresentation(presentation)
                 .build();
-        TechniqueFabric.service().presentLeap(actor.getUuid(), effect);
+        TechniqueFabric.service().presentLeap(actor.getUUID(), effect);
     }
 
-    public static void addDirector(Predicate<MobEntity> directs) {
+    public static void addDirector(Predicate<Mob> directs) {
         // 宿主大脑登记它指挥跃步的实体；被指挥者不走自动追击，由大脑调用 leapToward。
         directors.add(Objects.requireNonNull(directs));
     }
 
-    public static Jump leapToward(MobEntity actor, Vec3d desired) {
+    public static Jump leapToward(Mob actor, Vec3 desired) {
         // 大脑给出期望落点，求解、做功、碰撞与自动追击同一实现；没有轻身时按普通跳跃处理。
         var registered = TechniqueStatusBenefits.active(actor).orElse(null);
         if (registered == null) {
@@ -289,7 +289,7 @@ public final class TechniqueLeaps {
         return jump;
     }
 
-    public static Optional<Preview> preview(LivingEntity actor, Vec3d desired) {
+    public static Optional<Preview> preview(LivingEntity actor, Vec3 desired) {
         // 只求解不起跳：不扣体力、不改实体；没有轻身或尚不能起跳时为空。
         var registered = TechniqueStatusBenefits.active(actor).orElse(null);
         if (registered == null || !ready(actor)) {
@@ -297,13 +297,13 @@ public final class TechniqueLeaps {
         }
         var profile = registered.benefit().getLeap();
         var landing = TechniqueLeapTargets.toward(actor, profile, desired).point();
-        int ticks = TechniqueLeap.flightTicks(profile, TechniqueLeapTargets.point(actor.getPos()), landing);
+        int ticks = TechniqueLeap.flightTicks(profile, TechniqueLeapTargets.point(actor.position()), landing);
         return Optional.of(new Preview(TechniqueLeapTargets.vector(landing), ticks * MILLIS_PER_TICK));
     }
 
-    public static void tickMob(MobEntity actor) {
+    public static void tickMob(Mob actor) {
         // 原版目标决定追击对象；已施放、无目标、未落地或由宿主大脑指挥的 tick 不绑定身体或寻找落点。
-        if (actor.getWorld().isClient || actor.isAiDisabled() || !actor.isOnGround()) {
+        if (actor.level().isClientSide || actor.isNoAi() || !actor.onGround()) {
             return;
         }
         LivingEntity target = actor.getTarget();
@@ -313,18 +313,18 @@ public final class TechniqueLeaps {
         }
         var profile = registered.benefit().getLeap();
         if (actor.distanceTo(target) < profile.getAiMinimumDistance()
-                || Math.floorMod(actor.age + actor.getId(), profile.getAiDecisionTicks()) != 0) {
+                || Math.floorMod(actor.tickCount + actor.getId(), profile.getAiDecisionTicks()) != 0) {
             return;
         }
-        var landing = TechniqueLeapTargets.toward(actor, profile, target.getPos());
+        var landing = TechniqueLeapTargets.toward(actor, profile, target.position());
         if (start(actor, registered, landing) == Jump.LEAP) {
             actor.getNavigation().stop();
         }
     }
 
-    private static boolean directed(MobEntity actor) {
+    private static boolean directed(Mob actor) {
         // 任一宿主大脑认领即视为被指挥。
-        for (Predicate<MobEntity> director : directors) {
+        for (Predicate<Mob> director : directors) {
             if (director.test(actor)) {
                 return true;
             }

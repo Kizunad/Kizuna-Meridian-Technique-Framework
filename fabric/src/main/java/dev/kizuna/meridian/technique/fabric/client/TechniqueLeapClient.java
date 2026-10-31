@@ -15,14 +15,14 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /** 本地预测与无粒子落点描边；服务端回执只在偏差超过容差时纠正预测结果。 */
 public final class TechniqueLeapClient {
@@ -59,7 +59,7 @@ public final class TechniqueLeapClient {
         WorldRenderEvents.AFTER_TRANSLUCENT.register(TechniqueLeapClient::render);
     }
 
-    public static boolean jump(ClientPlayerEntity player) {
+    public static boolean jump(LocalPlayer player) {
         // 先预测以免按键等待网络；潜行普通跳不发跃步请求。
         if (ordinaryJump) {
             return false;
@@ -71,22 +71,22 @@ public final class TechniqueLeapClient {
         return result != TechniqueLeaps.Jump.ORDINARY;
     }
 
-    private static void request(ClientPlayerEntity player) {
+    private static void request(LocalPlayer player) {
         // 视线包先于请求到达，服务端按同一起点和准星求解；下一次间隔等服务端 FINISH 给出。
         var access = (TechniqueLeapAccess) player;
         prediction = access.meridian$getLeap();
         access.meridian$setLeapReadyTick(AWAITING_SERVER);
         var origin = prediction.origin;
-        player.networkHandler.sendPacket(new PlayerMoveC2SPacket.Full(origin.x, origin.y, origin.z,
-                player.getYaw(), player.getPitch(), true /* onGround */));
+        player.connection.send(new ServerboundMovePlayerPacket.PosRot(origin.x, origin.y, origin.z,
+                player.getYRot(), player.getXRot(), true /* onGround */));
         var request = LeapMotion.newBuilder().setAction(LeapMotion.Action.REQUEST).build();
         var buffer = PacketByteBufs.create().writeByteArray(request.toByteArray());
         ClientPlayNetworking.send(TechniqueLeapNetworking.CHANNEL, buffer);
     }
 
-    private static void receive(MinecraftClient client, LeapMotion message) {
+    private static void receive(Minecraft client, LeapMotion message) {
         // 只预测本人的移动；其他实体由原版跟踪器插值，避免双方同时移动。
-        if (client.world == null || !(client.world.getEntityById(message.getEntityId()) instanceof LivingEntity actor)
+        if (client.level == null || !(client.level.getEntity(message.getEntityId()) instanceof LivingEntity actor)
                 || actor != client.player) {
             return;
         }
@@ -104,10 +104,10 @@ public final class TechniqueLeapClient {
         // 服务端拒绝跃步时撤销预测，从服务端位置补一次原版跳跃并允许下一次预测。
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(null);
-        access.meridian$setLeapReadyTick(actor.getWorld().getTime());
+        access.meridian$setLeapReadyTick(actor.level().getGameTime());
         prediction = null;
-        actor.setPosition(message.getX(), message.getY(), message.getZ());
-        actor.setVelocity(Vec3d.ZERO);
+        actor.setPos(message.getX(), message.getY(), message.getZ());
+        actor.setDeltaMovement(Vec3.ZERO);
         ordinaryJump = true;
         try {
             ((TechniqueJumpInvoker) actor).meridian$ordinaryJump();
@@ -142,8 +142,8 @@ public final class TechniqueLeapClient {
         access.meridian$setLeap(flight);
         access.meridian$setLeapReadyTick(AWAITING_SERVER);
         prediction = flight;
-        actor.setPosition(flight.origin);
-        actor.setVelocity(flight.launch);
+        actor.setPos(flight.origin);
+        actor.setDeltaMovement(flight.launch);
         actor.setOnGround(false /* onGround */);
         for (int tick = 0; tick < elapsed && access.meridian$getLeap() == flight; tick++) {
             TechniqueLeaps.travel(actor);
@@ -154,45 +154,45 @@ public final class TechniqueLeapClient {
         // 采用服务端可起跳时刻；落点相差不超过原版移动容差时保留本地位置，由下一次移动包让服务端跟随。
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeapReadyTick(message.getReadyTick());
-        Vec3d offset = position(message).subtract(localLanding(actor));
+        Vec3 offset = position(message).subtract(localLanding(actor));
         access.meridian$setLeap(null);
         prediction = null;
         if (offset.length() > FINISH_TOLERANCE) {
-            actor.setPosition(actor.getPos().add(offset));
-            actor.setVelocity(velocity(message));
+            actor.setPos(actor.position().add(offset));
+            actor.setDeltaMovement(velocity(message));
         }
     }
 
-    private static Vec3d localLanding(LivingEntity actor) {
+    private static Vec3 localLanding(LivingEntity actor) {
         // 本地已先落地时比较当时的落点，落地后继续行走的位移不算偏差。
         if (((TechniqueLeapAccess) actor).meridian$getLeap() == null && prediction != null
                 && prediction.end != null) {
             return prediction.end;
         }
-        return actor.getPos();
+        return actor.position();
     }
 
-    private static Vec3d position(LeapMotion message) {
+    private static Vec3 position(LeapMotion message) {
         // 回执中的服务端脚底位置。
-        return new Vec3d(message.getX(), message.getY(), message.getZ());
+        return new Vec3(message.getX(), message.getY(), message.getZ());
     }
 
-    private static Vec3d velocity(LeapMotion message) {
+    private static Vec3 velocity(LeapMotion message) {
         // 回执中的服务端速度，单位为格每 tick。
-        return new Vec3d(message.getVelocityX(), message.getVelocityY(), message.getVelocityZ());
+        return new Vec3(message.getVelocityX(), message.getVelocityY(), message.getVelocityZ());
     }
 
-    private static void updateMarker(MinecraftClient client) {
+    private static void updateMarker(Minecraft client) {
         // 没有状态或已在空中时不显示落点；有限间隔避免每帧扫描世界。
-        ClientPlayerEntity player = client.player;
-        if (player == null || !player.isOnGround() || player.isSneaking()) {
+        LocalPlayer player = client.player;
+        if (player == null || !player.onGround() || player.isShiftKeyDown()) {
             marker = null;
             return;
         }
         var registered = TechniqueStatusBenefits.active(player).orElse(null);
         if (registered == null) {
             marker = null;
-        } else if (player.age % MARKER_INTERVAL_TICKS == 0) {
+        } else if (player.tickCount % MARKER_INTERVAL_TICKS == 0) {
             marker = TechniqueLeapTargets.aimed(player, registered.benefit().getLeap());
         }
     }
@@ -208,14 +208,14 @@ public final class TechniqueLeapClient {
             return;
         }
         var point = marker.point();
-        var box = new Box(point.x() - MARKER_RADIUS, point.y() + MARKER_HEIGHT, point.z() - MARKER_RADIUS,
+        var box = new AABB(point.x() - MARKER_RADIUS, point.y() + MARKER_HEIGHT, point.z() - MARKER_RADIUS,
                 point.x() + MARKER_RADIUS, point.y() + MARKER_HEIGHT, point.z() + MARKER_RADIUS);
-        var camera = context.camera().getPos();
+        var camera = context.camera().getPosition();
         var matrices = context.matrixStack();
-        matrices.push();
+        matrices.pushPose();
         matrices.translate(-camera.x, -camera.y, -camera.z);
-        WorldRenderer.drawBox(matrices, context.consumers().getBuffer(RenderLayer.getLines()), box,
+        LevelRenderer.renderLineBox(matrices, context.consumers().getBuffer(RenderType.lines()), box,
                 MARKER_COLOR, MARKER_COLOR, MARKER_COLOR, MARKER_ALPHA);
-        matrices.pop();
+        matrices.popPose();
     }
 }

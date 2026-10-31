@@ -3,10 +3,10 @@ package dev.kizuna.meridian.technique.fabric.mixin;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapAccess;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapFlight;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeaps;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -82,25 +82,25 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
     }
 
     @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
-    private void meridian$travel(Vec3d input, CallbackInfo callback) {
+    private void meridian$travel(Vec3 input, CallbackInfo callback) {
         // 服务端玩家由统一 tick 推进，其他实体与本地预测沿原版 travel 时序推进。
         LivingEntity actor = (LivingEntity) (Object) this;
-        if (actor instanceof ServerPlayerEntity && meridian$leap != null) {
+        if (actor instanceof ServerPlayer && meridian$leap != null) {
             callback.cancel();
         } else if (TechniqueLeaps.travel(actor)) {
             callback.cancel();
         }
     }
 
-    @Inject(method = "tickMovement", at = @At("HEAD"))
+    @Inject(method = "aiStep", at = @At("HEAD"))
     private void meridian$mobLeap(CallbackInfo callback) {
         // 生物在原版移动阶段读取目标，同样使用服务端落点求解器。
-        if ((Object) this instanceof MobEntity mob) {
+        if ((Object) this instanceof Mob mob) {
             TechniqueLeaps.tickMob(mob);
         }
     }
 
-    @ModifyVariable(method = "handleFallDamage", at = @At("HEAD"), argsOnly = true, ordinal = 0)
+    @ModifyVariable(method = "causeFallDamage", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private float meridian$fallDistance(float distance) {
         // 仅减去本次跃步本应覆盖的下降，不授予持续的摔落免疫。
         return TechniqueLeaps.fallDistance((LivingEntity) (Object) this, distance);

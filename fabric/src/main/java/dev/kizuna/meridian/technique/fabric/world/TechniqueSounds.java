@@ -3,18 +3,17 @@ package dev.kizuna.meridian.technique.fabric.world;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundCue;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import dev.kizuna.meridian.technique.server.TechniqueSoundCues;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.util.Identifier;
-
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -32,14 +31,14 @@ public final class TechniqueSounds {
 
     public static void play(Entity anchor, SoundCue cue) {
         // 在锚点实体脚下播放；附近玩家连同施放者本人都收到声音包，客户端不预测，所以不会双响。
-        if (!(anchor.getWorld() instanceof ServerWorld world)) {
+        if (!(anchor.level() instanceof ServerLevel world)) {
             return;
         }
         float volume = (float) TechniqueSoundCues.volume(cue);
         float pitch = (float) TechniqueSoundCues.playedPitch(cue, world.getRandom().nextDouble());
         long seed = world.getRandom().nextLong();
-        world.playSound(null /* except */, anchor.getX(), anchor.getY(), anchor.getZ(), event(cue),
-                SoundCategory.PLAYERS, volume, pitch, seed);
+        world.playSeededSound(null /* except */, anchor.getX(), anchor.getY(), anchor.getZ(), event(cue),
+                SoundSource.PLAYERS, volume, pitch, seed);
     }
 
     public static void playAll(Entity anchor, List<SoundCue> cues) {
@@ -57,14 +56,14 @@ public final class TechniqueSounds {
         }
     }
 
-    private static RegistryEntry<SoundEvent> event(SoundCue cue) {
+    private static Holder<SoundEvent> event(SoundCue cue) {
         // 已注册的按注册表编号下发；未注册的随包内联 ID，客户端有该资源就能播放。
-        Identifier id = new Identifier(cue.getSoundId());
-        RegistryKey<SoundEvent> key = RegistryKey.of(RegistryKeys.SOUND_EVENT, id);
-        Optional<RegistryEntry.Reference<SoundEvent>> registered = Registries.SOUND_EVENT.getEntry(key);
+        ResourceLocation id = new ResourceLocation(cue.getSoundId());
+        ResourceKey<SoundEvent> key = ResourceKey.create(Registries.SOUND_EVENT, id);
+        Optional<Holder.Reference<SoundEvent>> registered = BuiltInRegistries.SOUND_EVENT.getHolder(key);
         if (registered.isPresent()) {
             return registered.get();
         }
-        return RegistryEntry.of(SoundEvent.of(id));
+        return Holder.direct(SoundEvent.createVariableRangeEvent(id));
     }
 }

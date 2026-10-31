@@ -1,23 +1,22 @@
 package dev.kizuna.meridian.technique.fabric.world;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BreakBlocks;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.DoorBlock;
-import net.minecraft.block.enums.DoubleBlockHalf;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameRules;
-import net.minecraft.world.WorldEvents;
-
 import java.util.Comparator;
 import java.util.HashSet;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.LevelEvent;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.phys.Vec3;
 
 /** 劈门共用几何和方块破坏入口，玩家检查世界修改权限，生物检查 mobGriefing。 */
 final class TechniqueWorldDoors {
@@ -30,21 +29,21 @@ final class TechniqueWorldDoors {
 
     static void execute(LivingEntity actor, BreakBlocks intent, TechniqueWorldEffects.Policy policy) {
         // 总开关与生物破坏规则先于任何方块副作用。
-        ServerWorld world = (ServerWorld) actor.getWorld();
+        ServerLevel world = (ServerLevel) actor.level();
         if (policy == TechniqueWorldEffects.Policy.PLAYER_NO_BREAK
                 || policy == TechniqueWorldEffects.Policy.MOB
-                && !world.getGameRules().getBoolean(GameRules.DO_MOB_GRIEFING)) {
+                && !world.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
             return;
         }
         double reach = intent.getForwardDistance().getValue();
         double halfWidth = intent.getWidth().getValue() * HALF;
         int radius = (int) Math.ceil(reach + halfWidth);
         var seen = new HashSet<BlockPos>();
-        var positions = BlockPos.stream(actor.getBlockPos().add(-radius, 0, -radius),
-                        actor.getBlockPos().add(radius, BODY_HEIGHT_BLOCKS, radius))
-                .map(BlockPos::toImmutable)
+        var positions = BlockPos.betweenClosedStream(actor.blockPosition().offset(-radius, 0, -radius),
+                        actor.blockPosition().offset(radius, BODY_HEIGHT_BLOCKS, radius))
+                .map(BlockPos::immutable)
                 .filter(pos -> inside(actor, pos, reach, halfWidth))
-                .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(actor.getPos())))
+                .sorted(Comparator.comparingDouble(pos -> pos.distToCenterSqr(actor.position())))
                 .toList();
         int broken = 0;
         for (BlockPos pos : positions) {
@@ -61,9 +60,9 @@ final class TechniqueWorldDoors {
 
     private static boolean inside(LivingEntity actor, BlockPos pos, double reach, double halfWidth) {
         // 门中心的前向投影与侧向投影定义矩形范围。
-        Vec3d facing = Vec3d.fromPolar(0, actor.getYaw());
-        Vec3d delta = Vec3d.ofCenter(pos).subtract(actor.getPos()).multiply(1, 0, 1);
-        double forward = delta.dotProduct(facing);
+        Vec3 facing = Vec3.directionFromRotation(0, actor.getYRot());
+        Vec3 delta = Vec3.atCenterOf(pos).subtract(actor.position()).multiply(1, 0, 1);
+        double forward = delta.dot(facing);
         double lateral = Math.abs(delta.x * facing.z - delta.z * facing.x);
         return forward >= 0 && forward <= reach && lateral <= halfWidth;
     }
@@ -71,28 +70,28 @@ final class TechniqueWorldDoors {
     private static boolean matches(BlockState state, BreakBlocks intent) {
         // 门的种类完全由数据包标签决定。
         return intent.getBlockTagsList().stream().anyMatch(id ->
-                state.isIn(TagKey.of(RegistryKeys.BLOCK, new Identifier(id))));
+                state.is(TagKey.create(Registries.BLOCK, new ResourceLocation(id))));
     }
 
     private static BlockPos base(BlockPos pos, BlockState state) {
         // 双格门只从下半扇执行一次破坏，原版负责移除上半扇。
-        if (state.getBlock() instanceof DoorBlock && state.get(DoorBlock.HALF) == DoubleBlockHalf.UPPER) {
-            return pos.down();
+        if (state.getBlock() instanceof DoorBlock && state.getValue(DoorBlock.HALF) == DoubleBlockHalf.UPPER) {
+            return pos.below();
         }
         return pos;
     }
 
     private static boolean breakDoor(LivingEntity actor, BlockPos pos) {
         // 玩家在统一破坏入口前检查出生点等世界修改权限，耐久由功法末击统一结算。
-        ServerWorld world = (ServerWorld) actor.getWorld();
+        ServerLevel world = (ServerLevel) actor.level();
         BlockState original = world.getBlockState(pos);
-        if (actor instanceof ServerPlayerEntity player && !world.canPlayerModifyAt(player, pos)) {
+        if (actor instanceof ServerPlayer player && !world.mayInteract(player, pos)) {
             return false;
         }
-        boolean broken = world.breakBlock(pos, true /* drop */, actor);
+        boolean broken = world.destroyBlock(pos, true /* drop */, actor);
         if (broken) {
-            world.syncWorldEvent(WorldEvents.ZOMBIE_BREAKS_WOODEN_DOOR, pos, 0);
-            world.syncWorldEvent(WorldEvents.BLOCK_BROKEN, pos, Block.getRawIdFromState(original));
+            world.levelEvent(LevelEvent.SOUND_ZOMBIE_DOOR_CRASH, pos, 0);
+            world.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(original));
         }
         return broken;
     }

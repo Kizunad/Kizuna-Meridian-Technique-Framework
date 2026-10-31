@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import static dev.kizuna.meridian.technique.server.Fixtures.Shape;
 import static dev.kizuna.meridian.technique.server.Fixtures.body;
 import static dev.kizuna.meridian.technique.server.Fixtures.withProgress;
+import static dev.kizuna.meridian.technique.server.TechniqueGameTestTicks.DEFAULT_TIMEOUT;
 
 /** 真实服务端玩家通过原版物品交互入口学习清单卷轴。 */
 public final class TechniqueScrollGameTest {
@@ -30,7 +31,7 @@ public final class TechniqueScrollGameTest {
     private static final int BOTH_VOLUMES_KNOWN = 2;
     private static final PermissionSet LEARN_PERMISSION = LevelBasedPermissionSet.GAMEMASTER;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void registeredScrollKeepsReadableNamesAndCatalogDetails(GameTestHelper context) {
         // 正式注册卷轴携带完整定义，客户端读数不再依赖 ID 或单独硬编码数值。
         var item = TechniqueScrollItems.scrolls().get(Identifier.parse(BASIC + "_scroll"));
@@ -45,7 +46,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void learnCommandCompletesBooksVolumesAndTechniquesAndExecutesBook(GameTestHelper context) {
         // 真实命令树补全的书、卷和式都来自目录，书级选项可直接执行。
         Prepared prepared = prepare(context, GameType.CREATIVE);
@@ -74,7 +75,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void survivalLearnsAndConsumesOnceThenRejectsDuplicate(GameTestHelper context) {
         // 成功提交知识后才消耗一个，重复使用不改变身体版本或物品数量。
         Prepared prepared = prepare(context, GameType.SURVIVAL);
@@ -95,7 +96,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void missingPrerequisiteRejectsWithoutConsumingOrWriting(GameTestHelper context) {
         // 前置卷不足必须在身体活动提交和物品消耗之前拒绝。
         Prepared prepared = prepare(context, GameType.SURVIVAL);
@@ -113,7 +114,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void creativeLearnsBothVolumesWithoutConsuming(GameTestHelper context) {
         // 创造玩家仍须逐卷满足前置，成功学习后保持两卷物品数量。
         Prepared prepared = prepare(context, GameType.CREATIVE);
@@ -133,7 +134,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unboundPlayerRejectsWithoutConsuming(GameTestHelper context) {
         // 没有宿主认领的玩家使用卷轴时不创建身体或消耗物品。
         ServerPlayer player = context.makeMockServerPlayerInLevel();
@@ -148,7 +149,7 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void creativeGroupContainsEveryEarlyVolumeInBookOrder(GameTestHelper context) {
         // 核对真实注册表、创造展示列表和搜索列表，晚到入口不增加物品。
         CreativeModeTab group = TechniqueScrollItems.group();

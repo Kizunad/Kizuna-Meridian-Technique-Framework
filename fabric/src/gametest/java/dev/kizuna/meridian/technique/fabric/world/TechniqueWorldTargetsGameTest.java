@@ -11,6 +11,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import java.util.List;
 
+import static dev.kizuna.meridian.technique.server.TechniqueGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 用实体碰撞盒验证单体射线和后备锥各自的距离边界。 */
 public final class TechniqueWorldTargetsGameTest {
     private static final double REACH = 3;
@@ -19,7 +21,7 @@ public final class TechniqueWorldTargetsGameTest {
     private static final double SECTOR_ANGLE = 180;
     private static final float FORWARD_YAW = 0;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void singleTargetUsesCollisionIntersectionWithinReach(GameTestHelper context) {
         // 大实体中心可在距离外，但进入射线距离的碰撞盒仍应命中。
         Pair pair = entities(context);
@@ -30,7 +32,7 @@ public final class TechniqueWorldTargetsGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void sectorKeepsEntityPositionDistanceLimit(GameTestHelper context) {
         // 扇区没有单体射线，实体位置超出半径时仍应排除。
         Pair pair = entities(context);

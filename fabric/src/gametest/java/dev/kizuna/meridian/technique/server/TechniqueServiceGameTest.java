@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import static dev.kizuna.meridian.technique.server.Fixtures.*;
 import static dev.kizuna.meridian.technique.server.CombatTechniqueFixtures.*;
+import static dev.kizuna.meridian.technique.server.TechniqueGameTestTicks.DEFAULT_TIMEOUT;
 
 /** Fabric 服务端主线程上的功法服务旅程与生命周期取消。 */
 public final class TechniqueServiceGameTest {
@@ -44,7 +45,7 @@ public final class TechniqueServiceGameTest {
     private static final long NEXT_END = WINDOW_START + CAST_END - CLIP_OFFSET;
     private static final int SWEEP_HIT_COUNT = 2;
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void discoversManifestAlongsideEntrypointAndLearnsItsVolume(GameTestHelper context) {
         // 清单仅由测试模组元数据声明，服务启动后与旧入口目录一起可学习。
         Prepared prepared = prepare(context, "sample_manifest:technique");
@@ -61,7 +62,7 @@ public final class TechniqueServiceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void learnCommandPublishesKnownChangedAndTicksToFinish(GameTestHelper context) {
         // 管理命令、公开服务入口、Fabric tick 与宿主效果使用同一服务器服务。
         Prepared prepared = prepare(context);
@@ -85,7 +86,7 @@ public final class TechniqueServiceGameTest {
         context.runAfterDelay(EVENT_WAIT_TICKS, () -> assertEffectsAndFinish(context, prepared));
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void staggerInterruptCancels(GameTestHelper context) {
         // 伤害附属可从公开访问点取得服务，以僵直判定打断起手。
         Prepared prepared = prepare(context);
@@ -101,7 +102,7 @@ public final class TechniqueServiceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void discardTriggersEntityUnloadAndClearsSession(GameTestHelper context) {
         // discard 触发真实 ENTITY_UNLOAD，不能用直接调用服务来代替事件接线。
         Prepared prepared = prepare(context);
@@ -119,7 +120,7 @@ public final class TechniqueServiceGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void learnCommandRejectsUnknownIdAndInsufficientPermission(GameTestHelper context) {
         // 管理命令拒绝目录外 ID 和权限不足的调用，身体知识保持不变。
         Prepared prepared = prepare(context);
@@ -136,7 +137,7 @@ public final class TechniqueServiceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void volumeCommandSelectsOffHandLocksAndUnlocksOnServerTick(GameTestHelper context) {
         // 真实命令按卷学会，字节 inspect 选副手，Fabric tick 在收势结束清理移动约束。
         Prepared prepared = prepare(context, TechniqueGameTestHost.HELD_TECHNIQUE_ID);
@@ -169,7 +170,7 @@ public final class TechniqueServiceGameTest {
         });
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unclaimedSavedCastRecoversWithCleanupOnly(GameTestHelper context) {
         // 身体已经从实体目录撤销，公开服务仍可经可信恢复入口取消旧档中的施放。
         Prepared prepared = prepare(context);
@@ -183,7 +184,7 @@ public final class TechniqueServiceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void unclaimedDeadCastRecoversWithoutRefund(GameTestHelper context) {
         // Framework 死亡清空动作后仍可恢复附属进度，死体不再永久保留施放和会话。
         Prepared prepared = prepare(context);
@@ -200,7 +201,7 @@ public final class TechniqueServiceGameTest {
         context.succeed();
     }
 
-    @GameTest
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void combatFollowUpDispatchesTimedStrikesAndDoorsOnServerTicks(GameTestHelper context) {
         // 真实 Fabric tick 交付前式效果后原子承接，后式不重放预备冲量。
         Prepared prepared = prepare(context, TechniqueGameTestHost.COMBAT_ID);

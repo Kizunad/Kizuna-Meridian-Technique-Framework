@@ -1,7 +1,5 @@
 # 规则、测试与交付记录
 
-`fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：
-Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧的 server/shared JAR 打进发布 JAR。
 `TechniqueObserverTest` 覆盖调试入口：施放监听收到每条返回路径的同一份回执、观察者异常不改变回执，
 `submitLeap` 接受时返回实际组织做功，无宿主与施放进行中返回对应原因且不扣做功。
 `TechniqueSoundTest` 覆盖声音契约：省略字段按默认值播放；越界、单位错、缺锚点、非法 ID、抖动越出 [0.5, 2] 都拒绝；

@@ -103,17 +103,20 @@ public final class TechniqueLeapClientTest implements ClientModInitializer {
 
     private CompletableFuture<Void> prepare(Minecraft client) {
         // 仅在复制出来的测试世界铺一条直跑道，通过正式状态入口给予轻身。
+        // 跑道铺在玩家进世界的出生点：GameTest 每局新建的世界出生点随机且远离原点，传送到原点要等新区块生成并发到客户端。
         var server = client.getSingleplayerServer();
         return CompletableFuture.runAsync(() -> {
             var player = server.getPlayerList().getPlayer(client.player.getUUID());
             var world = player.level();
+            BlockPos spawn = player.blockPosition();
             for (int x = -HALF_WIDTH; x <= HALF_WIDTH; x++) {
                 for (int z = -RUNWAY_BACK; z <= RUNWAY_LENGTH; z++) {
-                    world.setBlockAndUpdate(new BlockPos(x, ARENA_Y - 1, z), Blocks.STONE.defaultBlockState());
+                    world.setBlockAndUpdate(new BlockPos(spawn.getX() + x, ARENA_Y - 1, spawn.getZ() + z),
+                            Blocks.STONE.defaultBlockState());
                 }
             }
             player.setGameMode(GameType.SURVIVAL);
-            player.connection.teleport(BLOCK_CENTER, ARENA_Y, BLOCK_CENTER, 0, 0);
+            player.connection.teleport(spawn.getX() + BLOCK_CENTER, ARENA_Y, spawn.getZ() + BLOCK_CENTER, 0, 0);
             var benefit = TechniqueStatusBenefits.get("meridian_basic_techniques:light_body");
             TechniqueStatusBenefits.apply(player, benefit.benefit());
         }, server);

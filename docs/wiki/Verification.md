@@ -479,3 +479,18 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 | 命令 | 结果 |
 |---|---|
 | `./gradlew test build :fabric:runGametest --console=plain` | fabric JUnit 16/16（服务端源码未改，`:server:test` 为 UP-TO-DATE）；GameTest 22/22，另有原版 `always_pass` |
+
+## 客户端验收跟随每局新建的世界（2026-11-02）
+
+`runGametest` 每局先删掉 `build/gametest/world` 再按平坦预设新建世界，出生点随机且远离原点。
+跃步客户端验收原先把跑道铺在原点再传送过去，旧世界里原点区块早已存在才通过；新世界里客户端要等
+原点区块生成并下发，等待超过轻身持续时间。跑道改铺在玩家进世界的出生点，传送只在已加载区块内移动。
+
+| 命令 | 结果 |
+|---|---|
+| `xvfb-run -a ./gradlew -PscrollFullAssembly :fabric:runLeapClientTest`（改前，新世界） | 失败：客户端缺少合法落点标记，脚下为 `void_air` |
+| 同上（改后，新世界） | `success=true`，最大回拉 0、无传送包，三跳落点各前进 6 格 |
+| `./gradlew :fabric:runGametest` 后再跑同上（保留上一局的客户端存档目录） | `success=true`，出生点换到另一处，三跳落点各前进 6 格 |
+
+完整装配会同时加载 Human 宿主，`:fabric:runGametest` 不加 `-PscrollFullAssembly`，否则玩家被两个功法宿主认领
+（`MultipleHostsException`），6 项 GameTest 失败。

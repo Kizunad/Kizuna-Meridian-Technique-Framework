@@ -264,7 +264,7 @@ GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何�
 | 末击耐久 | 仅 `last_strike=true` 时结算一次，命中或挥空都算；基数乘当前物品书级耐久倍率。有耐久走原版耐久附魔、无法破坏和损坏，无耐久消耗一叠中的 1 个；创造玩家及生物不扣，只扣选定手 |
 | 原版攻击/表现 | 施放时屏蔽原版左键攻击，每击调用挥手，结束重置攻击冷却；动画、另一手覆盖层、物品耗尽及破门声效由宿主处理 |
 | 劈门类别与范围 | 只有当前匹配类别 `can_break_doors=true` 才执行；按前方距离、宽度和任一方块标签选取，门上下两半合并为一扇，合计不超过 `maximum_doors` |
-| 劈门权限 | 玩家检查 `world.mayInteract` 与服主总开关，出生点保护可阻止；生物检查 `mobGriefing`。两者统一通过 `world.destroyBlock(pos, true, actor)` 破坏并掉落，使用原版声音和粒子 |
+| 劈门权限 | 玩家检查 `world.mayInteract` 与服主总开关，出生点保护可阻止；生物检查 `mob_griefing`。两者统一通过 `world.destroyBlock(pos, true, actor)` 破坏并掉落，使用原版声音和粒子 |
 
 Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作的共享实现，
 由 Human、Threatening 等宿主主动调用；功法服务仍只交付意图，不自行操作世界。

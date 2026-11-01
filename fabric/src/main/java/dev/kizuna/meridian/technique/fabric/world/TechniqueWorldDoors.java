@@ -18,7 +18,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.Vec3;
 
-/** 劈门共用几何和方块破坏入口，玩家检查世界修改权限，生物检查 mobGriefing。 */
+/** 劈门共用几何和方块破坏入口，玩家检查世界修改权限，生物检查 mob_griefing。 */
 final class TechniqueWorldDoors {
     private static final double HALF = 0.5;
     private static final int BODY_HEIGHT_BLOCKS = 2;

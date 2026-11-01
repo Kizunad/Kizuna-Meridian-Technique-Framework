@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -19,9 +20,25 @@ public final class TechniqueStrikeTargets {
         // 同组每目标只选一次，跨组可重击。
         // 整次施放限制不同目标总数，不限制重复命中次数。
         TechniqueCombatEffects.validateStrike(strike);
-        int maximumTargets = strike.getMaximumTargets();
-        int castTargetLimit = strike.getCastTargetLimit();
-        Set<String> groupHitIds = hitIdsByGroup.getOrDefault(strike.getDedupGroup(), Set.of());
+        Targeting targeting = new Targeting(strike.getMaximumTargets(), strike.getCastTargetLimit(),
+                strike.getDedupGroup());
+        return select(targeting, hitIdsByGroup, candidates);
+    }
+
+    public static List<String> select(LegStrike strike, Map<String, Set<String>> hitIdsByGroup,
+                                      List<String> candidates) {
+        // 腿法沿用同一去重和整式目标预算，朝向与几何参数由宿主读取腿击声明。
+        TechniqueCombatEffects.validateLegStrike(strike);
+        Targeting targeting = new Targeting(strike.getMaximumTargets(), strike.getCastTargetLimit(),
+                strike.getDedupGroup());
+        return select(targeting, hitIdsByGroup, candidates);
+    }
+
+    private static List<String> select(Targeting targeting, Map<String, Set<String>> hitIdsByGroup,
+                                       List<String> candidates) {
+        int maximumTargets = targeting.maximumTargets();
+        int castTargetLimit = targeting.castTargetLimit();
+        Set<String> groupHitIds = hitIdsByGroup.getOrDefault(targeting.dedupGroup(), Set.of());
         var seen = new HashSet<>(groupHitIds);
         var castHitIds = new HashSet<String>();
         hitIdsByGroup.values().forEach(castHitIds::addAll);
@@ -44,4 +61,6 @@ public final class TechniqueStrikeTargets {
         }
         return List.copyOf(selected);
     }
+
+    private record Targeting(int maximumTargets, int castTargetLimit, String dedupGroup) { }
 }

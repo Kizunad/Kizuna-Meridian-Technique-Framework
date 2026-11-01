@@ -52,6 +52,9 @@ final class TechniqueGroups {
                 if (book.hasHeldItemRules()) {
                     TechniqueHeldItems.validateRules(book.getHeldItemRules());
                 }
+                if (book.hasLegRules()) {
+                    TechniqueLegRules.validate(book.getLegRules());
+                }
                 validateName(book.getDisplayName());
                 index.put(id, book);
                 validateCount(index.size());

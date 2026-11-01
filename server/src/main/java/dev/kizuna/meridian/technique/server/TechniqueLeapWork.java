@@ -44,6 +44,7 @@ final class TechniqueLeapWork {
                     .setTissueId(module)
                     .setWatts(work.getPower().getValue())
                     .setSeconds(work.getDuration().getValue())
+                    .setTraining(work.getTraining())
                     .build();
             activity.addEfforts(effort);
         }

@@ -27,6 +27,9 @@ final class Fixtures {
     static final double HALF_LIFE = 10;
     static final double LIFESPAN = 100_000;
     static final double MINIMUM_STRENGTH = 20;
+    static final double TRAINING_MAXIMUM_GROWTH = 0.5;
+    static final double TRAINING_HALF_LIFE_SECONDS = 10;
+    static final double TRAINING_WORK_JOULES_PER_GROWTH = 10_000;
     static final long WARMUP = 100;
     static final long ACTIVE = 200;
     static final long RECOVERY = 300;
@@ -84,6 +87,11 @@ final class Fixtures {
     }
 
     private static BodyStructure structure(Shape shape) {
+        // 默认样例不声明训练参数，普通功法不能意外进入训练路径。
+        return structure(shape, false);
+    }
+
+    private static BodyStructure structure(Shape shape, boolean training) {
         // 对称样本有两个执行组织，触须样本只有一个，均带可独立做功的器官。
         PartDefinition part = PartDefinition.newBuilder()
                 .setId("body")
@@ -96,7 +104,7 @@ final class Fixtures {
             names = List.of("tendril");
         }
         for (String name : names) {
-            structure.addTissues(tissue(name));
+            structure.addTissues(tissue(name, training));
             structure.addMeridians(meridian(name));
         }
         structure.addOrgans(organ());
@@ -104,13 +112,18 @@ final class Fixtures {
     }
 
     private static TissueDefinition tissue(String id) {
+        // 普通样例保持无训练声明，专测按需使用带参数模板。
+        return tissue(id, false);
+    }
+
+    private static TissueDefinition tissue(String id, boolean training) {
         // 基础能力与恢复参数明确，便于验证起手做功和动作占用联动。
         TissueCapacity capacity = TissueCapacity.newBuilder()
                 .setStrengthNewtons(STRENGTH)
                 .setBurstWatts(POWER)
                 .setEnduranceJoules(ENDURANCE)
                 .build();
-        return TissueDefinition.newBuilder()
+        TissueDefinition.Builder definition = TissueDefinition.newBuilder()
                 .setId(id)
                 .setDisplayName("测试组织")
                 .setKind("sample:muscle")
@@ -119,8 +132,16 @@ final class Fixtures {
                 .setFatigueCapacity(ENDURANCE)
                 .setCapacity(capacity)
                 .setRecoveryHalfLifeSeconds(HALF_LIFE)
-                .addTags(MUSCLE_TAG)
-                .build();
+                .addTags(MUSCLE_TAG);
+        if (training) {
+            TissueTraining parameters = TissueTraining.newBuilder()
+                    .setMaximumGrowth(TRAINING_MAXIMUM_GROWTH)
+                    .setConsolidationHalfLifeSeconds(TRAINING_HALF_LIFE_SECONDS)
+                    .setWorkJoulesPerGrowth(TRAINING_WORK_JOULES_PER_GROWTH)
+                    .build();
+            definition.setTraining(parameters);
+        }
+        return definition.build();
     }
 
     private static MeridianDefinition meridian(String id) {
@@ -221,6 +242,16 @@ final class Fixtures {
     }
 
     static AddonRegistry addons() {
+        // 普通目录仅用于既有功法回归，训练目录由专测显式请求。
+        return addons(false);
+    }
+
+    static AddonRegistry trainingAddons() {
+        // 训练目录的所有可绑定组织都声明同一套训练参数。
+        return addons(true);
+    }
+
+    private static AddonRegistry addons(boolean training) {
         // 同一个附属登记两种构型，使目录可以验证跨身体标签词汇。
         ContentVersionRange versions = ContentVersionRange.newBuilder()
                 .setMinimum(1)
@@ -240,7 +271,7 @@ final class Fixtures {
         for (Shape shape : Shape.values()) {
             BodyTemplate template = BodyTemplate.newBuilder()
                     .setReference(templateReference(shape))
-                    .setStructure(structure(shape))
+                    .setStructure(structure(shape, training))
                     .build();
             bundle.addTemplates(template);
         }

@@ -69,7 +69,7 @@ public final class TechniqueRegistry {
             String id = definition.getId();
             String location = source.location("definitions[" + index + "]");
             try {
-                TechniqueDefinitions.validate(source.addons(), tags, definition);
+                TechniqueDefinitions.validate(source.addons(), tags, catalog.getBindingTemplatesList(), definition);
                 if (!id.startsWith(catalog.getNamespace() + ":")) {
                     throw TechniqueErrors.invalid(id, "功法 ID 不属于目录命名空间");
                 }
@@ -114,6 +114,17 @@ public final class TechniqueRegistry {
                         .anyMatch(effect -> effect.hasWeaponStrike() || effect.hasBreakBlocks());
                 if (heldEffects && bookOf(reference).filter(TechniqueBook::hasHeldItemRules).isEmpty()) {
                     throw TechniqueErrors.invalid(definition.getId(), "持物效果必须归属于声明持物规则的书");
+                }
+                if (TechniqueCombatEffects.hasLegStrike(definition)) {
+                    TechniqueBook book = bookOf(reference).orElseThrow(
+                            () -> TechniqueErrors.invalid(definition.getId(), "腿击效果没有所属书"));
+                    if (!book.hasLegRules()) {
+                        throw TechniqueErrors.invalid(
+                                definition.getId(), "腿击效果必须归属于声明腿法规则的书");
+                    }
+                    if (book.hasHeldItemRules()) {
+                        throw TechniqueErrors.invalid(definition.getId(), "腿法书不能声明持物规则");
+                    }
                 }
             } catch (IllegalArgumentException exception) {
                 throw TechniqueErrors.at(locations.get(reference), exception);

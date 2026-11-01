@@ -46,6 +46,7 @@ public final class TechniqueErrors {
             case FOLLOW_UP_REQUIRED -> "这一式须借前一式的余势施展";
             case FOLLOW_UP_UNAVAILABLE -> "承接的时机已过，先稳住架势";
             case STAGGERED -> "僵直中";
+            case NOT_GROUNDED -> "要站在地上才能出腿";
             default -> "暂时无法运功";
         };
     }

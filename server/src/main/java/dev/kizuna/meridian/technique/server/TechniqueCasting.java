@@ -76,7 +76,7 @@ public final class TechniqueCasting {
         if (activeReplay.isPresent()) {
             return activeReplay.get();
         }
-        TechniqueDefinition definition = requireCastable(body, progress, request, staggeredUntilMillis);
+        TechniqueDefinition definition = requireCastable(body, progress, request, staggeredUntilMillis, inspection);
         long clipStart = TechniqueFollowUps.clipStart(definition, progress, request,
                 body.settledAt().elapsedMillis());
         TechniqueActivities.CastBinding selection = bindCast(definition, inspection, clipStart);
@@ -93,9 +93,11 @@ public final class TechniqueCasting {
             throw TechniqueErrors.rejected(result.getFailure());
         }
         Hand hand = selectHand(definition, inspection.heldItems());
-        HeldItemRules rules = registry.bookOf(TechniqueRegistry.reference(definition))
-                .map(TechniqueBook::getHeldItemRules).orElse(HeldItemRules.getDefaultInstance());
-        var entry = new TechniqueActivities.Entry(clipStart, rules);
+        Optional<TechniqueBook> book = registry.bookOf(TechniqueRegistry.reference(definition));
+        HeldItemRules heldRules = book.map(TechniqueBook::getHeldItemRules)
+                .orElse(HeldItemRules.getDefaultInstance());
+        LegRules legRules = book.map(TechniqueBook::getLegRules).orElse(LegRules.getDefaultInstance());
+        var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules);
         return new TechniqueActivities.CastBinding(result.getBinding(), hand, entry);
     }
 
@@ -109,7 +111,7 @@ public final class TechniqueCasting {
     }
 
     private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request,
-                                                long staggeredUntilMillis) {
+                                                long staggeredUntilMillis, TechniqueHost.Inspection inspection) {
         // 先检查生命、目录与可信知识记录，再检查受击僵直和身体时钟冷却。
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
             throw TechniqueErrors.rejected(BODY_UNAVAILABLE);
@@ -128,7 +130,21 @@ public final class TechniqueCasting {
         if (nowMillis < cooldownEnd || nowMillis < curveEnd) {
             throw TechniqueErrors.rejected(COOLING_DOWN);
         }
+        validateLegConditions(definition, inspection);
         return definition;
+    }
+
+    private void validateLegConditions(TechniqueDefinition definition, TechniqueHost.Inspection inspection) {
+        // 腿法在绑定和扣费前读取同一次 inspect 的移动事实，失败只返回着地原因。
+        if (!TechniqueCombatEffects.hasLegStrike(definition)) {
+            return;
+        }
+        TechniqueBook book = registry.bookOf(TechniqueRegistry.reference(definition))
+                .orElseThrow(() -> TechniqueErrors.rejected(INVALID_STATE));
+        if (book.hasLegRules() && book.getLegRules().getRequireGrounded()
+                && !TechniqueInspection.canCastLeg(inspection.facts())) {
+            throw TechniqueErrors.rejected(NOT_GROUNDED);
+        }
     }
 
     private CastOutcome submitStart(TechniqueHost host, TechniqueActivities.Start start, BodyActivity activity) {

@@ -12,6 +12,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItem;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostFacts;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +36,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
             .setOffHand(HeldItem.getDefaultInstance())
             .setMainHandSide(HandSide.RIGHT)
             .build();
+    TechniqueHostFacts inspectFacts = TechniqueInspection.defaults();
     private FailureCode nextFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     private FailureCode nextEffectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     Consumer<EffectSubmission> effectObserver = submission -> { /* 默认不注入世界回调。 */ };
@@ -99,7 +101,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         // 先按旧动作结时；TIME_NOT_ADVANCED 表示身体已经在同一时刻。
         BodySnapshot body = current();
         if (body.vitality().dead()) {
-            return new Inspection(body, heldItems);
+            return new Inspection(body, heldItems, inspectFacts);
         }
         BodyCommand command = BodyCommand.newBuilder()
                 .setBodyId(bodyId.value())
@@ -110,7 +112,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         if (response.hasFailure() && response.getFailure().getCode() != FailureCode.TIME_NOT_ADVANCED) {
             throw new TechniqueErrors.HostRejected(response.getFailure().getCode());
         }
-        return new Inspection(current(), heldItems);
+        return new Inspection(current(), heldItems, inspectFacts);
     }
 
     @Override
@@ -179,6 +181,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         var restoredStore = new InMemoryBodyStore(List.of(restored), store.receipts(), store.environmentQi());
         MemoryHost restoredHost = new MemoryHost(restoredStore, bodyId);
         restoredHost.heldItems = heldItems;
+        restoredHost.inspectFacts = inspectFacts;
         restoredHost.effectReceipts.putAll(effectReceipts);
         return restoredHost;
     }

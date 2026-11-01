@@ -223,6 +223,10 @@ public final class TechniqueScheduler {
                 List<SoundCue> hitSounds = TechniqueSoundCues.hitSounds(definition, index);
                 intent.setWeaponStrike(weaponStrike(active, effect.getWeaponStrike(), hitSounds));
             }
+            case LEG_STRIKE -> {
+                List<SoundCue> hitSounds = TechniqueSoundCues.hitSounds(definition, index);
+                intent.setLegStrike(legStrike(active, effect.getLegStrike(), hitSounds));
+            }
             case BREAK_BLOCKS -> intent.setBreakBlocks(breakBlocks(active, effect.getBreakBlocks()));
             case SOUND -> intent.setSound(effect.getSound());
             case PRESENTATION -> {
@@ -244,6 +248,16 @@ public final class TechniqueScheduler {
         return WeaponStrikeIntent.newBuilder()
                 .setStrike(strike)
                 .setHeldItemRules(active.getHeldItemRules())
+                .addAllHitSounds(hitSounds)
+                .build();
+    }
+
+    private static LegStrikeIntent legStrike(ActiveCast active, LegStrike strike,
+                                             List<SoundCue> hitSounds) {
+        // 腿击只携带书级靴子规则，不携带手持规则或选定手位。
+        return LegStrikeIntent.newBuilder()
+                .setStrike(strike)
+                .setLegRules(active.getLegRules())
                 .addAllHitSounds(hitSounds)
                 .build();
     }

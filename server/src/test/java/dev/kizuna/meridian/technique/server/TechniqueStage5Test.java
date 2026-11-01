@@ -387,6 +387,7 @@ public class TechniqueStage5Test {
                         .setRequestId(request.getRequestId())
                         .setBody(BodyProtobuf.toMessage(inspection.body()))
                         .setHeldItems(inspection.heldItems())
+                        .setInspectFacts(inspection.facts())
                         .build());
             }
             case ACTIVITY -> {

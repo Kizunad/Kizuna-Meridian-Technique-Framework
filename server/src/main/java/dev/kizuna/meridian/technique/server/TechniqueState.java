@@ -149,6 +149,9 @@ public final class TechniqueState {
         if (active.getHeldItemRules().getCategoriesCount() > 0) {
             TechniqueHeldItems.validateRules(active.getHeldItemRules());
         }
+        if (active.hasLegRules()) {
+            TechniqueLegRules.validate(active.getLegRules());
+        }
         if (active.getPredecessorCleanupCount() > TechniqueValues.MAX_EFFECTS + 1) {
             throw TechniqueErrors.invalid("predecessor_cleanup", "前式清理数量超限");
         }

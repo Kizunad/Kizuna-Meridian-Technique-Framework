@@ -451,3 +451,33 @@ llvmpipe 软件渲染，新运行目录先跑 `:fabric:runGametest` 生成世界
 `disconnectFromClient` 模拟客户端退出，服务端已先踢出时不重复处理断线。
 下游在 GameTest 源码集写 `testFixtures('dev.kizuna.meridian.technique:fabric')`，经源码组合解析。
 夹具按实际用法逐步补充：Vanilla Damage 的挥手包用例用 `detached`，Human 的整套宿主用例用 `logIn`。
+
+## 阶段 8：腿法与训练做功
+
+阶段 8 为千里腿提供 `leg_strike`、书级着地与靴子事实、训练做功和腿力 AI 情境。
+腿击沿用持物打击的目标预算与分组去重，增加身后朝向、出力腿、击退和伤害类型 ID；宿主只接收意图，
+伤害类型 ID 直接交给下游读取，不在功法库拼接命名空间。`movement_speed_multiplier` 的下限为 0，0 表示站定，
+冲量仍由宿主照常执行。`#minecraft:bypasses_cooldown` 仍由内容与宿主按原规则使用，本阶段不新增处理。
+
+| 交接要求 | 测试名及验证内容 |
+|---|---|
+| 腿击参数、身后朝向和目标预算 | `TechniqueStage8Test.legStrikeUsesRearFacingAndSharedTargetBudget`：复用持物打击的同组去重与整式目标上限，并检查后腿、推开及身后朝向 |
+| 起手保存书级规则与末击约束 | `TechniqueStage8Test.legStrikeSchedulesSavedRulesAndRejectsWrongFinalStrike`：意图携带 `LegRules`，腿击不携带手位，错误末击声明在目录边界拒绝 |
+| 书级条件与手持物品互斥 | `TechniqueStage8Test.legBookRequiresGroundingRulesAndRejectsHeldRules`：腿法书必须显式忽略手持物品、要求着地和鞋参数，不能同时声明持物规则 |
+| inspect 着地事实和失败原因 | `TechniqueStage8Test.nonGroundedLegCastReturnsPlayerReasonAndSavesRules`：水中、攀爬、骑乘、滑翔和离地统一返回 `NOT_GROUNDED` 及中文原因，成功起手保存规则 |
+| `WorkCost.training` 与目录训练能力 | `TechniqueStage8Test.trainingWorkIsMarkedOnCastAndLeapAndUntrainedCatalogIsRejected`：训练做功转为 `ActivityEffort.training`，跃步同样传递，未声明 `TissueTraining` 的匹配组织拒绝 |
+| AI 新情境和两腿有效力量 | `TechniqueStage8Test.aiFactsMultiplyLegWeightsAndEnforceEffectiveForce`：身后、空中、逃跑权重相乘，低于腿力门槛的候选不可用 |
+| 移动限速下限 | `TechniqueMovementTest.registryAcceptsZeroAndRejectsNegativeNonfiniteAndAcceleration`、`movementIntentValidatesLimitAndCleanRemoval`：显式 0 可加载并表示站定，负数、非有限数和加速倍率拒绝 |
+
+本阶段新增或修改的关键文件：`shared/src/main/proto/.../technique.proto` 的腿法、宿主事实、训练与 AI 字段；
+`server/.../TechniqueLegRules.java`、`TechniqueInspection.java`、`TechniqueCombatEffects.java`、
+`TechniqueCasting.java`、`TechniqueScheduler.java`、`TechniqueDefinitions.java`、`TechniqueSelector.java`、
+`TechniqueLeapWork.java` 及对应测试夹具；`Contracts.md` 与 `Host-Integration.md` 同步更新公开契约。
+
+| 命令或检查 | 结果 |
+|---|---|
+| `./gradlew test build --no-daemon --console=plain` | `BUILD SUCCESSFUL`；JUnit 202/202，0 失败、0 错误、0 跳过；`TechniqueStage8Test` 6/6 |
+| `python3 "scripts/check_docs.py"` | 7 个页面通过 |
+| `git diff --check` | 通过 |
+
+本阶段不运行 GameTest，也不修改 Human、Damage 或 Threatening。

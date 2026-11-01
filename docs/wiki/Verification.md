@@ -521,3 +521,17 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 | `./gradlew test build --console=plain` | JUnit 197/197（服务端 181、fabric 16） |
 | `./gradlew :fabric:runGametest --console=plain` | 23/23 |
 | Basic `./gradlew test build :gametest:runGametest` | JUnit 11/11，GameTest 38/38 |
+
+## 施放中右键放行声明（2026-11-02）
+
+新增 `TechniqueDefinition.allow_use_while_casting=15`，起手冻结到 `ActiveCast.allow_use_while_casting=17`，
+随 LOCK 下发为 `MovementIntent.allow_use_while_casting=3`。`TechniqueUseInputTest` 检查缺省与声明两种目录：
+快照和 LOCK 带目录值，UNLOCK 不带。拦截本身在 Human 的左键拦截处，回归是 Human 的
+`castingBlocksUseInputUnlessTechniqueAllowsIt`；去掉 Human 的右键回调时该例失败，三种右键全部生效（Human 73/74）。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build --console=plain` | JUnit 198/198（服务端 182、fabric 16） |
+| `./gradlew :fabric:runGametest --console=plain` | 23/23 |
+| Human `./gradlew test build :fabric:runGametest` | JUnit 67/67（服务端 40、fabric 27），GameTest 74/74 |
+| Basic `./gradlew test build :gametest:runGametest` | JUnit 11/11，GameTest 38/38 |

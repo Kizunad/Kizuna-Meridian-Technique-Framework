@@ -93,6 +93,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 | 冲量 | 前、后、上、朝目标、`INPUT`；速度 `METERS_PER_SECOND`：(0, 100] |
 | 表现 | 命名空间资源 ID；一次性或持续到收势结束；剪辑起播 `start_millis`：[0, 86400000]，缺省 0 |
 | 移动限速 | `TechniqueDefinition.movement_speed_multiplier=14` 为可选 double，(0,1]，缺省 1；起手至收势有效 |
+| 施放中右键 | `TechniqueDefinition.allow_use_while_casting=15` 为 bool，缺省 false：宿主在施放中拦下玩家右键（用物品、放方块、与方块或实体交互），与左键同处同条件；需要右键的式（如服药）写 true 放行 |
 | AI 提示 | 距离 `METER`：[0, 1024]，最小不大于最大；HP/真元阈值 `RATIO`：[0, 1]，权重 [0, 100] |
 | 熟练度 | `RATIO`：[0, 1]，仅保存供未来 AI 使用，不改变费用、时长或效果 |
 | 目录规模 | 最多 1024 个精确功法版本；单目录最多 1024 个模板引用；每功法真元/做功各最多 32 项；效果中非声音效果最多 32 项，`sound` 不计入、另计最多 64 项 |
@@ -262,6 +263,9 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 `TechniqueDefinition` 原 `lock_movement=12` 与 `ActiveCast.lock_movement=10` 已删除并 reserved 编号与名称；
 没有正式内容继续使用布尔锁。`ActiveCast.movement_speed_multiplier=16` 固定本次倍率。
 `MovementIntent.movement_speed_multiplier=2` 随 LOCK 下发，UNLOCK 不携带倍率。
+右键放行同样起手冻结：`ActiveCast.allow_use_while_casting=17` 保存目录值，`MovementIntent.allow_use_while_casting=3`
+只随 LOCK 下发，旧存档缺省为拦截。宿主以 LOCK 到 UNLOCK 为施放中，左键一律拦，右键按此字段决定，
+所以只有会下发 LOCK 的式（倍率小于 1）才拦原版输入。
 保留 LOCK/UNLOCK 枚举值与 `movement_lock/movement_unlock` 效果身份，LOCK 现在表示应用正数限速。
 宿主按施放 ID 派生 UUID，以 `MULTIPLY_TOTAL=(倍率-1)` 施加临时属性，冲量不乘此倍率。
 

@@ -374,6 +374,7 @@ message TechniqueDefinition {
   reserved "lock_movement";
   FollowUpRules follow_up = 13;
   optional double movement_speed_multiplier = 14; // (0,1]，缺省为 1；全程限速，不缩放冲量
+  bool allow_use_while_casting = 15; // 施放中放行玩家右键（用物品、放方块、与方块/实体交互）；缺省拦截
 }
 
 enum TechniqueFailure {
@@ -444,6 +445,7 @@ enum MovementAction {
 message MovementIntent {
   MovementAction action = 1;
   optional double movement_speed_multiplier = 2; // LOCK 为 (0,1]，缺省 1；UNLOCK 不携带倍率
+  bool allow_use_while_casting = 3; // 只随 LOCK 下发本次是否放行右键；UNLOCK 不携带
 }
 // 世界效果只交给宿主，不包含身体修正。
 message EffectIntent {
@@ -532,6 +534,7 @@ message ActiveCast {
   HeldItemRules held_item_rules = 14;
   repeated EffectIntent predecessor_cleanup = 15; // 原式清理与新起手同次保存，可稳定重试
   optional double movement_speed_multiplier = 16; // 固定本次限速，缺省为 1
+  bool allow_use_while_casting = 17; // 固定本次是否放行右键，旧存档缺省为拦截
 }
 message LastCast {
   TechniqueReference technique = 1;

@@ -293,10 +293,11 @@ public final class TechniqueScheduler {
     }
 
     private static EffectIntent movement(ActiveCast active, MovementAction action) {
-        // 沿用限速与清理的稳定身份，倍率冻结于施放快照。
+        // 沿用限速与清理的稳定身份，倍率和右键放行都冻结于施放快照；宿主按 LOCK 判定施放中并拦截原版输入。
         var movement = MovementIntent.newBuilder().setAction(action);
         if (action == MovementAction.LOCK) {
             movement.setMovementSpeedMultiplier(TechniqueMovement.multiplier(active));
+            movement.setAllowUseWhileCasting(active.getAllowUseWhileCasting());
         }
         String effectId = "movement_lock";
         if (action == MovementAction.UNLOCK) {

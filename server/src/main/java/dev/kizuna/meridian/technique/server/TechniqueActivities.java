@@ -158,6 +158,7 @@ final class TechniqueActivities {
                 .setInterruptibleByDamage(phases.getInterruptibleByDamage())
                 .setSelectedHand(start.selection().hand())
                 .setMovementSpeedMultiplier(TechniqueMovement.multiplier(start.definition()))
+                .setAllowUseWhileCasting(start.definition().getAllowUseWhileCasting())
                 .setCooldownMillis(start.definition().getCooldownMillis())
                 .setClipStartMillis(clipStart)
                 .setHeldItemRules(start.selection().entry().heldRules())

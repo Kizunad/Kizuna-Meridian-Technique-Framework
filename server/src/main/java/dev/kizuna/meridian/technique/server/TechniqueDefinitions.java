@@ -203,9 +203,7 @@ final class TechniqueDefinitions {
 
     private static void validateEffects(Map<String, TechniqueSlot> slots, TechniqueDefinition definition) {
         // 所有效果保留声明顺序，同一时刻不重新排序；这里只检查数据，不生成意图。
-        if (definition.getEffectsCount() > MAX_EFFECTS) {
-            throw TechniqueErrors.invalid("effects", "效果数量超限");
-        }
+        TechniqueSoundCues.validateCounts(definition);
         long previousMillis = 0;
         long durationMillis = durationMillis(definition.getPhases());
         for (TechniqueEffect effect : definition.getEffectsList()) {

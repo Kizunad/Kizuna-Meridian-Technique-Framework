@@ -150,6 +150,22 @@ public class TechniqueSoundTest {
     }
 
     @Test
+    public void soundsAreCountedApartFromTheOtherEffects() {
+        // 非声音效果占满 32 项时仍能再带 64 条声音；任一类多一条都拒绝，报错写清两个上限。
+        TechniqueDefinition chain = chain();
+        int fillers = TechniqueValues.MAX_EFFECTS - chain.getEffectsCount();
+        load(padded(chain, fillers, TechniqueValues.MAX_SOUNDS));
+        var tooManySounds = assertThrows(IllegalArgumentException.class,
+                () -> load(padded(chain, fillers, TechniqueValues.MAX_SOUNDS + 1)));
+        var tooManyOthers = assertThrows(IllegalArgumentException.class,
+                () -> load(padded(chain, fillers + 1, 0)));
+        for (IllegalArgumentException rejected : List.of(tooManySounds, tooManyOthers)) {
+            assertTrue(rejected.getMessage(), rejected.getMessage().contains("最多 " + TechniqueValues.MAX_EFFECTS)
+                    && rejected.getMessage().contains("最多 " + TechniqueValues.MAX_SOUNDS));
+        }
+    }
+
+    @Test
     public void deprecatedPresentationSoundIsRejected() {
         // 声音只有 SoundCue 一套声明，旧的表现字段非空即拒绝。
         Presentation presentation = Presentation.newBuilder()
@@ -217,6 +233,25 @@ public class TechniqueSoundTest {
         // 按声明顺序插入；同刻效果的先后决定目标声音挂靠哪一击。
         var effects = new ArrayList<>(definition.getEffectsList());
         effects.add(position, effect);
+        return definition.toBuilder()
+                .clearEffects()
+                .addAllEffects(effects)
+                .build();
+    }
+
+    private static TechniqueDefinition padded(TechniqueDefinition definition, int impulses, int sounds) {
+        // 零时刻补冲量与施放者声音凑数，放在原有效果之前，声明时刻仍然不减。
+        var effects = new ArrayList<TechniqueEffect>();
+        for (int index = 0; index < impulses; index++) {
+            effects.add(TechniqueEffect.newBuilder()
+                    .setAtMillis(0)
+                    .setImpulse(forward())
+                    .build());
+        }
+        for (int index = 0; index < sounds; index++) {
+            effects.add(sound(0, swing()));
+        }
+        effects.addAll(definition.getEffectsList());
         return definition.toBuilder()
                 .clearEffects()
                 .addAllEffects(effects)

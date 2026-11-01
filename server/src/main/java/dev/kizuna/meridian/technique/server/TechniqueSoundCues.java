@@ -109,6 +109,18 @@ public final class TechniqueSoundCues {
         }
     }
 
+    static void validateCounts(TechniqueDefinition definition) {
+        // 声音只是表现，不占其他效果的名额：非声音效果仍按 MAX_EFFECTS，声音另按 MAX_SOUNDS，报错写清两个上限。
+        long sounds = definition.getEffectsList().stream()
+                .filter(TechniqueEffect::hasSound)
+                .count();
+        long others = definition.getEffectsCount() - sounds;
+        if (others > TechniqueValues.MAX_EFFECTS || sounds > TechniqueValues.MAX_SOUNDS) {
+            throw TechniqueErrors.invalid("effects", "效果数量超限：非声音效果最多 " + TechniqueValues.MAX_EFFECTS
+                    + " 项（实有 " + others + "），声音最多 " + TechniqueValues.MAX_SOUNDS + " 项（实有 " + sounds + "）");
+        }
+    }
+
     static void validateTargets(TechniqueDefinition definition) {
         // 目标声音必须跟在同刻的武器打击之后，中间只能隔同刻的其他声音；调度据此把它并入该击。
         List<TechniqueEffect> effects = definition.getEffectsList();

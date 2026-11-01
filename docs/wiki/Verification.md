@@ -498,3 +498,13 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 两项客户端验收不再依赖手工预置的 `options.txt`：`runClientTest` 与 `runLeapClientTest` 启动前把各自运行目录的
 `onboardAccessibility` 写成 `false`，文件不存在时新建。验证时先把两份残留文件改回 `true` 再各跑一次，
 卷轴阅读 `success=true`（截图 6 张、合上检查 7 次）、跃步 `success=true`，两份文件跑完均为 `false`。
+
+## 声音单独计数（2026-11-02）
+
+目录校验不再把 `sound` 算进每功法 32 项效果：非声音效果仍最多 32 项，声音另计最多 64 项，
+超限信息同时写出两个上限与实有数量。`soundsAreCountedApartFromTheOtherEffects` 用 32 项非声音效果加 64 条声音加载成功，
+任一类多一条都拒绝。红灯：旧上限下该例在第一次加载就报「效果数量超限」。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build --console=plain` | JUnit 197/197（服务端 181、fabric 16） |

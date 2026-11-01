@@ -14,7 +14,9 @@ final class TechniqueValues {
     static final int SCHEMA_VERSION = 1;
     static final int MAX_MODULES = 16;
     static final int MAX_COSTS = 32;
+    /** 每功法非声音效果的上限；声音单独计数，见 MAX_SOUNDS。 */
     static final int MAX_EFFECTS = 32;
+    static final int MAX_SOUNDS = 64;
     static final long MAX_MILLIS = 86_400_000;
     static final long MAX_CURVE_MILLIS = 300_000;
     static final double MAX_QUANTITY = 1_000_000_000;

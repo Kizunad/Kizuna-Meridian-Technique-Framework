@@ -466,3 +466,16 @@ llvmpipe 软件渲染，新运行目录先跑 `:fabric:runGametest` 生成世界
 | 命令 | 结果 |
 |---|---|
 | `./gradlew test build :fabric:runGametest --console=plain` | fabric JUnit 16/16（服务端源码未改，`:server:test` 为 UP-TO-DATE）；GameTest 21/21，另有原版 `always_pass` |
+
+## 敌我预筛交给宿主（2026-11-02）
+
+`TechniqueWorldTargets` 不再按 `actor.isAlliedTo(target)` 排除目标，只排除自己、死亡、旁观者、视线外和标记盔甲架，
+敌我（含同队、原版同伴）全部由宿主谓词决定。类人生物宿主据此可以打「同伴但正是我的敌人」的目标；
+Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
+
+`alliedTargetIsLeftToHostPredicate` 把两只实体放进同一队伍，宿主谓词接受目标时照常入选。
+红灯：旧预筛下该例失败。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build :fabric:runGametest --console=plain` | fabric JUnit 16/16（服务端源码未改，`:server:test` 为 UP-TO-DATE）；GameTest 22/22，另有原版 `always_pass` |

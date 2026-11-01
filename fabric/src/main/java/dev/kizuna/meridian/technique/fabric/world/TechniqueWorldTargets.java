@@ -41,8 +41,9 @@ final class TechniqueWorldTargets {
     }
 
     private static boolean eligible(LivingEntity actor, LivingEntity target, Predicate<LivingEntity> hostile) {
-        // 世界障碍与原版队伍规则适用于玩家和生物。
-        if (target == actor || !target.isAlive() || target.isSpectator() || actor.isAlliedTo(target)
+        // 框架只排除自己、死亡、旁观者和视线外的目标；敌我（含同队、同伴）全部交宿主谓词，
+        // 宿主才知道「同伴但正是我的敌人」这类例外。
+        if (target == actor || !target.isAlive() || target.isSpectator()
                 || !actor.hasLineOfSight(target) || !hostile.test(target)) {
             return false;
         }

@@ -43,6 +43,26 @@ public final class TechniqueWorldTargetsGameTest {
         context.succeed();
     }
 
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void alliedTargetIsLeftToHostPredicate(GameTestHelper context) {
+        // 框架不再按同队预筛：宿主谓词接受同队目标时照常入选，敌我只由宿主决定。
+        Pair pair = entities(context);
+        var scoreboard = context.getLevel().getScoreboard();
+        var team = scoreboard.addPlayerTeam("allies_" + pair.actor().getStringUUID());
+        try {
+            scoreboard.addPlayerToTeam(pair.actor().getScoreboardName(), team);
+            scoreboard.addPlayerToTeam(pair.target().getScoreboardName(), team);
+            context.assertTrue(pair.actor().isAlliedTo(pair.target()), "两只实体没有进同一队伍");
+            var strike = strike(StrikeShape.SINGLE_TARGET, FALLBACK_ANGLE);
+            List<LivingEntity> selected = TechniqueWorldTargets.candidates(pair.actor(), strike,
+                    entity -> entity == pair.target());
+            context.assertTrue(selected.equals(List.of(pair.target())), "同队目标被框架预筛排除，宿主谓词没有生效");
+        } finally {
+            scoreboard.removePlayerTeam(team);
+        }
+        context.succeed();
+    }
+
     private static Pair entities(GameTestHelper context) {
         // 两个实体共用测试结构坐标，禁用 AI 保持几何不受寻路改变。
         var actor = context.spawn(EntityTypes.VINDICATOR, 1, 1, 1);

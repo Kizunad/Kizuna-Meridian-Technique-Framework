@@ -5,10 +5,14 @@ import com.mojang.logging.LogUtils;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
+import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.server.network.PlayerChunkSender;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.level.storage.TagValueInput;
@@ -53,6 +57,22 @@ public final class TestPlayers {
         server.getPlayerList().placeNewPlayer(connection, player, cookie);
         // 真实客户端加载完世界后会上报；上报前原版视玩家无敌，并忽略移动、攻击与交互。
         player.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
+    }
+
+    /** 测试连接每发出一个包都交给这里：区块批次结束包按真实客户端回执，其他包不处理。 */
+    public static void acknowledgeChunkBatch(Connection connection, Packet<?> packet) {
+        // 26.2 分批发区块，客户端回执前不发下一批，未发到的区块里的实体也不向玩家同步；
+        // 这里像真实客户端那样收到批次结束就回执，按最大速率要下一批。
+        // 区块发到后，其中的实体要等玩家跨区段或发来移动包才重算配对；测试玩家不发移动包，
+        // 回执后按移动包的服务端处理重算一次。1.20.1 没有批次回执，发区块时就同步其中的实体。
+        if (!(packet instanceof ClientboundChunkBatchFinishedPacket)) {
+            return;
+        }
+        if (connection.getPacketListener() instanceof ServerGamePacketListenerImpl listener) {
+            listener.handleChunkBatchReceived(
+                    new ServerboundChunkBatchReceivedPacket(PlayerChunkSender.MAX_CHUNKS_PER_TICK));
+            listener.player.level().getChunkSource().move(listener.player);
+        }
     }
 
     private static void moveToWorldSpawn(ServerPlayer player) {

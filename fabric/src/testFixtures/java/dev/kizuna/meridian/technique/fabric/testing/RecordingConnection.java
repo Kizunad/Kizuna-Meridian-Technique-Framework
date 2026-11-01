@@ -46,6 +46,7 @@ public final class RecordingConnection extends Connection {
     public void send(Packet<?> packet, ChannelFutureListener listener, boolean flush) {
         // 26.2 的各个发送入口都汇到这里；保留原始包供断言，并像传输成功那样执行回调。
         packets.add(packet);
+        TestPlayers.acknowledgeChunkBatch(this, packet);
         if (listener != null) {
             completeSend(listener);
         }

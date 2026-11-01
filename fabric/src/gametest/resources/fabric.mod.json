@@ -14,7 +14,8 @@
     "fabric-gametest": [
       "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueScrollGameTest",
-      "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest"
+      "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest",
+      "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldBlockingGameTest"
     ],
     "meridian_technique_catalog": [
       "dev.kizuna.meridian.technique.server.TechniqueGameTestHost"

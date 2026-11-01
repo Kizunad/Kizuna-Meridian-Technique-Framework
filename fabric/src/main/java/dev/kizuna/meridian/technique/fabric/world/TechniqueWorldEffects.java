@@ -168,7 +168,7 @@ public final class TechniqueWorldEffects {
             if (!selected.contains(target.getStringUUID())) {
                 continue;
             }
-            boolean blocked = target.isBlocking() && facesAttacker(target);
+            boolean blocked = target.isBlocking() && TechniqueWorldBlocking.facesSource(target, data.source());
             if (blocked && data.strike().getBreakShield()
                     && data.category().getShieldInteraction() == ShieldInteraction.BREAK_BEFORE_HIT) {
                 disableShield(target, data.strike().getShieldBreakMillis());
@@ -224,12 +224,6 @@ public final class TechniqueWorldEffects {
         double enchanted = EnchantmentHelper.modifyDamage((ServerLevel) target.level(), stack, target, source,
                 (float) total);
         return enchanted * category.getBaseDamage().getValue();
-    }
-
-    private boolean facesAttacker(LivingEntity target) {
-        // 原版盾只保护正面；不能因为背后攻击而触发盾冷却。
-        Vec3 toward = actor.position().subtract(target.position()).multiply(1, 0, 1).normalize();
-        return target.getViewVector(1).multiply(1, 0, 1).dot(toward) > 0;
     }
 
     private static void disableShield(LivingEntity target, long millis) {

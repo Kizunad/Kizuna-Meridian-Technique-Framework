@@ -451,3 +451,18 @@ llvmpipe 软件渲染，新运行目录先跑 `:fabric:runGametest` 生成世界
 `disconnectFromClient` 模拟客户端退出，服务端已先踢出时不重复处理断线。
 下游在 GameTest 源码集写 `testFixtures('dev.kizuna.meridian.technique:fabric')`，经源码组合解析。
 夹具按实际用法逐步补充：Vanilla Damage 的挥手包用例用 `detached`，Human 的整套宿主用例用 `logIn`。
+
+## 盾挡朝向与 26.2 原版对齐（2026-11-02）
+
+`TechniqueWorldEffects` 判断是否破盾、给盾冷却前，改由 `TechniqueWorldBlocking.facesSource` 判正面：
+与原版 `LivingEntity.applyItemBlocking` 同一套算法，取头部水平朝向（俯仰按 0）与伤害来源水平方向的夹角，
+不超过格挡物品各减伤项的水平格挡角即为正面。旧算法用含俯仰的视线向量、水平点积严格大于 0，
+对原版盾只在来源正好位于正侧方 90° 时与原版不同（原版算挡住，旧算法不算）。
+
+`TechniqueWorldBlockingGameTest` 三例都同时断言功法判定和原版 `applyItemBlocking` 的结果：
+头朝来源、身体背对时挡住；头背对、身体朝向时不挡；正侧方 90° 挡住。
+红灯：换回旧算法时只有正侧方一例失败。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build :fabric:runGametest --console=plain` | fabric JUnit 16/16（服务端源码未改，`:server:test` 为 UP-TO-DATE）；GameTest 21/21，另有原版 `always_pass` |

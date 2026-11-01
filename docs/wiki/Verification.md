@@ -494,3 +494,7 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 
 完整装配会同时加载 Human 宿主，`:fabric:runGametest` 不加 `-PscrollFullAssembly`，否则玩家被两个功法宿主认领
 （`MultipleHostsException`），6 项 GameTest 失败。
+
+两项客户端验收不再依赖手工预置的 `options.txt`：`runClientTest` 与 `runLeapClientTest` 启动前把各自运行目录的
+`onboardAccessibility` 写成 `false`，文件不存在时新建。验证时先把两份残留文件改回 `true` 再各跑一次，
+卷轴阅读 `success=true`（截图 6 张、合上检查 7 次）、跃步 `success=true`，两份文件跑完均为 `false`。

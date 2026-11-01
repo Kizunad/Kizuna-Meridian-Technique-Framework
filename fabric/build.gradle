@@ -106,6 +106,16 @@ tasks.named('runGametest') {
     }
 }
 
+// 26.2 首启先弹无障碍引导页再进快速游戏，两个客户端测试目录都预置为已看过引导。
+def skipAccessibilityOnboarding = { File file ->
+    if (file.exists()) {
+        file.text = file.text.replace('onboardAccessibility:true', 'onboardAccessibility:false')
+    } else {
+        file.parentFile.mkdirs()
+        file.text = 'onboardAccessibility:false\n'
+    }
+}
+
 tasks.register('prepareClientTestWorld', Copy) {
     from layout.buildDirectory.dir('gametest/world')
     into layout.buildDirectory.dir('clienttest/saves/scroll-screen-test')
@@ -114,11 +124,13 @@ tasks.register('prepareClientTestWorld', Copy) {
 tasks.named('runClientTest') {
     dependsOn tasks.named('prepareClientTestWorld')
     def report = layout.buildDirectory.file('clienttest-results.txt')
+    def options = layout.buildDirectory.file('clienttest/options.txt')
     doFirst {
         if (!providers.gradleProperty('scrollFullAssembly').isPresent()) {
             throw new GradleException('卷轴客户端验收需要 -PscrollFullAssembly 完整装配')
         }
         report.get().asFile.text = 'success=false\n'
+        skipAccessibilityOnboarding(options.get().asFile)
     }
     doLast {
         if (!report.get().asFile.text.startsWith('success=true')) {
@@ -135,11 +147,13 @@ tasks.register('prepareLeapClientWorld', Copy) {
 tasks.named('runLeapClientTest') {
     dependsOn tasks.named('prepareLeapClientWorld')
     def report = layout.buildDirectory.file('leap-client-results.txt')
+    def options = layout.buildDirectory.file('leapclienttest/options.txt')
     doFirst {
         if (!providers.gradleProperty('scrollFullAssembly').isPresent()) {
             throw new GradleException('跃步客户端验收需要 -PscrollFullAssembly 完整装配')
         }
         report.get().asFile.text = 'success=false\n'
+        skipAccessibilityOnboarding(options.get().asFile)
     }
     doLast {
         if (!report.get().asFile.text.startsWith('success=true')) {

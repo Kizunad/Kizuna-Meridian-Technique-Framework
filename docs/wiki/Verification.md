@@ -431,10 +431,14 @@ T2 只有正常 FINISHED 沿用原收势边界；取消与中断恢复按实际�
 |---|---|
 | `./gradlew test build :fabric:runGametest --console=plain` | JUnit 196/196（服务端 180、fabric 16）；GameTest 18/18，另有原版 `always_pass` |
 | `python3 scripts/check_docs.py` | 通过 |
+| `xvfb-run -a ./gradlew -PscrollFullAssembly :fabric:runClientTest`（11-01） | 卷轴阅读 `success=true`，截图 6 张、合上检查 7 次 |
+| `xvfb-run -a ./gradlew -PscrollFullAssembly :fabric:runLeapClientTest`（11-01） | 跃步 `success=true`，最大回拉 0、无传送包，三跳落点各前进 6 格 |
 
 GameTest 改用 Fabric 的 `@GameTest`。26.2 的 `performPrefixedCommand` 不再返回结果，测试经
 `GameTestCommands` 从来源的结果回调取得；物品使用成功会附带手中物品，断言改为判断服务端成功且不挥手。
-客户端验收需要整合装配与 Human 客户端，待装配脚本迁移后补跑。
+两项客户端验收在装配脚本迁移后补跑（上表 11-01 两行）：完整装配含 Human 客户端，`ALSOFT_DRIVERS=null`、
+llvmpipe 软件渲染，新运行目录先跑 `:fabric:runGametest` 生成世界，客户端目录预置 `options.txt`
+（`onboardAccessibility:false`，跳过首启无障碍引导）。
 
 ### 下游共用的 GameTest 夹具
 

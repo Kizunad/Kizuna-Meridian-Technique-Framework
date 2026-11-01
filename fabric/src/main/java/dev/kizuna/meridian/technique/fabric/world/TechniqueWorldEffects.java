@@ -184,7 +184,7 @@ public final class TechniqueWorldEffects {
                 target.knockback(data.strike().getKnockback().getValue(), delta.x, delta.z, data.source(), dose);
             }
             if (damaged) {
-                TechniqueSounds.playAll(target, hitSounds);
+                TechniqueSounds.playAll(actor, target, hitSounds);
             }
         }
     }

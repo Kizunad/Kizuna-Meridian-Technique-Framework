@@ -22,7 +22,6 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MoverType;
@@ -231,11 +230,11 @@ public final class TechniqueLeaps {
     }
 
     private static void landed(LivingEntity actor, TechniqueLeapFlight flight) {
-        // 落地声沿用脚下方块，只有服务端广播，避免预测双响。
+        // 落地声沿用脚下方块，只有服务端广播，避免预测双响；类别与功法声音一样跟施放者。
         if (!actor.level().isClientSide()) {
             var group = actor.level().getBlockState(actor.blockPosition().below()).getSoundType();
             actor.level().playSound(null, actor.getX(), actor.getY(), actor.getZ(), group.getStepSound(),
-                    SoundSource.PLAYERS, group.getVolume() * STEP_VOLUME, group.getPitch());
+                    TechniqueSounds.source(actor), group.getVolume() * STEP_VOLUME, group.getPitch());
         }
         actor.setDeltaMovement(Vec3.ZERO);
         actor.fallDistance = 0;

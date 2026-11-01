@@ -508,3 +508,16 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 | 命令 | 结果 |
 |---|---|
 | `./gradlew test build --console=plain` | JUnit 197/197（服务端 181、fabric 16） |
+
+## 声音类别跟施放者（2026-11-02）
+
+`sound` 效果、`TARGET` 命中声、跃步起跳声与落地脚步声的类别改为按施放者取：玩家 `PLAYERS`，原版 `Enemy` 为
+`HOSTILE`，其余 `NEUTRAL`。本库测试里施放者都是玩家，类别没有变化；`NEUTRAL` 分支目前没有用例覆盖。
+回归放在 Basic 的 `KnockMultihitGameTest`：玩家出手的四种模式仍期望 `PLAYERS`，真炁卫道士出手期望 `HOSTILE`。
+红灯：功法库改完而 Basic 期望不改时，只有卫道士一例因声音类别不符失败（Basic 37/38）。
+
+| 命令 | 结果 |
+|---|---|
+| `./gradlew test build --console=plain` | JUnit 197/197（服务端 181、fabric 16） |
+| `./gradlew :fabric:runGametest --console=plain` | 23/23 |
+| Basic `./gradlew test build :gametest:runGametest` | JUnit 11/11，GameTest 38/38 |

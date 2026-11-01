@@ -14,6 +14,8 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -29,7 +31,30 @@ public final class TechniqueSounds {
         return event -> playAtCaster(server, event);
     }
 
-    public static void play(Entity anchor, SoundCue cue) {
+    public static void play(Entity caster, SoundCue cue) {
+        // 施放者声音与起跳声锚在施放者自己脚下。
+        play(caster, caster, cue);
+    }
+
+    public static void playAll(Entity caster, Entity anchor, List<SoundCue> cues) {
+        // 同一锚点的多条声音按目录顺序各播一次；锚在目标处的声音类别仍跟施放者。
+        for (SoundCue cue : cues) {
+            play(caster, anchor, cue);
+        }
+    }
+
+    static SoundSource source(Entity caster) {
+        // 声音类别跟施放者，玩家在客户端的音量分类里各自调：玩家归玩家，敌对生物归敌对，其余生物归中立。
+        if (caster instanceof Player) {
+            return SoundSource.PLAYERS;
+        }
+        if (caster instanceof Enemy) {
+            return SoundSource.HOSTILE;
+        }
+        return SoundSource.NEUTRAL;
+    }
+
+    private static void play(Entity caster, Entity anchor, SoundCue cue) {
         // 在锚点实体脚下播放；附近玩家连同施放者本人都收到声音包，客户端不预测，所以不会双响。
         if (!(anchor.level() instanceof ServerLevel world)) {
             return;
@@ -38,14 +63,7 @@ public final class TechniqueSounds {
         float pitch = (float) TechniqueSoundCues.playedPitch(cue, world.getRandom().nextDouble());
         long seed = world.getRandom().nextLong();
         world.playSeededSound(null /* except */, anchor.getX(), anchor.getY(), anchor.getZ(), event(cue),
-                SoundSource.PLAYERS, volume, pitch, seed);
-    }
-
-    public static void playAll(Entity anchor, List<SoundCue> cues) {
-        // 同一锚点的多条声音按目录顺序各播一次。
-        for (SoundCue cue : cues) {
-            play(anchor, cue);
-        }
+                source(caster), volume, pitch, seed);
     }
 
     private static void playAtCaster(MinecraftServer server, TechniqueService.SoundDue event) {

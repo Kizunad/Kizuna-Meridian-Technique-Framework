@@ -280,14 +280,17 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 
 - `CASTER`：`TechniqueService` 分发到期效果时，把 `sound` 意图交给声音监听者（`addSoundListener`），
   不提交给宿主。Fabric 层 `TechniqueSounds` 在服务器启动时注册监听，按实体 UUID 找到施放者，
-  在其位置调用 `world.playSeededSound(null, pos, event, SoundSource.PLAYERS, volume, pitch, seed)`。
+  在其位置调用 `world.playSeededSound(null, pos, event, source, volume, pitch, seed)`，`source` 按施放者取，见下。
   同一施放的批次重试按效果身份去重，不会重复播放。
 - `TARGET`：随 `weapon_strike` 意图的 `hit_sounds` 下发。`TechniqueWorldEffects` 对 `hurt` 返回 true 的每个目标
   在其位置播放；宿主照常调用共享打击实现即可。
 - 跃步起跳：`TechniqueLeaps` 在服务端付费成功、施加初速度后播放 `takeoff_sound`；客户端预测不播，
-  施放者本人只听到服务端下发的一次。落地仍是原版方块脚步声。
+  施放者本人只听到服务端下发的一次。落地仍是原版方块脚步声，类别同样按施放者取。
 - 打断、取消、卸载后不再分发后续效果，之后的声音自然不播。
-- 声音类别固定为 `PLAYERS`，原版按距离与音量衰减；本库不另设距离上限。
+- 声音类别按施放者取，`TARGET` 声音也跟施放者而不跟目标：玩家为 `PLAYERS`；其他实体实现原版 `Enemy`
+  接口的为 `HOSTILE`，否则为 `NEUTRAL`。玩家可在客户端音量设置里分别调这三类。
+  这里不读 `Entity.getSoundSource()`：原版杀手兔等个别生物自报 `HOSTILE` 但不是 `Enemy`，按本规则归 `NEUTRAL`。
+- 原版按距离与音量衰减；本库不另设距离上限。
 
 ## 数据驱动状态与跃步
 

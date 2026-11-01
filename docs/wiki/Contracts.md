@@ -167,6 +167,8 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 挥空也要有声音时，在目录里另写一条同刻的 `CASTER` 声音；代码里没有「挥空换声」的特殊分支。
 `LeapProfile.takeoff_sound=18` 是跃步起跳声，锚点只能是 `CASTER`，每次实际起跳播放一次。
 `EffectIntent.sound=16` 只承载 `CASTER` 声音，效果身份仍是 `effect_<index>`。
+目录不声明声音类别：服务端按施放者取，玩家为 `PLAYERS`，原版 `Enemy` 为 `HOSTILE`，其余为 `NEUTRAL`，
+详见 [宿主流程](Host-Integration.md#声音)。
 
 `Presentation.sound_id=4` 已废弃：字段号保留，目录里必须为空，非空即拒绝。声音一律用 `SoundCue` 声明，
 不存在两套声音声明。

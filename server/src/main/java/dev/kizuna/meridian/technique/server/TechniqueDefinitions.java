@@ -8,6 +8,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,7 +27,8 @@ final class TechniqueDefinitions {
         // 校验器不对宿主或 Framework 施加修正。
     }
 
-    static void validate(AddonRegistry addons, Map<ModuleKind, Set<String>> tags, TechniqueDefinition definition) {
+    static void validate(AddonRegistry addons, Map<ModuleKind, Set<String>> tags,
+                         List<BodyMessages.TemplateReference> templates, TechniqueDefinition definition) {
         // 身份、时间、槽位、费用、效果依次检查，错误直接定位原始字段。
         id(definition.getId(), "id");
         if (definition.getVersion() <= 0 || definition.getCategoryValue() <= 0
@@ -38,9 +40,10 @@ final class TechniqueDefinitions {
         validateTiming(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
-        validateCosts(addons, slots, definition);
-        validateEffects(slots, definition);
+        validateCosts(addons, templates, slots, definition);
+        validateEffects(addons, templates, slots, definition);
         TechniqueCombatEffects.validateSequence(definition);
+        TechniqueCombatEffects.validateLegSequence(definition);
         TechniqueSoundCues.validateTargets(definition);
         if (definition.hasAiHints()) {
             validateAiHints(definition.getCategory(), definition.getAiHints());
@@ -137,7 +140,8 @@ final class TechniqueDefinitions {
         }
     }
 
-    private static void validateCosts(AddonRegistry addons, Map<String, TechniqueSlot> slots,
+    private static void validateCosts(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
+                                      Map<String, TechniqueSlot> slots,
                                       TechniqueDefinition definition) {
         // 声明空费用必须显式保留 cost 消息，未知费用字段由递归检查拒绝。
         TechniqueCost cost = definition.getCost();
@@ -166,7 +170,7 @@ final class TechniqueDefinitions {
             }
         }
         for (WorkCost work : cost.getWorkList()) {
-            validateWork(slots, work);
+            validateWork(addons, templates, slots, work);
         }
     }
 
@@ -183,7 +187,8 @@ final class TechniqueDefinitions {
         }
     }
 
-    private static void validateWork(Map<String, TechniqueSlot> slots, WorkCost work) {
+    private static void validateWork(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
+                                     Map<String, TechniqueSlot> slots, WorkCost work) {
         // 器官疲劳同样按 W × s 表达，与 Framework 的单一能量预算一致。
         TechniqueSlot slot = slots.get(work.getSlotId());
         if (slot == null || slot.getModule() == ModuleKind.MERIDIAN || slot.getMinimumCount() == 0) {
@@ -191,8 +196,16 @@ final class TechniqueDefinitions {
         }
         if (slot.getModule() == ModuleKind.TISSUE) {
             quantity(work.getForce(), Unit.NEWTON, 0, MAX_QUANTITY, "cost.work.force");
-        } else if (work.hasForce()) {
-            throw TechniqueErrors.invalid(work.getSlotId(), "器官做功不能声明组织力量");
+            if (work.getTraining()) {
+                validateTrainingWork(addons, templates, slot);
+            }
+        } else {
+            if (work.getTraining()) {
+                throw TechniqueErrors.invalid(work.getSlotId(), "训练做功只能用于组织槽位");
+            }
+            if (work.hasForce()) {
+                throw TechniqueErrors.invalid(work.getSlotId(), "器官做功不能声明组织力量");
+            }
         }
         double powerWatts = positive(work.getPower(), Unit.WATT, MAX_QUANTITY, "cost.work.power");
         double durationSeconds = positive(work.getDuration(), Unit.SECOND, MAX_SECONDS, "cost.work.duration");
@@ -201,7 +214,37 @@ final class TechniqueDefinitions {
         }
     }
 
-    private static void validateEffects(Map<String, TechniqueSlot> slots, TechniqueDefinition definition) {
+    private static void validateTrainingWork(AddonRegistry addons,
+                                             List<BodyMessages.TemplateReference> templates,
+                                             TechniqueSlot slot) {
+        // 训练负荷必须能在目录引用的每个匹配组织上安全落账，不能延迟到运行时。
+        boolean matched = false;
+        for (BodyMessages.TemplateReference reference : templates) {
+            BodyMessages.BodyTemplate template = addons.findTemplate(reference.getId(), reference.getVersion())
+                    .orElseThrow(() -> TechniqueErrors.invalid(reference.getId(), "绑定模板不存在"));
+            for (BodyMessages.TissueDefinition tissue : template.getStructure().getTissuesList()) {
+                if (!matches(slot, tissue)) {
+                    continue;
+                }
+                matched = true;
+                if (!tissue.hasTraining()) {
+                    throw TechniqueErrors.invalid(slot.getId(), "训练做功命中的组织未声明 TissueTraining");
+                }
+            }
+        }
+        if (!matched) {
+            throw TechniqueErrors.invalid(slot.getId(), "训练做功没有可验证的组织匹配项");
+        }
+    }
+
+    private static boolean matches(TechniqueSlot slot, BodyMessages.TissueDefinition tissue) {
+        // 与运行时绑定保持同一组标签和类型匹配规则，训练不能放宽槽位选择范围。
+        return tissue.getTagsList().containsAll(slot.getTagsList())
+                && (slot.getKind().isEmpty() || slot.getKind().equals(tissue.getKind()));
+    }
+
+    private static void validateEffects(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
+                                        Map<String, TechniqueSlot> slots, TechniqueDefinition definition) {
         // 所有效果保留声明顺序，同一时刻不重新排序；这里只检查数据，不生成意图。
         TechniqueSoundCues.validateCounts(definition);
         long previousMillis = 0;
@@ -217,10 +260,11 @@ final class TechniqueDefinitions {
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> {
                     TechniqueBenefits.validate(effect.getStatusBenefit());
-                    validateWork(slots, effect.getStatusBenefit().getLeap().getWork());
+                    validateWork(addons, templates, slots, effect.getStatusBenefit().getLeap().getWork());
                     requireSlot(slots, effect.getStatusBenefit().getLeap().getWork().getSlotId(), ModuleKind.TISSUE);
                 }
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
+                case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
                 case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
                 case PRESENTATION -> {
@@ -350,6 +394,18 @@ final class TechniqueDefinitions {
         }
         if (hints.hasPursuedWeight()) {
             quantity(hints.getPursuedWeight(), Unit.RATIO, 0, MAX_WEIGHT, "pursued_weight");
+        }
+        if (hints.hasTargetBehindWeight()) {
+            quantity(hints.getTargetBehindWeight(), Unit.RATIO, 0, MAX_WEIGHT, "target_behind_weight");
+        }
+        if (hints.hasTargetAirborneWeight()) {
+            quantity(hints.getTargetAirborneWeight(), Unit.RATIO, 0, MAX_WEIGHT, "target_airborne_weight");
+        }
+        if (hints.hasSelfFleeingWeight()) {
+            quantity(hints.getSelfFleeingWeight(), Unit.RATIO, 0, MAX_WEIGHT, "self_fleeing_weight");
+        }
+        if (hints.hasMinimumLegForce()) {
+            quantity(hints.getMinimumLegForce(), Unit.NEWTON, 0, MAX_QUANTITY, "minimum_leg_force");
         }
         if (hints.hasMaximumWarmupUnderAttackMillis()) {
             millis(hints.getMaximumWarmupUnderAttackMillis(), "maximum_warmup_under_attack_millis");

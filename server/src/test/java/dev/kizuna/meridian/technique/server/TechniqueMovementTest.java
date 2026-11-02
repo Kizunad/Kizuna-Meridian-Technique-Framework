@@ -27,11 +27,13 @@ public final class TechniqueMovementTest {
     }
 
     @Test
-    public void registryRejectsZeroNegativeNonfiniteAndAcceleration() {
-        // 走正式目录装配校验，防止只测试辅助方法却漏接注册边界。
+    public void registryAcceptsZeroAndRejectsNegativeNonfiniteAndAcceleration() {
+        // 走正式目录装配校验，零表示站定，其他越界倍率仍在目录边界拒绝。
         var catalog = Fixtures.catalog(Fixtures.definition());
         var original = catalog.getDefinitions(0);
-        for (double invalid : List.of(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY, ACCELERATION)) {
+        TechniqueDefinition stopped = original.toBuilder().setMovementSpeedMultiplier(0).build();
+        TechniqueRegistry.load(Fixtures.addons(), List.of(catalog.toBuilder().setDefinitions(0, stopped).build()));
+        for (double invalid : List.of(-1.0, Double.NaN, Double.POSITIVE_INFINITY, ACCELERATION)) {
             var definition = original.toBuilder().setMovementSpeedMultiplier(invalid).build();
             var malformed = catalog.toBuilder().setDefinitions(0, definition).build();
             assertThrows(IllegalArgumentException.class,
@@ -41,15 +43,16 @@ public final class TechniqueMovementTest {
 
     @Test
     public void movementIntentValidatesLimitAndCleanRemoval() {
-        // UNLOCK 不能夹带新倍率；LOCK 的显式零也必须被拒绝。
+        // UNLOCK 不能夹带新倍率；LOCK 的显式零表示施放期间不能移动。
         var limit = MovementIntent.newBuilder()
                 .setAction(MovementAction.LOCK)
                 .setMovementSpeedMultiplier(SLOW_MULTIPLIER)
                 .build();
         TechniqueMovement.validateIntent(limit);
         assertEquals(SLOW_MULTIPLIER, TechniqueMovement.multiplier(limit), EPSILON);
-        assertThrows(IllegalArgumentException.class,
-                () -> TechniqueMovement.validateIntent(limit.toBuilder().setMovementSpeedMultiplier(0).build()));
+        MovementIntent stopped = limit.toBuilder().setMovementSpeedMultiplier(0).build();
+        TechniqueMovement.validateIntent(stopped);
+        assertEquals(0, TechniqueMovement.multiplier(stopped), EPSILON);
         var invalidRemoval = limit.toBuilder().setAction(MovementAction.UNLOCK).build();
         assertThrows(IllegalArgumentException.class, () -> TechniqueMovement.validateIntent(invalidRemoval));
         TechniqueMovement.validateIntent(invalidRemoval.toBuilder().clearMovementSpeedMultiplier().build());

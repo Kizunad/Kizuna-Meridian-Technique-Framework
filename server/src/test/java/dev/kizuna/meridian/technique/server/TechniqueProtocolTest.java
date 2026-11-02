@@ -29,6 +29,7 @@ public class TechniqueProtocolTest {
                 .setRequestId("inspect_hands")
                 .setBody(BodyProtobuf.toMessage(body(Shape.TENDRIL)))
                 .setHeldItems(hands)
+                .setInspectFacts(TechniqueInspection.defaults())
                 .build();
         assertEquals(response, TechniqueProtocol.decodeHostResponse(TechniqueProtocol.encodeHostResponse(response)));
         TechniqueHostResponse missingHands = response.toBuilder().clearHeldItems().build();

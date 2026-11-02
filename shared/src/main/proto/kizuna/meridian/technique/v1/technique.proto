@@ -38,6 +38,7 @@ message TechniqueBook {
   string id = 1;
   string display_name = 2;
   HeldItemRules held_item_rules = 3; // 缺省表示不要求持物
+  LegRules leg_rules = 10; // 腿法书级条件与靴子参数
 }
 message TechniqueVolume {
   string id = 1;
@@ -155,6 +156,7 @@ message WorkCost {
   Quantity force = 2; // 组织必填，N；器官必须缺省
   Quantity power = 3; // W
   Quantity duration = 4; // s
+  bool training = 5; // 训练做功；只允许用于声明 TissueTraining 的组织
 }
 message TechniqueCost { repeated QiCost qi = 1; repeated WorkCost work = 2; }
 message CastPhases {
@@ -264,6 +266,57 @@ enum StrikeShape {
   SINGLE_TARGET = 1;
   SECTOR = 2;
 }
+enum StrikeFacing {
+  STRIKE_FACING_UNSPECIFIED = 0;
+  STRIKE_FORWARD = 1;
+  STRIKE_BACKWARD = 2;
+}
+enum LegSelection {
+  LEG_SELECTION_UNSPECIFIED = 0;
+  FRONT_LEG = 1;
+  REAR_LEG = 2;
+  BOTH_LEGS = 3;
+}
+enum LegKnockbackKind {
+  LEG_KNOCKBACK_UNSPECIFIED = 0;
+  NONE = 1;
+  PUSH = 2;
+  SIDEWAYS = 3;
+  TRIP = 4;
+  DOWN = 5;
+}
+message LegRules {
+  optional bool ignore_held_items = 1;
+  optional bool require_grounded = 2;
+  Quantity base_damage = 3; // DAMAGE_POINT，光脚基础伤害
+  Quantity armor_damage = 4; // DAMAGE_POINT，每点靴子护甲增加的伤害
+  optional int32 durability_cost = 5; // 每式最后一击扣除的靴子耐久
+}
+message TechniqueHostFacts {
+  optional bool grounded = 1;
+  optional bool in_water = 2;
+  optional bool climbing = 3;
+  optional bool riding = 4;
+  optional bool gliding = 5;
+  optional double boot_armor = 6;
+  optional int32 boot_durability = 7;
+}
+message LegStrike {
+  StrikeShape shape = 1;
+  StrikeFacing facing = 2;
+  Quantity distance = 3; // METER，(0, 1024]
+  Quantity angle = 4; // DEGREE，扇形 (0, 360]；单体固定 60 度后备锥
+  Quantity multiplier = 5; // RATIO，(0, 10]
+  optional int32 maximum_targets = 6;
+  optional int32 cast_target_limit = 7;
+  LegSelection leg = 8;
+  string damage_type_id = 9; // 目录直接提供的 Damage 身份
+  LegKnockbackKind knockback_kind = 10;
+  Quantity knockback = 11; // RATIO，[0, 10]，交由宿主换算
+  optional bool knockback_when_blocked = 12;
+  optional bool last_strike = 13;
+  string dedup_group = 14; // 必填局部标识，同次施放内同组每目标只命中一次
+}
 message WeaponStrike {
   StrikeShape shape = 1;
   Quantity distance = 2; // METER，(0, 1024]
@@ -294,6 +347,11 @@ message WeaponStrikeIntent {
   HeldItemRules held_item_rules = 2; // 按打击时选定手的当前物品重新匹配
   repeated SoundCue hit_sounds = 3; // 并入的 TARGET 声音，在每个真正受伤的目标处各播一次
 }
+message LegStrikeIntent {
+  LegStrike strike = 1;
+  LegRules leg_rules = 2; // 起手保存的书级鞋规则
+  repeated SoundCue hit_sounds = 3; // 并入的 TARGET 声音，在每个真正受伤的目标处各播一次
+}
 message BreakBlocksIntent {
   BreakBlocks blocks = 1;
   HeldItemRules held_item_rules = 2;
@@ -318,6 +376,7 @@ message TechniqueEffect {
     BreakBlocks break_blocks = 6;
     StatusBenefit status_benefit = 7;
     SoundCue sound = 8;
+    LegStrike leg_strike = 20;
   }
 }
 message Presentation {
@@ -357,6 +416,10 @@ message CombatAiHints {
   optional int64 maximum_warmup_under_attack_millis = 5;
   Quantity maximum_long_warmup_distance = 6; // 与 long_warmup_millis 同时提供
   optional int64 long_warmup_millis = 7;
+  Quantity target_behind_weight = 8;
+  Quantity target_airborne_weight = 9;
+  Quantity self_fleeing_weight = 10;
+  Quantity minimum_leg_force = 11; // NEWTON；两腿有效力量下限
 }
 message TechniqueDefinition {
   string id = 1;
@@ -373,7 +436,7 @@ message TechniqueDefinition {
   reserved 12;
   reserved "lock_movement";
   FollowUpRules follow_up = 13;
-  optional double movement_speed_multiplier = 14; // (0,1]，缺省为 1；全程限速，不缩放冲量
+  optional double movement_speed_multiplier = 14; // [0,1]，缺省为 1；全程限速，不缩放冲量
   bool allow_use_while_casting = 15; // 施放中放行玩家右键（用物品、放方块、与方块/实体交互）；缺省拦截
 }
 
@@ -400,6 +463,7 @@ enum TechniqueFailure {
   FOLLOW_UP_REQUIRED = 19;
   FOLLOW_UP_UNAVAILABLE = 20;
   STAGGERED = 21; // 受击僵直未到期，不能起新式
+  NOT_GROUNDED = 22; // 腿法要求施放者站在地上
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -444,7 +508,7 @@ enum MovementAction {
 }
 message MovementIntent {
   MovementAction action = 1;
-  optional double movement_speed_multiplier = 2; // LOCK 为 (0,1]，缺省 1；UNLOCK 不携带倍率
+  optional double movement_speed_multiplier = 2; // LOCK 为 [0,1]，缺省 1；UNLOCK 不携带倍率
   bool allow_use_while_casting = 3; // 只随 LOCK 下发本次是否放行右键；UNLOCK 不携带
 }
 // 世界效果只交给宿主，不包含身体修正。
@@ -463,6 +527,7 @@ message EffectIntent {
     BreakBlocksIntent break_blocks = 14;
     StatusBenefit status_benefit = 15;
     SoundCue sound = 16; // 只承载 CASTER，由功法服务交给声音监听者，不提交宿主
+    LegStrikeIntent leg_strike = 20;
   }
 }
 message TechniqueHostRequest {
@@ -482,6 +547,7 @@ message TechniqueActivityCommit {
 message TechniqueHostResponse {
   string request_id = 1;
   HeldItems held_items = 2; // body 回执必须携带，与身体同一次 inspect 采集
+  TechniqueHostFacts inspect_facts = 20; // body 回执必须携带，与身体同一次 inspect 采集
   oneof result {
     bool unbound = 10;
     kizuna.meridian.v1.BodySnapshot body = 11;
@@ -535,6 +601,7 @@ message ActiveCast {
   repeated EffectIntent predecessor_cleanup = 15; // 原式清理与新起手同次保存，可稳定重试
   optional double movement_speed_multiplier = 16; // 固定本次限速，缺省为 1
   bool allow_use_while_casting = 17; // 固定本次是否放行右键，旧存档缺省为拦截
+  LegRules leg_rules = 30; // 固定本次书级腿法规则
 }
 message LastCast {
   TechniqueReference technique = 1;

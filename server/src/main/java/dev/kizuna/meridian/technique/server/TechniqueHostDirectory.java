@@ -148,7 +148,7 @@ public final class TechniqueHostDirectory {
                 throw rejected(response);
             }
             BodySnapshot body = BodyProtobuf.fromMessage(response.getBody());
-            return new Inspection(body, response.getHeldItems());
+            return new Inspection(body, response.getHeldItems(), response.getInspectFacts());
         }
 
         private TechniqueErrors.HostRejected rejected(TechniqueHostResponse response) {

@@ -29,12 +29,19 @@ public final class TechniqueSelector {
     }
 
     public record Situation(long nowMillis, double selfHpRatio, double selfQiRatio,
-                            double targetDistanceMeters, TargetState targetState) {
+                            double targetDistanceMeters, TargetState targetState,
+                            double effectiveLegForceNewtons) {
+        public Situation(long nowMillis, double selfHpRatio, double selfQiRatio,
+                         double targetDistanceMeters, TargetState targetState) {
+            this(nowMillis, selfHpRatio, selfQiRatio, targetDistanceMeters, targetState, 0);
+        }
+
         public Situation {
             // AI 输入来自宿主，先拒绝无界数值，避免权重计算产生 NaN。
             if (nowMillis < 0 || !ratio(selfHpRatio) || !ratio(selfQiRatio)
                     || !Double.isFinite(targetDistanceMeters) || targetDistanceMeters < 0
-                    || targetState == null) {
+                    || targetState == null || !Double.isFinite(effectiveLegForceNewtons)
+                    || effectiveLegForceNewtons < 0) {
                 throw new IllegalArgumentException("AI 情境参数非法");
             }
         }
@@ -60,7 +67,10 @@ public final class TechniqueSelector {
         TARGET_SHIELDING,
         SURROUNDED,
         UNDER_ATTACK,
-        PURSUED
+        PURSUED,
+        TARGET_BEHIND,
+        TARGET_AIRBORNE,
+        SELF_FLEEING
     }
 
     public record CombatContext(Set<CombatFact> facts, TechniqueProgress progress) {
@@ -161,8 +171,13 @@ public final class TechniqueSelector {
             return false;
         }
         double distance = context.situation().targetDistanceMeters();
-        return distance >= hints.getMinimumDistance().getValue()
-                && distance <= hints.getMaximumDistance().getValue();
+        if (distance < hints.getMinimumDistance().getValue()
+                || distance > hints.getMaximumDistance().getValue()) {
+            return false;
+        }
+        return !hints.getCombat().hasMinimumLegForce()
+                || context.situation().effectiveLegForceNewtons() >= hints.getCombat()
+                        .getMinimumLegForce().getValue();
     }
 
     private static boolean combatAvailable(Context context, TechniqueDefinition definition) {
@@ -204,6 +219,9 @@ public final class TechniqueSelector {
                 case SURROUNDED -> hints.getSurroundedWeight();
                 case UNDER_ATTACK -> hints.getUnderAttackWeight();
                 case PURSUED -> hints.getPursuedWeight();
+                case TARGET_BEHIND -> hints.getTargetBehindWeight();
+                case TARGET_AIRBORNE -> hints.getTargetAirborneWeight();
+                case SELF_FLEEING -> hints.getSelfFleeingWeight();
             };
             if (multiplier.hasValue()) {
                 result *= multiplier.getValue();

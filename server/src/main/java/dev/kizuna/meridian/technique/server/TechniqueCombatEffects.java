@@ -6,6 +6,10 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeShape;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegKnockbackKind;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegSelection;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeFacing;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
 
 import java.util.HashSet;
@@ -47,6 +51,80 @@ final class TechniqueCombatEffects {
         if (strike.hasInjuryOverride() && strike.getInjuryOverride() != InjuryKind.CUTTING
                 && strike.getInjuryOverride() != InjuryKind.BLUNT) {
             throw TechniqueErrors.invalid("injury_override", "未知致伤覆盖");
+        }
+    }
+
+    static void validateLegStrike(LegStrike strike) {
+        // 腿法不读取持物，目录必须把目标、出力腿、伤害身份和鞋磨损规则写全。
+        localId(strike.getDedupGroup(), "leg_strike.dedup_group");
+        id(strike.getDamageTypeId(), "leg_strike.damage_type_id");
+        positive(strike.getDistance(), Unit.METER, MAX_DISTANCE, "leg_strike.distance");
+        double angle = positive(strike.getAngle(), Unit.DEGREE, FULL_CIRCLE, "leg_strike.angle");
+        positive(strike.getMultiplier(), Unit.RATIO, MAX_PEAK, "leg_strike.multiplier");
+        quantity(strike.getKnockback(), Unit.RATIO, 0, MAX_PEAK, "leg_strike.knockback");
+        validateLegBudget(strike);
+        validateLegShape(strike, angle);
+        validateLegKnockback(strike);
+    }
+
+    private static void validateLegBudget(LegStrike strike) {
+        // 每次范围腿击共享整式不同目标上限，显式末击才负责磨鞋。
+        int maximumTargets = strike.getMaximumTargets();
+        int castTargetLimit = strike.getCastTargetLimit();
+        if (strike.getFacingValue() <= 0 || strike.getFacing() == StrikeFacing.UNRECOGNIZED
+                || strike.getLegValue() <= 0 || strike.getLeg() == LegSelection.UNRECOGNIZED
+                || !strike.hasMaximumTargets() || !strike.hasCastTargetLimit()
+                || !strike.hasKnockbackWhenBlocked() || !strike.hasLastStrike()
+                || maximumTargets < 1 || castTargetLimit < maximumTargets || castTargetLimit > MAX_TARGETS) {
+            throw TechniqueErrors.invalid("leg_strike", "缺少显式朝向、出力腿、盾规则或目标预算");
+        }
+    }
+
+    private static void validateLegShape(LegStrike strike, double angle) {
+        // 单体目标沿用持物打击的六十度后备锥，扇形允许身前或身后朝向。
+        if (strike.getShape() != StrikeShape.SINGLE_TARGET && strike.getShape() != StrikeShape.SECTOR) {
+            throw TechniqueErrors.invalid("leg_strike.shape", "未知打击形状");
+        }
+        if (strike.getShape() == StrikeShape.SINGLE_TARGET
+                && (strike.getMaximumTargets() != 1 || angle != SINGLE_TARGET_ANGLE)) {
+            throw TechniqueErrors.invalid("leg_strike", "单体必须最多一个目标且后备锥为 60 度");
+        }
+    }
+
+    private static void validateLegKnockback(LegStrike strike) {
+        // 无击退必须填零，其余四种击退必须有正大小，避免宿主猜测单位含义。
+        LegKnockbackKind kind = strike.getKnockbackKind();
+        if (kind.getNumber() <= 0 || kind == LegKnockbackKind.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("leg_strike.knockback_kind", "未知腿法击退方式");
+        }
+        double amount = strike.getKnockback().getValue();
+        if ((kind == LegKnockbackKind.NONE && amount != 0)
+                || (kind != LegKnockbackKind.NONE && amount == 0)) {
+            throw TechniqueErrors.invalid("leg_strike.knockback", "击退大小必须与击退方式匹配");
+        }
+    }
+
+    static boolean hasLegStrike(TechniqueDefinition definition) {
+        // 书级腿法规则只对真正包含腿击算子的定义生效。
+        return definition.getEffectsList().stream().anyMatch(TechniqueEffect::hasLegStrike);
+    }
+
+    static void validateLegSequence(TechniqueDefinition definition) {
+        // 多段腿法的目标预算一致，只有最后一段能磨鞋；同组去重由宿主命中记录保证。
+        List<LegStrike> strikes = definition.getEffectsList().stream()
+                .filter(TechniqueEffect::hasLegStrike).map(TechniqueEffect::getLegStrike).toList();
+        if (strikes.isEmpty()) {
+            return;
+        }
+        LegStrike first = strikes.get(0);
+        for (int index = 0; index < strikes.size(); index++) {
+            LegStrike strike = strikes.get(index);
+            boolean last = index == strikes.size() - 1;
+            if (strike.getCastTargetLimit() != first.getCastTargetLimit()
+                    || strike.getLastStrike() != last) {
+                throw TechniqueErrors.invalid(
+                        definition.getId(), "腿法整式目标上限或最后一击声明不一致");
+            }
         }
     }
 

@@ -60,7 +60,7 @@ public final class TechniqueSoundCues {
     }
 
     public static boolean targetAnchored(TechniqueEffect effect) {
-        // 目标锚点的声音不单独成为意图，随它所跟的打击下发。
+        // 目标锚点的声音不单独成为意图，随它所跟的持物或腿法打击下发。
         return effect.hasSound() && effect.getSound().getAnchor() == SoundAnchor.TARGET;
     }
 
@@ -122,7 +122,7 @@ public final class TechniqueSoundCues {
     }
 
     static void validateTargets(TechniqueDefinition definition) {
-        // 目标声音必须跟在同刻的武器打击之后，中间只能隔同刻的其他声音；调度据此把它并入该击。
+        // 目标声音必须跟在同刻的武器或腿法打击之后，中间只能隔同刻的其他声音。
         List<TechniqueEffect> effects = definition.getEffectsList();
         for (int index = 0; index < effects.size(); index++) {
             if (targetAnchored(effects.get(index)) && !followsStrike(effects, index)) {
@@ -156,7 +156,7 @@ public final class TechniqueSoundCues {
             if (effect.getAtMillis() != atMillis) {
                 return false;
             }
-            if (effect.hasWeaponStrike()) {
+            if (effect.hasWeaponStrike() || effect.hasLegStrike()) {
                 return true;
             }
             if (!effect.hasSound()) {

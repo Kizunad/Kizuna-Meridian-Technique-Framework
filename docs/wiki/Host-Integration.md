@@ -84,7 +84,7 @@ Fabric 层据此给实体加临时 `MULTIPLY_TOTAL` 移动修饰，并把 `merid
 
 | 宿主方法 | 必须履行的行为 |
 |---|---|
-| `inspect()` | 先按旧动作结算至可信当前身体时刻，再返回 `Inspection(body, heldItems)`；双手事实与身体同时采集 |
+| `inspect()` | 先按旧动作结算至可信当前身体时刻，再返回 `Inspection(body, heldItems, facts)`；身体、双手、移动状态与鞋事实同时采集 |
 | `findActivity(requestId)` | 重新验证授权，查同一身体、`TechniqueHost.CALLER_ID` 下 Framework 持久活动回执 |
 | `submit(Submission)` | 检查 `expectedRevision`，走 `handleActivity`，原子保存身体、回执及释放账户；返回实际活动和 revision |
 | `submitEffect(EffectSubmission)` | 校验 `EffectIntent`，幂等执行冲量、表现、移动限速、持物打击、劈门或状态增益；本库不直接改世界 |
@@ -98,7 +98,7 @@ Fabric 层据此给实体加临时 `MULTIPLY_TOTAL` 移动修饰，并把 `merid
 
 1. 校验 `CastRequest`。客户端不能上传费用、效果剂量或知识记录。
 2. 按 `technique_start_<cast_id>` 查持久回执；相同请求返回原起手结果并标记 `replayed`，不同请求返回冲突。
-3. 宿主结算时间并提供身体与双手事实。检查存活、精确功法版本、可信 `known`、冷却及旧曲线结束；
+3. 宿主结算时间并提供身体、双手与 `TechniqueHostFacts`。检查存活、精确功法版本、可信 `known`、冷却及旧曲线结束；
    有其他施放时必须存在合法承接窗口。重新绑定并按书级规则选手，没有可用手时拒绝。
 4. 按每项 `QiCost.distribution` 扣除绑定经脉的内腔费用：`EACH` 每条经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount`；释放实际扣除的真元，不能扣外壁、未开拓经脉或其他属性余额。
 5. 生成一份 `BodyActivity`，包括 `accounts`、`released_qi`、`efforts`、`start_actions`、`add_modifiers`、`progress`。
@@ -215,7 +215,7 @@ Human 宿主需要同步适配以下契约：
 4. 正常实体效果路径还需执行移动 LOCK/UNLOCK、支持 BACKWARD，并让表现 START/PLAY_ONCE 使用
    `start_millis`、STOP 清理已启动表现。移动限速按 cast ID 管理并同步客户端，生命周期终止要移除限速，不能阻断冲量。
    开发依赖和 Fabric 本地产物也需同步更新；未执行的意图不能直接确认成功。
-5. 新增 `weapon_strike`、`break_blocks` 的 oneof 分支，必须按下列规则执行后再确认；
+5. 新增 `weapon_strike`、`break_blocks` 和 `leg_strike` 的 oneof 分支，必须按下列规则执行后再确认；
    并按 cast 和 `dedup_group` 保存命中记录，接入末击耐久、Damage 手臂侧和双手做功、玩家破门权限。
    不能静默接受未执行的分支。
 
@@ -243,11 +243,11 @@ Framework 现有接口限制已记录，未修改依赖：
 `movement_speed_multiplier<1` 的式在起手活动成功后立即下发 LOCK、倍率及同刻效果，
 收势、承接、打断、死亡、卸载、下线或恢复时 UNLOCK。两种效果保留原稳定身份。
 宿主按 cast ID 派生属性 UUID，用 `MULTIPLY_TOTAL=(倍率-1)` 管理临时移速属性并同步客户端；
-重复操作去重，移除不存在的修正无副作用。倍率必须在 (0,1] 内，缺省为 1，不拦冲量或跳跃。
+重复操作去重，移除不存在的修正无副作用。倍率必须在 [0,1] 内，缺省为 1；0 表示站定，不拦冲量或跳跃。
 玩家宿主在 LOCK 到 UNLOCK 之间拦原版输入：左键攻击实体、攻击方块与挥手包一律拦；右键（用物品、放方块、
 与方块或实体交互）在 LOCK 的 `allow_use_while_casting=false` 时拦，为 true 时放行。Human 在同一处注册这几个回调。
 本库只发意图，真实属性、动画和速度执行仍属宿主。
-inspect 字节身体分支必须提供双手 ID/标签/显式耐久与装物状态及主手侧，详见 [数据契约](Contracts.md)。
+inspect 字节身体分支必须提供双手 ID/标签/显式耐久与装物状态、主手侧，以及着地、水中、攀爬、骑乘、滑翔和成对鞋事实，详见 [数据契约](Contracts.md)。
 GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何表现内容。
 
 持物效果的宿主执行约定：
@@ -267,6 +267,16 @@ GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何�
 | 原版攻击/表现 | 施放时屏蔽原版左键攻击，右键按 `allow_use_while_casting` 屏蔽或放行，每击调用挥手，结束重置攻击冷却；动画、另一手覆盖层、物品耗尽及破门声效由宿主处理 |
 | 劈门类别与范围 | 只有当前匹配类别 `can_break_doors=true` 才执行；按前方距离、宽度和任一方块标签选取，门上下两半合并为一扇，合计不超过 `maximum_doors` |
 | 劈门权限 | 玩家检查 `world.mayInteract` 与服主总开关，出生点保护可阻止；生物检查 `mob_griefing`。两者统一通过 `world.destroyBlock(pos, true, actor)` 破坏并掉落，使用原版声音和粒子 |
+
+腿击效果的宿主执行约定：
+
+| 环节 | 宿主责任 |
+|---|---|
+| 起手条件 | 读取同次 inspect 的移动事实；未着地、水中、攀爬、骑乘或滑翔时拒绝 `NOT_GROUNDED`，不得扣费 |
+| 目标与伤害 | 按 `StrikeFacing`、距离、形状、`LegSelection` 和当前朝向选目标；直接读取目录提供的 `damage_type_id`，不拼接固定命名空间；剂量使用 `base_damage + armor_damage × boot_armor` |
+| 击退与盾 | 执行推开、横推、绊、踩落及大小；`knockback_when_blocked` 为真时即使盾挡住也执行击退；击退抗性由原版处理 |
+| 去重与鞋 | 复用 `TechniqueStrikeTargets.select` 的同组去重和整式目标预算；仅 `last_strike=true` 结算一次鞋耐久，挥空也算，创造或无靴由宿主按事实处理 |
+| 做功与冲量 | 每次腿击的 Damage 做功由宿主按腿与部位提交；施放费用中的训练做功已经记录，冲量位移不另记走路做功 |
 
 Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作的共享实现，
 由 Human、Threatening 等宿主主动调用；功法服务仍只交付意图，不自行操作世界。

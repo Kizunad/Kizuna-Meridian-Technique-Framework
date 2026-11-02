@@ -79,22 +79,22 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 |---|---|
 | `Quantity` | 显式 `value` 和 `unit`，有限数；缺失、错单位均拒绝 |
 | 真元费用 | `QI`（元），[10⁻¹², 10⁹]；按 `matching` 匹配，保留库存属性与密度；`EACH` 按每条绑定经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount` |
-| 组织做功 | 力 `NEWTON`：[0, 10⁹]；功率 `WATT`：(0, 10⁹]；时间 `SECOND`：(0, 86400] |
+| 组织做功 | 力 `NEWTON`：[0, 10⁹]；功率 `WATT`：(0, 10⁹]；时间 `SECOND`：(0, 86400]；`training=true` 只允许模板中声明 `TissueTraining` 的组织 |
 | 器官做功 | 功率与时间同上，不允许力字段，疲劳由 Framework 唯一预算计算 |
 | 最低组织力量 | 可省略；提供时必须是 `NEWTON`，[0, 10⁹] |
 | 三段时长 | 显式毫秒，各段非负，总和 (0, 86400000]；每段均可达 9 s；打断布尔必须显式提供 |
 | 冷却 | 显式毫秒，[0, 86400000]；仅 `FINISHED` 从原定收势结束算，`CANCELLED/INTERRUPTED` 从实际终止时刻算（含晚恢复） |
 | 槽位 | 最多 16 个；标签全部匹配且不重复，0–16 个；标签和类型至少提供一种；按模块 ID 字典序选择 |
 | 绑定数量 | 显式最少 [0, 16]、最多 [1, 16]，最少不大于最多；最少 0 表示可选 |
-| 费用槽位 | 真元只允许不可缺省且 `require_opened=true` 的经脉；做功只允许不可缺省组织或器官 |
+| 费用槽位 | 真元只允许不可缺省且 `require_opened=true` 的经脉；做功只允许不可缺省组织或器官；训练做功还须命中可训练组织 |
 | 效果时刻 | 显式相对起手毫秒，非负且不超过收势结束；非递减排序，同刻按声明顺序 |
 | 组织修正 | 复用 Framework `CurvePoint`；2–16 点，首点偏移 0，之后严格递增，首尾值 0，值 [-1, 1] |
 | 修正期限与倍率 | 曲线不超过 300000 ms；四项峰值 `RATIO`：(0, 10]；各点倍率不低于 0.05 |
 | 冲量 | 前、后、上、朝目标、`INPUT`；速度 `METERS_PER_SECOND`：(0, 100] |
 | 表现 | 命名空间资源 ID；一次性或持续到收势结束；剪辑起播 `start_millis`：[0, 86400000]，缺省 0 |
-| 移动限速 | `TechniqueDefinition.movement_speed_multiplier=14` 为可选 double，(0,1]，缺省 1；起手至收势有效 |
+| 移动限速 | `TechniqueDefinition.movement_speed_multiplier=14` 为可选 double，[0,1]，缺省 1；起手至收势有效，0 表示站定且不缩放冲量 |
 | 施放中右键 | `TechniqueDefinition.allow_use_while_casting=15` 为 bool，缺省 false：宿主在施放中拦下玩家右键（用物品、放方块、与方块或实体交互），与左键同处同条件；需要右键的式（如服药）写 true 放行 |
-| AI 提示 | 距离 `METER`：[0, 1024]，最小不大于最大；HP/真元阈值 `RATIO`：[0, 1]，权重 [0, 100] |
+| AI 提示 | 距离 `METER`：[0, 1024]，最小不大于最大；HP/真元阈值、战斗情境权重为 `RATIO`：[0, 1] 或 [0, 100]；腿力门槛为 `NEWTON` |
 | 熟练度 | `RATIO`：[0, 1]，仅保存供未来 AI 使用，不改变费用、时长或效果 |
 | 目录规模 | 最多 1024 个精确功法版本；单目录最多 1024 个模板引用；每功法真元/做功各最多 32 项；效果中非声音效果最多 32 项，`sound` 不计入、另计最多 64 项 |
 | 传输与存档 | 载荷最多 1 MiB，解码嵌套最多 32 层；进度含 Any 包装最多 64 KiB |
@@ -152,6 +152,16 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 末击挥空也按当前选定手物品结算一次耐久或消耗；起手打断没有末击，不扣耐久，分组不增加耐久结算次数。
 真实伤害、附魔、盾、耐久和权限规则见 [宿主流程](Host-Integration.md)。
 
+阶段 8 的 `TechniqueEffect.leg_strike=20` 与持物打击共用单体/扇形和目标预算，`StrikeFacing` 额外提供
+`STRIKE_BACKWARD` 身后扇形。`LegStrike` 必须显式声明 `FRONT_LEG/REAR_LEG/BOTH_LEGS`、命名空间伤害类型 ID、
+击退方式与大小、被盾挡住是否仍击退、`last_strike` 和 `dedup_group`；同一范围组每个目标只命中一次，
+全部组共享 `cast_target_limit`。`LegRules` 书级规则固定声明忽略手持物品、要求着地，以及基础伤害、每点靴子护甲加成和每式耐久消耗。
+腿法书不能同时声明 `held_item_rules`。
+
+`TechniqueHostFacts` 与身体、双手在同一次 `inspect` 回执中提供 `grounded/in_water/climbing/riding/gliding`，
+并可成对提供 `boot_armor/boot_durability`。腿法起手在水中、攀爬、骑乘、滑翔或未着地时返回
+`NOT_GROUNDED` /「要站在地上才能出腿」。`EffectIntent.leg_strike=20` 携带起手保存的 `LegRules`，不携带手位规则。
+
 `TechniqueEffect.sound=8`（`SoundCue`）在 `at_millis` 时刻播放一个声音事件；五脏诀设计稿 plans/18 §9.2、§11
 里叫 `sound` 的效果就是它。
 
@@ -163,7 +173,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 | `pitch_jitter` | 可省略，`RATIO`，[0, 0.5]；每次播放在 `pitch ± pitch_jitter` 内均匀取值，两端仍须落在 [0.5, 2] |
 | `anchor` | 必填，`CASTER`（施放者位置）或 `TARGET`（本次打击真正造成伤害的每个目标位置） |
 
-`TARGET` 必须跟在一条同一 `at_millis` 的 `weapon_strike` 之后，中间只能隔其他同刻声音。
+`TARGET` 必须跟在一条同一 `at_millis` 的 `weapon_strike` 或 `leg_strike` 之后，中间只能隔其他同刻声音。
 调度时它并入该击意图的 `WeaponStrikeIntent.hit_sounds=3`，不单独成为意图；挥空、被盾挡下或目标免疫时不响。
 挥空也要有声音时，在目录里另写一条同刻的 `CASTER` 声音；代码里没有「挥空换声」的特殊分支。
 `LeapProfile.takeoff_sound=18` 是跃步起跳声，锚点只能是 `CASTER`，每次实际起跳播放一次。
@@ -237,7 +247,7 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 `expected_revision` 只用于 `activity`，由宿主按 Framework 当前 revision 做原子校验；查询和效果操作必须为 0。
 oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(EffectIntent)`。
 `inspect=false`、缺操作、错误 UUID、非法嵌套活动或效果均拒绝。
-`EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13` 或 `break_blocks=14`，交给宿主执行；不包含身体修正。
+`EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13`、`break_blocks=14` 或 `leg_strike=20`，交给宿主执行；不包含身体修正。
 每条意图带起手固定的 `selected_hand`，无持物规则为未指定；`effect_id` 在施放内独立且稳定。
 打击和劈门意图必须有选定手和书级规则。`scheduled_millis` 为非负的权威身体时刻，迟到 tick 不修改原生效时刻。
 表现 STOP 与移动 UNLOCK 始终保留原定收势边界作为 `scheduled_millis`，使提前终止、承接和恢复重试的载荷一致；
@@ -246,7 +256,7 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 移动限速分别为 `movement_lock/movement_unlock`。身份不依赖 tick 分组，相同时间或相同内容的效果仍各自幂等。
 表现开始带剪辑 `start_millis`，`STOP` 的起播时刻必须为 0；本库不读取动画长度。
 `TechniqueHostResponse` 以原 `request_id` 回显未认领、身体快照、活动 revision、效果接受或 Framework 失败。
-身体分支必须同时携带 `held_items=2`：显式主副手消息和 `LEFT/RIGHT` 主手侧。
+身体分支必须同时携带 `held_items=2` 与 `inspect_facts=20`：前者是显式主副手消息和 `LEFT/RIGHT` 主手侧，后者是移动状态及成对鞋事实。
 空手使用无任何字段的 `HeldItem`；非空物品必须提供 ID、标签以及显式的 `damageable/contains_items`。
 主副手是逻辑身份，左撇子仍按 `MAIN_HAND/OFF_HAND` 选手，物理左右由宿主解释。
 这是宿主接线的必需更新，缺少双手事实会拒绝回执，不能按空手降级。
@@ -274,9 +284,9 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 熟练度只影响这一权重，不改变费用、曲线和施放时长。
 选择器的外部可用性数据应把 `cooldowns` 与 `curve_ends` 的最大值作为同式可再次施放时刻，
 并在 `affordable` 中反映持物等宿主预检；施放入口仍会再次校验。
-`CombatContext` 提供可信 `TechniqueProgress` 及 `TARGET_SHIELDING/SURROUNDED/UNDER_ATTACK/PURSUED` 事实，
+`CombatContext` 提供可信 `TechniqueProgress` 及 `TARGET_SHIELDING/SURROUNDED/UNDER_ATTACK/PURSUED/TARGET_BEHIND/TARGET_AIRBORNE/SELF_FLEEING` 事实，
 `AiHints.combat` 的对应可选权重为 `RATIO` [0, 100]，缺省乘 1、零权重排除，多事实相乘。
-`maximum_warmup_under_attack_millis` 可设挨打时的起手上限；`long_warmup_millis` 必须和
+`minimum_leg_force` 可设两腿有效力量下限；`maximum_warmup_under_attack_millis` 可设挨打时的起手上限；`long_warmup_millis` 必须和
 `maximum_long_warmup_distance` 同时提供，分别使用毫秒 [0, 86400000]、`METER` [0, 1024]。
 起手达到长起手门槛且目标超出该距离时排除；承接使用扣除起播偏移后的起手长度。
 有当前施放或只能承接的候选必须存在合法窗口，进度中的冷却和曲线到期同样参与筛选。

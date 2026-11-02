@@ -96,12 +96,14 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
 
     private static byte[] route(MemoryHost host, TechniqueHostRequest request) {
         // 按操作类型分别确认身体快照、原子活动和世界效果。
-        var response = TechniqueHostResponse.newBuilder().setRequestId(request.getRequestId());
+        var response = TechniqueHostResponse.newBuilder()
+                .setRequestId(request.getRequestId());
         switch (request.getOperationCase()) {
             case INSPECT -> {
                 TechniqueHost.Inspection inspection = host.inspect();
                 response.setBody(BodyProtobuf.toMessage(inspection.body()));
                 response.setHeldItems(inspection.heldItems());
+                response.setInspectFacts(inspection.facts());
             }
             case ACTIVITY -> {
                 TechniqueHost.Commit commit = host.submit(new TechniqueHost.Submission(request.getRequestId(),

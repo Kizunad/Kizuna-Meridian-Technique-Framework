@@ -147,6 +147,10 @@ public final class TechniqueProtocol {
             case BODY -> {
                 validateHostBody(response.getBody());
                 TechniqueHeldItems.validate(response.getHeldItems());
+                if (!response.hasInspectFacts()) {
+                    throw TechniqueErrors.invalid("response.inspect_facts", "身体回执缺少宿主状态事实");
+                }
+                TechniqueInspection.validate(response.getInspectFacts());
             }
             case ACTIVITY -> validateActivityCommit(response.getActivity());
             case EFFECT_ACCEPTED -> {
@@ -230,6 +234,16 @@ public final class TechniqueProtocol {
                 TechniqueHeldItems.validateRules(intent.getWeaponStrike().getHeldItemRules());
                 for (SoundCue cue : intent.getWeaponStrike().getHitSoundsList()) {
                     TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "weapon_strike.hit_sounds");
+                }
+            }
+            case LEG_STRIKE -> {
+                if (intent.getSelectedHand() != Hand.HAND_UNSPECIFIED) {
+                    throw TechniqueErrors.invalid("selected_hand", "腿击效果不能携带出手手位");
+                }
+                TechniqueCombatEffects.validateLegStrike(intent.getLegStrike().getStrike());
+                TechniqueLegRules.validate(intent.getLegStrike().getLegRules());
+                for (SoundCue cue : intent.getLegStrike().getHitSoundsList()) {
+                    TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "leg_strike.hit_sounds");
                 }
             }
             case BREAK_BLOCKS -> {

@@ -220,6 +220,7 @@ final class HeldTechniqueFixtures {
                 TechniqueHost.Inspection inspection = host.inspect();
                 response.setBody(BodyProtobuf.toMessage(inspection.body()));
                 response.setHeldItems(inspection.heldItems());
+                response.setInspectFacts(inspection.facts());
             }
             case ACTIVITY -> {
                 TechniqueHost.Commit commit = host.submit(new TechniqueHost.Submission(request.getRequestId(),

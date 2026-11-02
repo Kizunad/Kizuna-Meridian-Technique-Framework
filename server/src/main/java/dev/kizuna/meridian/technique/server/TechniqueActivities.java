@@ -38,11 +38,15 @@ final class TechniqueActivities {
     record CastBinding(TechniqueBinding binding, Hand hand, Entry entry) {
         CastBinding(TechniqueBinding binding, Hand hand) {
             // 无持物和承接的既有调用保持零偏移语义。
-            this(binding, hand, new Entry(0, HeldItemRules.getDefaultInstance()));
+            this(binding, hand, new Entry(0, HeldItemRules.getDefaultInstance(), LegRules.getDefaultInstance()));
         }
     }
 
-    record Entry(long clipStart, HeldItemRules heldRules) { }
+    record Entry(long clipStart, HeldItemRules heldRules, LegRules legRules) {
+        Entry(long clipStart, HeldItemRules heldRules) {
+            this(clipStart, heldRules, LegRules.getDefaultInstance());
+        }
+    }
 
     static BodyActivity start(Start start) {
         // 费用、动作和冷却都依据同一个快照 revision，任一校验失败都没有提交。
@@ -164,6 +168,9 @@ final class TechniqueActivities {
                 .setHeldItemRules(start.selection().entry().heldRules())
                 .addAllPresentations(TechniqueScheduler.presentations(start.definition(), clipStart))
                 .addAllPredecessorCleanup(predecessorCleanup(start.progress(), started));
+        if (TechniqueCombatEffects.hasLegStrike(start.definition())) {
+            active.setLegRules(start.selection().entry().legRules());
+        }
         return active.build();
     }
 
@@ -291,7 +298,8 @@ final class TechniqueActivities {
             for (String moduleId : slot.getModuleIdsList()) {
                 var effort = ActivityEffort.newBuilder()
                         .setWatts(work.getPower().getValue())
-                        .setSeconds(work.getDuration().getValue());
+                        .setSeconds(work.getDuration().getValue())
+                        .setTraining(work.getTraining());
                 if (slot.getModule() == ModuleKind.TISSUE) {
                     var load = new TissueCapabilities.Exertion(new Anatomy.TissueId(moduleId),
                             work.getForce().getValue(), work.getPower().getValue(), work.getDuration().getValue());

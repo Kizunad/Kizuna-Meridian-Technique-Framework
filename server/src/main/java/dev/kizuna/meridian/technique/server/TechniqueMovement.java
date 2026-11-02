@@ -36,9 +36,9 @@ public final class TechniqueMovement {
     }
 
     public static void validateMultiplier(double multiplier) {
-        // NaN、无穷、零、负数和加速均不是本契约支持的限速。
-        if (!Double.isFinite(multiplier) || multiplier <= 0 || multiplier > 1) {
-            throw TechniqueErrors.invalid("movement_speed_multiplier", "移动倍率必须在 (0,1] 内");
+        // NaN、无穷、负数和加速均不是本契约支持的限速；零表示施放期间站定。
+        if (!Double.isFinite(multiplier) || multiplier < 0 || multiplier > 1) {
+            throw TechniqueErrors.invalid("movement_speed_multiplier", "移动倍率必须在 [0,1] 内");
         }
     }
 

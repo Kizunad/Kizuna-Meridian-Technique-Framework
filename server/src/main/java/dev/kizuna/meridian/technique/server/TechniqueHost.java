@@ -4,6 +4,7 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostFacts;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -21,11 +22,17 @@ public interface TechniqueHost {
      */
     Inspection inspect();
 
-    record Inspection(BodySnapshot body, HeldItems heldItems) {
+    record Inspection(BodySnapshot body, HeldItems heldItems, TechniqueHostFacts facts) {
+        Inspection(BodySnapshot body, HeldItems heldItems) {
+            this(body, heldItems, TechniqueInspection.defaults());
+        }
+
         public Inspection {
-            // 身体和双手事实来自同一次可信查询，缺少持物接入时明确拒绝。
+            // 身体、双手和移动/靴子事实来自同一次可信查询，缺少接入时明确拒绝。
             Objects.requireNonNull(body);
             TechniqueHeldItems.validate(heldItems);
+            Objects.requireNonNull(facts);
+            TechniqueInspection.validate(facts);
         }
     }
 

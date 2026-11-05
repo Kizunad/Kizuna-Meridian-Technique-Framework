@@ -1,5 +1,15 @@
 # 规则、测试与交付记录
 
+`TechniqueStatusTissuesTest` 通过真实 Framework 事务验证组织状态：原子刷新不叠加、保留旧完整曲线、
+按剩余时间恢复相位、容量与 revision 拒绝、重复清除、归属伪造拒绝、能力种类/槽位校验与长命令曲线续接。
+Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计时、重登、维度切换、死亡及类人实体接线，
+四肢恢复与同剑伤害继续由 `BasicTechniquesGameTest` 对照真实 Human 身体验证。
+
+`TechniqueStatusClientTest` 只在 `:fabric:runStatusClientTest -PscrollFullAssembly` 中加载。
+预置独立世界 `fabric/build/statusclienttest/saves/status-buffs-test` 后，记录昼夜、GUI scale 2/4 的
+原版 HUD/状态列表与牛奶清除截图；结果写入 `fabric/build/status-client-results.txt`。
+客户端读取真实资源、语言和网络状态，不以静态图标预览代替游戏内验证。
+
 `TechniqueObserverTest` 覆盖调试入口：施放监听收到每条返回路径的同一份回执、观察者异常不改变回执，
 `submitLeap` 接受时返回实际组织做功，无宿主与施放进行中返回对应原因且不扣做功。
 `TechniqueSoundTest` 覆盖声音契约：省略字段按默认值播放；越界、单位错、缺锚点、非法 ID、抖动越出 [0.5, 2] 都拒绝；

@@ -79,6 +79,21 @@ loom {
             programArgs '--quickPlaySingleplayer', 'leap-test', '--width', '1280', '--height', '960'
             vmArg '-Dmeridian.leapClientTest=true'
         }
+        statusClientTest {
+            client()
+            source sourceSets.clientTest
+            runDir 'build/statusclienttest'
+            programArgs '--quickPlaySingleplayer', 'status-buffs-test', '--width', '1280', '--height', '960'
+            vmArg '-Dmeridian.statusClientTest=true'
+        }
+        statusRestartClientTest {
+            client()
+            source sourceSets.clientTest
+            runDir 'build/statusclienttest'
+            programArgs '--quickPlaySingleplayer', 'status-buffs-test', '--username', 'StatusRestart',
+                    '--width', '1280', '--height', '960'
+            vmArg "-Dmeridian.statusRestart=${providers.gradleProperty('statusRestart').getOrElse('save')}"
+        }
         gametest {
             server()
             name 'Meridian Technique GameTest'
@@ -158,6 +173,39 @@ tasks.named('runLeapClientTest') {
     doLast {
         if (!report.get().asFile.text.startsWith('success=true')) {
             throw new GradleException("跃步客户端验收失败：${report.get().asFile}")
+        }
+    }
+}
+
+tasks.named('runStatusClientTest') {
+    def report = layout.buildDirectory.file('status-client-results.txt')
+    def options = layout.buildDirectory.file('statusclienttest/options.txt')
+    doFirst {
+        if (!providers.gradleProperty('scrollFullAssembly').isPresent()) {
+            throw new GradleException('状态客户端验收需要 -PscrollFullAssembly 完整装配')
+        }
+        report.get().asFile.text = 'success=false\n'
+        skipAccessibilityOnboarding(options.get().asFile)
+    }
+    doLast {
+        if (!report.get().asFile.text.startsWith('success=true')) {
+            throw new GradleException("状态客户端验收失败：${report.get().asFile}")
+        }
+    }
+}
+
+tasks.named('runStatusRestartClientTest') {
+    def mode = providers.gradleProperty('statusRestart').getOrElse('save')
+    def report = layout.buildDirectory.file("status-restart-${mode}-results.txt")
+    doFirst {
+        if (!providers.gradleProperty('scrollFullAssembly').isPresent() || !(mode in ['save', 'restore'])) {
+            throw new GradleException('重启验收需要完整装配和 -PstatusRestart=save 或 restore')
+        }
+        report.get().asFile.text = 'success=false\n'
+    }
+    doLast {
+        if (!report.get().asFile.text.startsWith('success=true')) {
+            throw new GradleException("重启验收失败：${report.get().asFile}")
         }
     }
 }

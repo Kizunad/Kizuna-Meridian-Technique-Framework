@@ -7,7 +7,8 @@
 - 身体、真元、做功、动作与附属进度只有 Framework 的权威状态；本库通过 `handleActivity` 提交。
 - 本库状态放在 `addon_progress["meridian_technique:state"]`；可信学会记录也走 Framework 的进度入口。
 - 一个身体同时施放一个功法；费用在起手一次付清，打断或卸载不退费；冷却使用身体时钟。
-- 本库修正必须跑完整条曲线，不生成 `remove_modifiers`；效果分发和 AI 选择器尚未实现。
+- 旧 `tissue_modifier` 必须跑完整条曲线，普通功法活动不得提前移除。状态宿主只能通过受限状态活动撤销
+  `meridian_technique:status/` 下自己登记且实际存在的修正；不得清理历史 `cast/` 曲线。
 - 文档唯一编辑源是 `docs/wiki/`，README 仅作入口；契约变更同步更新 Wiki 和必要的整体回归测试。
 - 修改前读相邻代码；用 patch/Edit 修改；保留用户改动，不修改依赖仓库。
 - 每个方法、构造器内部写中文意图注释；一行不超过 120 列，不嵌套 builder，不用复杂三元。

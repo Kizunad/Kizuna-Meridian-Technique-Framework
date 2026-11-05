@@ -676,6 +676,11 @@ public final class TechniqueService {
         }
     }
 
+    public Optional<TechniqueHost> statusHost(UUID entityUuid) {
+        // 状态宿主复用同一认领与活动协议，无身体实体返回空，不创建或代付身体。
+        return hosts.resolve(Objects.requireNonNull(entityUuid));
+    }
+
     private TechniqueHost requireHost(UUID entityUuid) {
         // 学会是可信写入，不能把没有实体宿主解释为新建身体。
         return hosts.resolve(entityUuid).orElseThrow(() -> new NoHostException(entityUuid));

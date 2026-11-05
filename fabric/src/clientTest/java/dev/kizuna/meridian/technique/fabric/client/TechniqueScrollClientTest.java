@@ -56,7 +56,8 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
     public void onInitializeClient() {
         // 页面稳定若干帧后才取图，避免把加载遮罩或页面打开前的画面当作证据。
         // 26.2 先收集再绘制，收集回调里只能登记截图，图像在显卡拷贝完成后异步交回。
-        if (Boolean.getBoolean("meridian.leapClientTest")) {
+        if (Boolean.getBoolean("meridian.leapClientTest") || Boolean.getBoolean("meridian.statusClientTest")
+                || !System.getProperty("meridian.statusRestart", "").isEmpty()) {
             return;
         }
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);

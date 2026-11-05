@@ -258,11 +258,7 @@ final class TechniqueDefinitions {
             switch (effect.getOperationCase()) {
                 case TISSUE_MODIFIER -> validateModifier(slots, definition, effect);
                 case IMPULSE -> validateImpulse(effect.getImpulse());
-                case STATUS_BENEFIT -> {
-                    TechniqueBenefits.validate(effect.getStatusBenefit());
-                    validateWork(addons, templates, slots, effect.getStatusBenefit().getLeap().getWork());
-                    requireSlot(slots, effect.getStatusBenefit().getLeap().getWork().getSlotId(), ModuleKind.TISSUE);
-                }
+                case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
                 case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
                 case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
@@ -281,11 +277,33 @@ final class TechniqueDefinitions {
         }
     }
 
+    private static void validateBenefit(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
+                                        Map<String, TechniqueSlot> slots, StatusBenefit benefit) {
+        // 跃步验证做功；组织状态只引用绝对组织槽，不依赖施放手位、费用或已学记录。
+        TechniqueBenefits.validate(benefit);
+        if (benefit.hasLeap()) {
+            WorkCost work = benefit.getLeap().getWork();
+            validateWork(addons, templates, slots, work);
+            requireSlot(slots, work.getSlotId(), ModuleKind.TISSUE);
+        } else {
+            for (TissueModifier modifier : benefit.getTissue().getModifiersList()) {
+                requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
+            }
+        }
+    }
+
     private static void validateModifier(Map<String, TechniqueSlot> slots, TechniqueDefinition definition,
                                          TechniqueEffect effect) {
         // 延迟生效计入冷却期限，防止只比较曲线长度而漏掉起手偏移。
         TissueModifier modifier = effect.getTissueModifier();
         requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
+        long maximumDuration = durationMillis(definition.getPhases())
+                + definition.getCooldownMillis() - effect.getAtMillis();
+        validateModifierCurve(modifier, maximumDuration);
+    }
+
+    static void validateModifierCurve(TissueModifier modifier, long maximumDuration) {
+        // 旧施法曲线与状态曲线共用形状、峰值和最低能力约束，各自提供生命周期上限。
         int pointCount = modifier.getCurveCount();
         if (pointCount < MIN_CURVE_POINTS || pointCount > MAX_CURVE_POINTS) {
             throw TechniqueErrors.invalid("tissue_modifier.curve", "曲线必须有 2–16 个点");
@@ -297,8 +315,7 @@ final class TechniqueDefinitions {
         }
         long endOffsetMillis = last.getOffsetMillis();
         if (endOffsetMillis > MAX_CURVE_MILLIS
-                || endOffsetMillis > durationMillis(definition.getPhases())
-                        + definition.getCooldownMillis() - effect.getAtMillis()) {
+                || endOffsetMillis > maximumDuration) {
             throw TechniqueErrors.invalid("tissue_modifier.curve", "修正曲线结束晚于冷却结束或超过曲线上限");
         }
         double[] peaks = {

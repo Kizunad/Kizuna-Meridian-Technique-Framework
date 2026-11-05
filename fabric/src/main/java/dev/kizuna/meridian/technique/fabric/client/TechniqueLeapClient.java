@@ -136,6 +136,9 @@ public final class TechniqueLeapClient {
             elapsed = local.ticks;
         }
         var registered = TechniqueStatusBenefits.get(message.getEffectId());
+        if (!registered.benefit().hasLeap()) {
+            throw new IllegalArgumentException("跃步回执引用了非跃步状态");
+        }
         var flight = new TechniqueLeapFlight(registered, message.getLandingY(), position(message),
                 velocity(message), "prediction");
         var access = (TechniqueLeapAccess) actor;
@@ -189,7 +192,7 @@ public final class TechniqueLeapClient {
             marker = null;
             return;
         }
-        var registered = TechniqueStatusBenefits.active(player).orElse(null);
+        var registered = TechniqueStatusBenefits.activeLeap(player).orElse(null);
         if (registered == null) {
             marker = null;
         } else if (player.tickCount % MARKER_INTERVAL_TICKS == 0) {

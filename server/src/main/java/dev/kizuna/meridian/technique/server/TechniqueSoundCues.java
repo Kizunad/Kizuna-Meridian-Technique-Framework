@@ -171,6 +171,9 @@ public final class TechniqueSoundCues {
         if (effect.hasSound()) {
             return List.of(effect.getSound());
         }
+        if (!effect.hasStatusBenefit() || !effect.getStatusBenefit().hasLeap()) {
+            return List.of();
+        }
         var leap = effect.getStatusBenefit().getLeap();
         if (leap.hasTakeoffSound()) {
             return List.of(leap.getTakeoffSound());

@@ -50,7 +50,20 @@ public final class TechniqueRegistry {
         TechniqueGroups groups = new TechniqueGroups(sources, definitions, locations);
         TechniqueRegistry registry = new TechniqueRegistry(definitions, groups, sources);
         registry.validateCombatDefinitions(locations);
+        registry.validateBenefitIdentities();
         return registry;
+    }
+
+    private void validateBenefitIdentities() {
+        // 原版注册表每个状态身份只能对应一份能力定义，跨目录和跨版本重复也拒绝。
+        var identities = new HashSet<String>();
+        for (TechniqueDefinition definition : definitions.values()) {
+            for (TechniqueEffect effect : definition.getEffectsList()) {
+                if (effect.hasStatusBenefit() && !identities.add(effect.getStatusBenefit().getId())) {
+                    throw TechniqueErrors.invalid(definition.getId(), "状态增益身份重复");
+                }
+            }
+        }
     }
 
     public List<TechniqueCatalogSource> sources() {

@@ -3,6 +3,7 @@ package dev.kizuna.meridian.technique.server;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundAnchor;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StatusBenefit;
+import java.util.HashSet;
 
 /** 状态增益的有界数据契约，不包含特定功法或身体模板。 */
 public final class TechniqueBenefits {
@@ -21,10 +22,31 @@ public final class TechniqueBenefits {
         TechniqueValues.id(benefit.getId(), "status_benefit.id");
         TechniqueValues.millis(benefit.getDurationMillis(), "status_benefit.duration_millis");
         if (benefit.getDurationMillis() == 0 || benefit.getColorRgb() < 0
-                || benefit.getColorRgb() > MAX_COLOR || !benefit.hasLeap()) {
-            throw TechniqueErrors.invalid("status_benefit", "缺少跃步配置或持续时间、颜色非法");
+                || benefit.getColorRgb() > MAX_COLOR || benefit.hasLeap() == benefit.hasTissue()) {
+            throw TechniqueErrors.invalid("status_benefit", "必须恰有一种能力，且持续时间、颜色合法");
         }
-        validateLeap(benefit.getLeap());
+        if (benefit.hasLeap()) {
+            validateLeap(benefit.getLeap());
+        } else {
+            validateTissue(benefit);
+        }
+    }
+
+    private static void validateTissue(StatusBenefit benefit) {
+        // 多个槽共用一个状态时长，校验重复槽和曲线结束时刻。
+        var modifiers = benefit.getTissue().getModifiersList();
+        if (modifiers.isEmpty() || modifiers.size() > TechniqueValues.MAX_MODULES) {
+            throw TechniqueErrors.invalid("status_benefit.tissue", "组织描述为空或数量超限");
+        }
+        var slots = new HashSet<String>();
+        for (var modifier : modifiers) {
+            TechniqueValues.localId(modifier.getSlotId(), "status_benefit.tissue.slot_id");
+            TechniqueDefinitions.validateModifierCurve(modifier, benefit.getDurationMillis());
+            long end = modifier.getCurve(modifier.getCurveCount() - 1).getOffsetMillis();
+            if (!slots.add(modifier.getSlotId()) || end != benefit.getDurationMillis()) {
+                throw TechniqueErrors.invalid("status_benefit.tissue", "重复槽或曲线时长非法");
+            }
+        }
     }
 
     private static void validateLeap(LeapProfile leap) {

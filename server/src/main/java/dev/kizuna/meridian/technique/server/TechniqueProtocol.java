@@ -165,9 +165,7 @@ public final class TechniqueProtocol {
 
     private static void validateActivity(TechniqueHostRequest request) {
         // 这里只验证活动结构；真实身体、revision 和守恒由宿主提交时复核。
-        if (request.getActivity().getRemoveModifiersCount() != 0) {
-            throw TechniqueErrors.invalid("activity.remove_modifiers", "本库的修正必须跑完整条曲线，不能提前移除");
-        }
+        TechniqueStatusTissues.validateRemovals(request.getActivity());
         BodyActivityExecution.validate(request.getActivity());
         MeridianMessages.BodyCommand command = MeridianMessages.BodyCommand.newBuilder()
                 .setBodyId(request.getEntityUuid())
@@ -188,9 +186,7 @@ public final class TechniqueProtocol {
         if (commit.getRevision() < 0) {
             throw TechniqueErrors.invalid("response.activity.revision", "活动 revision 不能为负");
         }
-        if (commit.getActivity().getRemoveModifiersCount() != 0) {
-            throw TechniqueErrors.invalid("response.activity.remove_modifiers", "活动回执不能提前移除修正");
-        }
+        TechniqueStatusTissues.validateRemovals(commit.getActivity());
         BodyActivityExecution.validate(commit.getActivity());
     }
 

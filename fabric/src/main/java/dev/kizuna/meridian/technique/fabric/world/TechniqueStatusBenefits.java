@@ -62,8 +62,25 @@ public final class TechniqueStatusBenefits {
     }
 
     public static Optional<Registered> active(LivingEntity actor) {
-        // 没有自建持续时间副本，权威有效期只取原版状态容器。
-        return benefits.values().stream().filter(value -> actor.hasEffect(value.effect())).findFirst();
+        // 旧宿主把此入口用于跃步与 AI，保留只查询跃步能力的兼容语义。
+        return activeLeap(actor);
+    }
+
+    public static Optional<Registered> activeLeap(LivingEntity actor) {
+        // 跃步只读取有跃步能力的状态，其他增益的注册或添加顺序不影响选择。
+        return benefits.values().stream()
+                .filter(value -> value.benefit().hasLeap() && actor.hasEffect(value.effect())).findFirst();
+    }
+
+    public static Optional<Registered> tissue(MobEffectInstance instance) {
+        // 能力接线按目录描述查找，不识别内容包的具体状态 ID。
+        return benefits.values().stream()
+                .filter(value -> value.benefit().hasTissue() && instance.is(value.effect())).findFirst();
+    }
+
+    public static List<Registered> tissues() {
+        // 重载只核对组织状态，不改变既有轻身的生命周期。
+        return benefits.values().stream().filter(value -> value.benefit().hasTissue()).toList();
     }
 
     public static boolean quiet(MobEffect effect) {
@@ -78,9 +95,14 @@ public final class TechniqueStatusBenefits {
             throw new IllegalArgumentException("状态增益与初始化配置不一致");
         }
         int ticks = Math.toIntExact((benefit.getDurationMillis() + MILLIS_PER_TICK - 1) / MILLIS_PER_TICK);
-        actor.removeEffect(registered.effect());
-        actor.addEffect(new MobEffectInstance(registered.effect(), ticks, 0,
-                true /* ambient */, false /* showParticles */, true /* showIcon */));
+        MobEffectInstance instance = new MobEffectInstance(registered.effect(), ticks, 0,
+                true /* ambient */, false /* showParticles */, true /* showIcon */);
+        if (benefit.hasTissue()) {
+            TechniqueTissueEffects.of(actor).apply(instance);
+        } else {
+            actor.removeEffect(registered.effect());
+            actor.addEffect(instance);
+        }
     }
 
     private static final class QuietBenefit extends MobEffect {

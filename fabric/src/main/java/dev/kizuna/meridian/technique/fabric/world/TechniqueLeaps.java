@@ -58,7 +58,7 @@ public final class TechniqueLeaps {
 
     public static Jump jump(LivingEntity actor) {
         // 潜行、液体和骑乘使用原版跳跃，不消费额外体力。
-        var registered = TechniqueStatusBenefits.active(actor).orElse(null);
+        var registered = TechniqueStatusBenefits.activeLeap(actor).orElse(null);
         if (registered == null || actor.isShiftKeyDown() || actor.isPassenger() || actor.isInWater()
                 || actor.isInLava() || !actor.isAlive()) {
             return Jump.ORDINARY;
@@ -80,6 +80,9 @@ public final class TechniqueLeaps {
     public static Jump start(LivingEntity actor, TechniqueStatusBenefits.Registered registered,
                               TechniqueLeap.Landing landing) {
         // 只有服务端可扣体力，客户端先预测相同轨迹再与权威起点和初速度比对。
+        if (!registered.benefit().hasLeap()) {
+            return Jump.ORDINARY;
+        }
         if (!ready(actor)) {
             return Jump.WAIT;
         }
@@ -276,7 +279,7 @@ public final class TechniqueLeaps {
 
     public static Jump leapToward(Mob actor, Vec3 desired) {
         // 大脑给出期望落点，求解、做功、碰撞与自动追击同一实现；没有轻身时按普通跳跃处理。
-        var registered = TechniqueStatusBenefits.active(actor).orElse(null);
+        var registered = TechniqueStatusBenefits.activeLeap(actor).orElse(null);
         if (registered == null) {
             return Jump.ORDINARY;
         }
@@ -290,7 +293,7 @@ public final class TechniqueLeaps {
 
     public static Optional<Preview> preview(LivingEntity actor, Vec3 desired) {
         // 只求解不起跳：不扣体力、不改实体；没有轻身或尚不能起跳时为空。
-        var registered = TechniqueStatusBenefits.active(actor).orElse(null);
+        var registered = TechniqueStatusBenefits.activeLeap(actor).orElse(null);
         if (registered == null || !ready(actor)) {
             return Optional.empty();
         }
@@ -306,7 +309,7 @@ public final class TechniqueLeaps {
             return;
         }
         LivingEntity target = actor.getTarget();
-        var registered = TechniqueStatusBenefits.active(actor).orElse(null);
+        var registered = TechniqueStatusBenefits.activeLeap(actor).orElse(null);
         if (target == null || !target.isAlive() || registered == null || directed(actor)) {
             return;
         }

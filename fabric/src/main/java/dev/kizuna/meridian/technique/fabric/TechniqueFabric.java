@@ -5,6 +5,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapNetworking;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
@@ -86,7 +87,7 @@ public final class TechniqueFabric implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player.getUUID()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
         registerCommands();
     }
@@ -122,6 +123,7 @@ public final class TechniqueFabric implements ModInitializer {
     private void stop() {
         // 服务器销毁世界前取消活动，宿主可在仍有权限时写回清理活动。
         if (service != null) {
+            TechniqueTissueEffects.suspendAll();
             service.shutdown();
             service = null;
         }
@@ -134,10 +136,11 @@ public final class TechniqueFabric implements ModInitializer {
         }
     }
 
-    private void disconnect(UUID entityUuid) {
+    private void disconnect(ServerPlayer player) {
         // 玩家断线事件在宿主撤销身体访问前清除当前动作。
         if (service != null) {
-            service.cancelOnDisconnect(entityUuid);
+            TechniqueTissueEffects.of(player).suspend();
+            service.cancelOnDisconnect(player.getUUID());
         }
     }
 

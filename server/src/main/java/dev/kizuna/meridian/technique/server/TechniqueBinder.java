@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -18,6 +19,8 @@ import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Techni
 
 /** 每次使用当前身体重新绑定，不缓存跨 revision 的模块选择。 */
 public final class TechniqueBinder {
+    private enum Purpose { CAST, STATUS }
+
     private TechniqueBinder() {
         // 绑定只是查询，不开启经脉、不占用组织。
     }
@@ -31,12 +34,35 @@ public final class TechniqueBinder {
         if (realmNumber < definition.getMinimumRealmValue()) {
             return failure(REALM_TOO_LOW);
         }
+        return bindSlots(body, definition, Purpose.CAST);
+    }
+
+    public static BindingOutcome bindBenefit(BodySnapshot body, TechniqueDefinition definition, StatusBenefit benefit) {
+        // 命令状态只要求存活身体与描述引用的组织，疲劳耗尽也应允许恢复状态。
+        var vitality = body.vitality();
+        if (vitality.dead() || vitality.remainingSeconds() == 0) {
+            return failure(BODY_UNAVAILABLE);
+        }
+        Set<String> ids = benefit.getTissue().getModifiersList().stream()
+                .map(TissueModifier::getSlotId).collect(Collectors.toSet());
+        List<TechniqueSlot> slots = definition.getSlotsList().stream()
+                .filter(slot -> ids.contains(slot.getId())).toList();
+        if (slots.size() != ids.size() || slots.stream().anyMatch(slot -> slot.getModule() != ModuleKind.TISSUE)) {
+            return failure(INVALID_REQUEST);
+        }
+        TechniqueDefinition tissues = definition.toBuilder().clearSlots().addAllSlots(slots).build();
+        return bindSlots(body, tissues, Purpose.STATUS);
+    }
+
+    private static BindingOutcome bindSlots(BodySnapshot body, TechniqueDefinition definition,
+                                            Purpose purpose) {
+        // 对每个定义槽选择同一快照上的有效组织，并保留稳定字典序。
         BodyMessages.BodySnapshot message = BodyProtobuf.toMessage(body);
         var binding = TechniqueBinding.newBuilder()
                 .setBodyId(body.id().value())
                 .setRevision(body.revision());
         for (TechniqueSlot slot : definition.getSlotsList()) {
-            List<Candidate> matching = candidates(body, message, slot).stream()
+            List<Candidate> matching = candidates(body, message, slot, purpose).stream()
                     .filter(candidate -> candidate.tags().containsAll(slot.getTagsList()))
                     .filter(candidate -> slot.getKind().isEmpty() || slot.getKind().equals(candidate.kind()))
                     .sorted(Comparator.comparing(Candidate::id))
@@ -61,13 +87,13 @@ public final class TechniqueBinder {
     }
 
     private static List<Candidate> candidates(BodySnapshot body, BodyMessages.BodySnapshot message,
-                                               TechniqueSlot slot) {
+                                               TechniqueSlot slot, Purpose purpose) {
         // 同一快照的定义和状态先建立索引，避免在每个候选中反复扫描 HP。
         Map<String, Double> partHp = message.getPartStatesList().stream()
                 .collect(Collectors.toMap(BodyMessages.PartState::getId, BodyMessages.PartState::getHp));
         return switch (slot.getModule()) {
             case MERIDIAN -> meridians(message, slot);
-            case TISSUE -> tissues(body, message, slot, partHp);
+            case TISSUE -> tissues(body, message, slot, partHp, purpose);
             case ORGAN -> organs(message, partHp);
             default -> List.of();
         };
@@ -93,7 +119,7 @@ public final class TechniqueBinder {
     }
 
     private static List<Candidate> tissues(BodySnapshot body, BodyMessages.BodySnapshot message,
-                                          TechniqueSlot slot, Map<String, Double> partHp) {
+                                          TechniqueSlot slot, Map<String, Double> partHp, Purpose purpose) {
         // 力量读取 Framework 的当前有效能力，伤势和疲劳不能被模板基础值掩盖。
         Map<String, BodyMessages.TissueState> states = message.getTissueStatesList().stream()
                 .collect(Collectors.toMap(BodyMessages.TissueState::getId, Function.identity()));
@@ -102,9 +128,9 @@ public final class TechniqueBinder {
             BodyMessages.TissueState state = states.get(definition.getId());
             TechniqueFailure failure = TECHNIQUE_FAILURE_UNSPECIFIED;
             if (state.getHp() == 0 || partHp.get(definition.getPartId()) == 0
-                    || state.getFatigue() >= definition.getFatigueCapacity()) {
+                    || (purpose == Purpose.CAST && state.getFatigue() >= definition.getFatigueCapacity())) {
                 failure = MODULE_UNAVAILABLE;
-            } else if (slot.hasMinimumStrength()) {
+            } else if (purpose == Purpose.CAST && slot.hasMinimumStrength()) {
                 Anatomy.TissueCapacity available = TissueCapabilities.available(body,
                         new Anatomy.TissueId(definition.getId()));
                 if (available.strengthNewtons() < slot.getMinimumStrength().getValue()) {

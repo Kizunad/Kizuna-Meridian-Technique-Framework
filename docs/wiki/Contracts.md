@@ -220,6 +220,14 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 生效延迟也计入期限；等于正常冷却结束合法。提前终止可能使冷却早于曲线结束，
 进度 `curve_ends` 保留已提交曲线最晚到期时间；同式跨版本要等冷却和曲线都到期才可重施。
 本库功法目录采用首尾归零约束。
+旧 `tissue_modifier` 的完整曲线契约不变。`StatusBenefit.tissue` 是独立的可撤销生命周期：
+状态宿主通过只含 `add_modifiers/remove_modifiers` 的受限活动管理自己登记的
+`meridian_technique:status/` 修正。只移除快照中实际存在的自有 ID，禁止移除任何 `cast/` 曲线。
+刷新以同笔活动撤销旧组并登记新组；Framework 拒绝时保留旧组，不发布无能力的成功状态。
+`StatusBenefit.leap=4` 保持原字段号，`tissue=5` 与其恰有一种。
+`TissueBenefitProfile.modifiers` 复用 `TissueModifier` 的组织槽、四项倍率与首尾归零曲线，
+每条曲线末点必须等于状态默认时长；重复槽、空描述或混合能力均拒绝。
+实际登记只发生于原版效果被接受时，起手中断不会留下待生效的状态曲线。
 Framework 接受常值曲线的能力不等于本目录必须接受任意修正数据。
 不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework。施放起手把每个绑定组织的
 `CapabilityModifier` 与费用、做功、动作和进度放进同一份 `BodyActivity`；修正来源为

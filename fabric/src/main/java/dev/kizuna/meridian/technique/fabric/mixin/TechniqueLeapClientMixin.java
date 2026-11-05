@@ -18,7 +18,7 @@ public abstract class TechniqueLeapClientMixin {
     private void meridian$landingDelay(CallbackInfo callback) {
         // 轻身间隔由服务端 FINISH 回执的可起跳时刻决定，不叠加原版十 tick 的按键冷却；间隔内 WAIT 不发包。
         if ((Object) this instanceof LocalPlayer player && !player.isShiftKeyDown()
-                && TechniqueStatusBenefits.active(player).isPresent()) {
+                && TechniqueStatusBenefits.activeLeap(player).isPresent()) {
             noJumpDelay = 0;
         }
     }

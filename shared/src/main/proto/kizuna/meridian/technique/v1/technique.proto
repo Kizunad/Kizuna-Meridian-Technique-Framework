@@ -194,7 +194,19 @@ message StatusBenefit {
   int64 duration_millis = 2;
   int32 color_rgb = 3;
   LeapProfile leap = 4;
+  TissueBenefitProfile tissue = 5; // 与 leap 恰有一种；状态撤销时仅清理本状态拥有的修正。
 }
+message TissueBenefitProfile {
+  repeated TissueModifier modifiers = 1; // 同一状态可覆盖多个组织槽；曲线末点等于状态默认时长。
+}
+// 原版效果负责剩余时长；此元数据只恢复相位与修正归属，不独立计时。
+message TissueBenefitLease {
+  string status_id = 1;
+  string body_id = 2;
+  int32 total_ticks = 3;
+  repeated string modifier_ids = 4;
+}
+message TissueBenefitLeases { repeated TissueBenefitLease leases = 1; }
 // 声音锚点：施放者位置，或本次打击真正造成伤害的每个目标位置。
 enum SoundAnchor {
   SOUND_ANCHOR_UNSPECIFIED = 0;

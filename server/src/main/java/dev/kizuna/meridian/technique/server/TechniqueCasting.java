@@ -88,26 +88,26 @@ public final class TechniqueCasting {
     private TechniqueActivities.CastBinding bindCast(TechniqueDefinition definition,
                                                       TechniqueHost.Inspection inspection, long clipStart) {
         // 身体绑定与选手都基于同一次宿主查询，任一失败都不能生成扣费活动。
-        BindingOutcome result = TechniqueBinder.bind(inspection.body(), definition);
-        if (!result.hasBinding()) {
-            throw TechniqueErrors.rejected(result.getFailure());
-        }
-        Hand hand = selectHand(definition, inspection.heldItems());
         Optional<TechniqueBook> book = registry.bookOf(TechniqueRegistry.reference(definition));
         HeldItemRules heldRules = book.map(TechniqueBook::getHeldItemRules)
                 .orElse(HeldItemRules.getDefaultInstance());
+        Hand hand = selectHand(definition, inspection.heldItems(), heldRules);
+        BindingOutcome result = TechniqueBinder.bind(inspection.body(), definition,
+                hand, inspection.heldItems().getMainHandSide());
+        if (!result.hasBinding()) {
+            throw TechniqueErrors.rejected(result.getFailure());
+        }
         LegRules legRules = book.map(TechniqueBook::getLegRules).orElse(LegRules.getDefaultInstance());
         var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules);
         return new TechniqueActivities.CastBinding(result.getBinding(), hand, entry);
     }
 
-    private Hand selectHand(TechniqueDefinition definition, HeldItems items) {
+    private Hand selectHand(TechniqueDefinition definition, HeldItems items, HeldItemRules rules) {
         // 无书级持物声明的功法沿用空手语义，持物规则只从当前目录获取。
-        Optional<TechniqueBook> book = registry.bookOf(TechniqueRegistry.reference(definition));
-        if (book.isEmpty() || !book.get().hasHeldItemRules()) {
+        if (!definition.hasProjectileWeapon() && rules.equals(HeldItemRules.getDefaultInstance())) {
             return Hand.HAND_UNSPECIFIED;
         }
-        return TechniqueHeldItems.select(book.get().getHeldItemRules(), items);
+        return TechniqueHeldItems.select(rules, items, definition);
     }
 
     private TechniqueDefinition requireCastable(BodySnapshot body, TechniqueProgress progress, CastRequest request,
@@ -233,8 +233,18 @@ public final class TechniqueCasting {
     }
 
     public CastOutcome advance(TechniqueHost host) {
-        // 只需要阶段状态的调用方不提供效果游标，效果意图仍由带时刻的入口负责生成。
-        return advance(host, NO_PREVIOUS_MILLIS).outcome();
+        // 仅查询阶段的宿主仍逐边界结算费用；世界效果须使用带游标的入口交付。
+        long previousMillis = NO_PREVIOUS_MILLIS;
+        AdvanceResult result = advance(host, previousMillis);
+        for (int boundary = 0; boundary <= TechniqueValues.MAX_TIMELINE_EVENTS + 1; boundary++) {
+            if (result.outcome().getFailure() != TECHNIQUE_FAILURE_UNSPECIFIED
+                    || result.advancedMillis() <= previousMillis || result.recoveryCommit().isPresent()) {
+                break;
+            }
+            previousMillis = result.advancedMillis();
+            result = advance(host, previousMillis);
+        }
+        return result.outcome();
     }
 
     public AdvanceResult advance(TechniqueHost host, long previousMillis) {
@@ -253,20 +263,51 @@ public final class TechniqueCasting {
             }
             ActiveCast active = progress.getActiveCast();
             castId = active.getRequest().getCastId();
-            TechniqueScheduler.Due due = due(active, previousMillis, nowMillis);
-            CastPhase current = TechniqueScheduler.phase(active, nowMillis);
-            if (!due.recoveryDue()) {
-                return new AdvanceResult(outcome(active, current, body.revision()),
-                        due.effects(), Optional.empty(), nowMillis);
-            }
-            return stop(host, body, progress, CastPhase.FINISHED, due.effects());
+            return advanceActive(host, body, active, previousMillis);
+        } catch (TechniqueErrors.Rejected exception) {
+            CastOutcome rejected = failure(castId, exception.code);
+            return new AdvanceResult(rejected, List.of(), Optional.empty(), previousMillis);
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome failure = hostFailure(castId, exception);
+            return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
+        } catch (MeridianErrors.CapabilityRejected | MeridianErrors.IntakeRejected exception) {
+            CastOutcome failure = failure(castId, INSUFFICIENT_CAPABILITY);
+            return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
+        } catch (MeridianErrors.TransportRejected exception) {
+            CastOutcome failure = failure(castId, BODY_UNAVAILABLE);
             return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
         } catch (IllegalArgumentException exception) {
             CastOutcome failure = failure(castId, INVALID_STATE);
             return new AdvanceResult(failure, List.of(), Optional.empty(), previousMillis);
         }
+    }
+
+    private AdvanceResult advanceActive(TechniqueHost host, BodySnapshot body, ActiveCast active,
+                                        long previousMillis) {
+        // 分段费用先于同刻世界效果支付；每次只跨一个事件边界，迟到时由服务继续推进。
+        long nowMillis = body.settledAt().elapsedMillis();
+        Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
+        long boundaryMillis;
+        BodySnapshot paidBody;
+        if (definition.isPresent()) {
+            TechniqueDefinition currentDefinition = definition.get();
+            long workBoundary = TechniqueScheduledWork.boundary(
+                    currentDefinition, active, previousMillis, nowMillis);
+            long modifierBoundary = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
+            boundaryMillis = Math.min(workBoundary, modifierBoundary);
+            BodySnapshot modifiedBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
+            paidBody = TechniqueScheduledWork.payDue(host, currentDefinition, modifiedBody, boundaryMillis);
+        } else {
+            boundaryMillis = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
+            paidBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
+        }
+        TechniqueScheduler.Due due = due(active, previousMillis, boundaryMillis);
+        CastPhase current = TechniqueScheduler.phase(active, boundaryMillis);
+        if (!due.recoveryDue()) {
+            return new AdvanceResult(outcome(active, current, paidBody.revision()),
+                    due.effects(), Optional.empty(), boundaryMillis);
+        }
+        return stop(host, paidBody, TechniqueState.read(paidBody), CastPhase.FINISHED, due.effects());
     }
 
     public AdvanceResult interruptByStagger(TechniqueHost host, long previousMillis) {
@@ -309,8 +350,10 @@ public final class TechniqueCasting {
                 return new AdvanceResult(outcome(active, phase, body.revision()),
                         List.of(), Optional.empty(), nowMillis);
             }
+            BodySnapshot settledBody = TechniqueScheduledModifiers.settleBeforeStop(host, body);
+            TechniqueProgress settledProgress = TechniqueState.read(settledBody);
             List<EffectIntent> effects = stopEffects(active, previousMillis, nowMillis);
-            return stop(host, body, progress, ending, effects);
+            return stop(host, settledBody, settledProgress, ending, effects);
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome rejected = hostFailure(castId, exception);
             return new AdvanceResult(rejected, List.of(), Optional.empty(), previousMillis);

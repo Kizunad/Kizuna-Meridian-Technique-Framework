@@ -36,7 +36,10 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
             .setOffHand(HeldItem.getDefaultInstance())
             .setMainHandSide(HandSide.RIGHT)
             .build();
-    TechniqueHostFacts inspectFacts = TechniqueInspection.defaults();
+    // 测试宿主明确模拟站地；缺少采集能力的旧宿主另行走兼容构造器。
+    TechniqueHostFacts inspectFacts = TechniqueInspection.defaults().toBuilder()
+            .setGrounded(true /* grounded */)
+            .build();
     private FailureCode nextFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     private FailureCode nextEffectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     Consumer<EffectSubmission> effectObserver = submission -> { /* 默认不注入世界回调。 */ };

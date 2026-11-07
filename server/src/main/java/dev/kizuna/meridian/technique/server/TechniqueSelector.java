@@ -28,6 +28,33 @@ public final class TechniqueSelector {
         FLEEING
     }
 
+    public enum Visibility { VISIBLE, HIDDEN }
+
+    public enum Approach { APPROACHING, NOT_APPROACHING }
+
+    public enum Ammunition { AVAILABLE, UNAVAILABLE }
+
+    public record TargetContext(TargetDistanceBand distanceBand, Visibility visibility,
+                                double speedMetersPerSecond, Approach approach, Ammunition ammunition,
+                                Set<ProjectileWeaponCategory> reserveWeapons) {
+        public TargetContext {
+            // 远程 AI 事实由宿主提供，速度和武器集合先固定成不可变快照。
+            if (distanceBand == null || distanceBand == TargetDistanceBand.UNRECOGNIZED
+                    || distanceBand == TargetDistanceBand.TARGET_DISTANCE_BAND_UNSPECIFIED
+                    || visibility == null || approach == null || ammunition == null
+                    || !Double.isFinite(speedMetersPerSecond) || speedMetersPerSecond < 0
+                    || speedMetersPerSecond > TechniqueValues.MAX_SPEED) {
+                throw new IllegalArgumentException("远程 AI 情境参数非法");
+            }
+            reserveWeapons = Set.copyOf(reserveWeapons);
+            if (reserveWeapons.stream().anyMatch(weapon -> weapon == null
+                    || weapon == ProjectileWeaponCategory.UNRECOGNIZED
+                    || weapon == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED)) {
+                throw new IllegalArgumentException("备用武器类别非法");
+            }
+        }
+    }
+
     public record Situation(long nowMillis, double selfHpRatio, double selfQiRatio,
                             double targetDistanceMeters, TargetState targetState,
                             double effectiveLegForceNewtons) {
@@ -73,11 +100,18 @@ public final class TechniqueSelector {
         SELF_FLEEING
     }
 
-    public record CombatContext(Set<CombatFact> facts, TechniqueProgress progress) {
+    public record CombatContext(Set<CombatFact> facts, TechniqueProgress progress,
+                                Optional<TargetContext> target) {
+        public CombatContext(Set<CombatFact> facts, TechniqueProgress progress) {
+            // 近战情境没有远程观察，不为射击凭空补造目标或弹药事实。
+            this(facts, progress, Optional.empty());
+        }
+
         public CombatContext {
             // 事实由宿主观察，承接则始终读取同一身体的可信进度。
             facts = Set.copyOf(facts);
             TechniqueState.validate(progress);
+            Objects.requireNonNull(target);
         }
     }
 
@@ -148,7 +182,8 @@ public final class TechniqueSelector {
     }
 
     public static boolean castable(Context context, KnownTechnique known, TechniqueDefinition definition) {
-        // 绑定、费用、冷却和承接窗口满足即可施放；不看距离与 AI 角色，宿主大脑筛辅助式和打断式时复用。
+        // 绑定、费用、冷却和承接窗口满足即可施放；不看距离与 AI 角色，宿主大脑
+        // 筛辅助式和打断式时复用。
         TechniqueReference reference = known.getTechnique();
         BindingOutcome binding = context.availability().bindings().get(reference);
         if (binding == null || !binding.hasBinding()
@@ -168,6 +203,15 @@ public final class TechniqueSelector {
         }
         AiHints hints = definition.getAiHints();
         if (hints.getSupport().getRole() != AiRole.AI_ROLE_UNSPECIFIED) {
+            return false;
+        }
+        TargetDistanceBand requiredBand = hints.getCombat().getTargetDistanceBand();
+        Optional<TargetContext> target = context.combat().target();
+        if (definition.hasProjectileWeapon() && target.isEmpty()) {
+            return false;
+        }
+        if (requiredBand != TargetDistanceBand.TARGET_DISTANCE_BAND_UNSPECIFIED
+                && (target.isEmpty() || requiredBand != target.orElseThrow().distanceBand())) {
             return false;
         }
         double distance = context.situation().targetDistanceMeters();
@@ -227,10 +271,40 @@ public final class TechniqueSelector {
                 result *= multiplier.getValue();
             }
         }
-        if (!Double.isFinite(result)) {
+        double rangedWeight = contextWeight(result, context.combat().target(), hints);
+        if (!Double.isFinite(rangedWeight)) {
             return 0;
         }
-        return result;
+        return rangedWeight;
+    }
+
+    private static double contextWeight(double base, Optional<TargetContext> target, CombatAiHints hints) {
+        // 远程事实只影响 AI 权重，不改变功法的真实倍率、目标或时序。
+        if (target.isEmpty()) {
+            return base;
+        }
+        TargetContext facts = target.orElseThrow();
+        double visibilityWeight = 1;
+        if (facts.visibility() == Visibility.HIDDEN && hints.hasTargetHiddenWeight()) {
+            visibilityWeight = hints.getTargetHiddenWeight().getValue();
+        }
+        double movementWeight = 1;
+        if (facts.speedMetersPerSecond() > 0 && hints.hasTargetMovingWeight()) {
+            movementWeight = hints.getTargetMovingWeight().getValue();
+        }
+        double approachWeight = 1;
+        if (facts.approach() == Approach.APPROACHING && hints.hasSelfApproachedWeight()) {
+            approachWeight = hints.getSelfApproachedWeight().getValue();
+        }
+        double ammunitionWeight = 1;
+        if (facts.ammunition() == Ammunition.AVAILABLE && hints.hasAmmunitionWeight()) {
+            ammunitionWeight = hints.getAmmunitionWeight().getValue();
+        }
+        double reserveWeaponWeight = 1;
+        if (!facts.reserveWeapons().isEmpty() && hints.hasReserveWeaponWeight()) {
+            reserveWeaponWeight = hints.getReserveWeaponWeight().getValue();
+        }
+        return base * visibilityWeight * movementWeight * approachWeight * ammunitionWeight * reserveWeaponWeight;
     }
 
     private static double weight(Situation situation, TechniqueDefinition definition,

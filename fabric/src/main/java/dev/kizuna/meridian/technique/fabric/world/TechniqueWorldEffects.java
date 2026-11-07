@@ -96,7 +96,8 @@ public final class TechniqueWorldEffects {
         }
     }
 
-    private StrikeData strikeData(InteractionHand hand, ItemStack stack, HeldItemCategory category, WeaponStrike strike) {
+    private StrikeData strikeData(InteractionHand hand, ItemStack stack, HeldItemCategory category,
+                                  WeaponStrike strike) {
         // 双手只改变剂量和伤害类型标签，身体系数及做功由 Damage 读取；26.2 的伤害类型按注册表查找项取。
         boolean twoHanded = twoHanded(actor, hand, strike);
         String side = "main_hand";
@@ -109,11 +110,23 @@ public final class TechniqueWorldEffects {
         if (injury(category, strike) == InjuryKind.BLUNT) {
             kind = "blunt";
         }
-        var key = ResourceKey.create(Registries.DAMAGE_TYPE,
-                Identifier.fromNamespaceAndPath(damageNamespace, kind + "_" + side));
+        Identifier defaultType = Identifier.fromNamespaceAndPath(damageNamespace, kind + "_" + side);
+        Identifier damageType = damageType(strike, hand, defaultType);
+        var key = ResourceKey.create(Registries.DAMAGE_TYPE, damageType);
         var type = actor.level().registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(key);
         double multiplier = strike.getMultiplier().getValue() * gripMultiplier(strike, twoHanded);
         return new StrikeData(stack, category, strike, multiplier, new DamageSource(type, actor));
+    }
+
+    static Identifier damageType(WeaponStrike strike, InteractionHand hand, Identifier defaultType) {
+        // 目录声明完整主副手身份时直接读取，不拼接宿主命名空间。
+        if (strike.getMainHandDamageTypeId().isEmpty()) {
+            return defaultType;
+        }
+        if (hand == InteractionHand.OFF_HAND) {
+            return Identifier.parse(strike.getOffHandDamageTypeId());
+        }
+        return Identifier.parse(strike.getMainHandDamageTypeId());
     }
 
     public static Optional<DoseEstimate> estimate(LivingEntity actor, TechniqueMessages.Hand selected,

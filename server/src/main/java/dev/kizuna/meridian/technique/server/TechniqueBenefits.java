@@ -3,6 +3,7 @@ package dev.kizuna.meridian.technique.server;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundAnchor;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StatusBenefit;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ModifierActivation;
 import java.util.HashSet;
 
 /** 状态增益的有界数据契约，不包含特定功法或身体模板。 */
@@ -33,7 +34,7 @@ public final class TechniqueBenefits {
     }
 
     private static void validateTissue(StatusBenefit benefit) {
-        // 多个槽共用一个状态时长，校验重复槽和曲线结束时刻。
+        // 多个槽共用一个状态时长，禁止重复槽和有歧义的起手登记配置。
         var modifiers = benefit.getTissue().getModifiersList();
         if (modifiers.isEmpty() || modifiers.size() > TechniqueValues.MAX_MODULES) {
             throw TechniqueErrors.invalid("status_benefit.tissue", "组织描述为空或数量超限");
@@ -43,8 +44,9 @@ public final class TechniqueBenefits {
             TechniqueValues.localId(modifier.getSlotId(), "status_benefit.tissue.slot_id");
             TechniqueDefinitions.validateModifierCurve(modifier, benefit.getDurationMillis());
             long end = modifier.getCurve(modifier.getCurveCount() - 1).getOffsetMillis();
-            if (!slots.add(modifier.getSlotId()) || end != benefit.getDurationMillis()) {
-                throw TechniqueErrors.invalid("status_benefit.tissue", "重复槽或曲线时长非法");
+            if (!slots.add(modifier.getSlotId()) || end != benefit.getDurationMillis()
+                    || modifier.getActivation() != ModifierActivation.AT_CAST_START) {
+                throw TechniqueErrors.invalid("status_benefit.tissue", "重复槽、曲线时长或登记时机非法");
             }
         }
     }

@@ -23,7 +23,8 @@ public interface TechniqueHost {
     Inspection inspect();
 
     record Inspection(BodySnapshot body, HeldItems heldItems, TechniqueHostFacts facts) {
-        Inspection(BodySnapshot body, HeldItems heldItems) {
+        public Inspection(BodySnapshot body, HeldItems heldItems) {
+            // 保留外部旧宿主的构造入口；腿法必须另行提供可信移动事实。
             this(body, heldItems, TechniqueInspection.defaults());
         }
 

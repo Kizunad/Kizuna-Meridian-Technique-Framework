@@ -40,8 +40,11 @@ final class TechniqueDefinitions {
         validateTiming(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
+        TechniqueRelativeArms.validate(addons, templates, definition);
         validateCosts(addons, templates, slots, definition);
+        validateProjectileDefinition(definition);
         validateEffects(addons, templates, slots, definition);
+        TechniqueProjectiles.validateConvergence(definition);
         TechniqueCombatEffects.validateSequence(definition);
         TechniqueCombatEffects.validateLegSequence(definition);
         TechniqueSoundCues.validateTargets(definition);
@@ -257,11 +260,13 @@ final class TechniqueDefinitions {
             previousMillis = atMillis;
             switch (effect.getOperationCase()) {
                 case TISSUE_MODIFIER -> validateModifier(slots, definition, effect);
+                case WORK -> validateScheduledWork(addons, templates, slots, effect, durationMillis);
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
                 case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
                 case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
+                case LAUNCH_PROJECTILE -> TechniqueProjectiles.validate(effect.getLaunchProjectile());
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
                 case PRESENTATION -> {
                     PresentationEffect presentation = effect.getPresentation();
@@ -287,7 +292,51 @@ final class TechniqueDefinitions {
             requireSlot(slots, work.getSlotId(), ModuleKind.TISSUE);
         } else {
             for (TissueModifier modifier : benefit.getTissue().getModifiersList()) {
-                requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
+                TechniqueSlot slot = requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
+                if (slot.hasRelativeArm()) {
+                    throw TechniqueErrors.invalid(slot.getId(), "组织状态不能引用依赖出手手位的槽");
+                }
+            }
+        }
+    }
+
+    private static void validateScheduledWork(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
+            Map<String, TechniqueSlot> slots, TechniqueEffect effect, long durationMillis) {
+        // 起始事件与整段持续时间都必须落在本次施放内。
+        WorkCost work = effect.getWork();
+        validateWork(addons, templates, slots, work);
+        if (work.getDuration().getValue() * TechniqueScheduledWork.MILLIS_PER_SECOND
+                > durationMillis - effect.getAtMillis()) {
+            throw TechniqueErrors.invalid("effects.work", "做功区间不能超出收势结束");
+        }
+    }
+
+    private static void validateProjectileDefinition(TechniqueDefinition definition) {
+        // 远程式的武器类别由式声明，所有射击效果必须与之保持一致。
+        if ((definition.hasRequireAmmunition() || definition.getLockTarget()) && !definition.hasProjectileWeapon()) {
+            throw TechniqueErrors.invalid("projectile_weapon", "弹药覆盖与目标锁定必须归属远程式");
+        }
+        if (definition.getLockTarget() != definition.hasTargetLockDistance()) {
+            throw TechniqueErrors.invalid("target_lock_distance", "锁定目标与搜索距离必须同时声明");
+        }
+        if (definition.getLockTarget()) {
+            positive(definition.getTargetLockDistance(), Unit.METER, MAX_DISTANCE, "target_lock_distance");
+        }
+        if (definition.hasProjectileWeapon()
+                && (definition.getProjectileWeapon()
+                        == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
+                        || definition.getProjectileWeapon() == ProjectileWeaponCategory.UNRECOGNIZED)) {
+            throw TechniqueErrors.invalid("projectile_weapon", "未知远程武器类别");
+        }
+        for (TechniqueEffect effect : definition.getEffectsList()) {
+            if (!effect.hasLaunchProjectile()) {
+                continue;
+            }
+            if (!definition.hasProjectileWeapon()) {
+                throw TechniqueErrors.invalid(definition.getId(), "射击式必须声明武器类别");
+            }
+            if (effect.getLaunchProjectile().getProjectileWeapon() != definition.getProjectileWeapon()) {
+                throw TechniqueErrors.invalid(definition.getId(), "射击算子的武器类别与式不一致");
             }
         }
     }
@@ -296,6 +345,9 @@ final class TechniqueDefinitions {
                                          TechniqueEffect effect) {
         // 延迟生效计入冷却期限，防止只比较曲线长度而漏掉起手偏移。
         TissueModifier modifier = effect.getTissueModifier();
+        if (modifier.getActivation() == ModifierActivation.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("tissue_modifier.activation", "未知的曲线登记时机");
+        }
         requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
         long maximumDuration = durationMillis(definition.getPhases())
                 + definition.getCooldownMillis() - effect.getAtMillis();
@@ -435,6 +487,34 @@ final class TechniqueDefinitions {
             quantity(hints.getMaximumLongWarmupDistance(), Unit.METER, 0, MAX_DISTANCE,
                     "maximum_long_warmup_distance");
         }
+        validateRangedHints(hints);
+    }
+
+    private static void validateRangedHints(CombatAiHints hints) {
+        // 远程观察使用独立权重，未声明的观察维持乘数一。
+        if (hints.getTargetDistanceBand() == TargetDistanceBand.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("combat.target_distance_band", "未知目标距离档");
+        }
+        if (hints.hasTargetHiddenWeight()) {
+            validateOptionalWeight(hints.getTargetHiddenWeight(), "target_hidden_weight");
+        }
+        if (hints.hasTargetMovingWeight()) {
+            validateOptionalWeight(hints.getTargetMovingWeight(), "target_moving_weight");
+        }
+        if (hints.hasSelfApproachedWeight()) {
+            validateOptionalWeight(hints.getSelfApproachedWeight(), "self_approached_weight");
+        }
+        if (hints.hasAmmunitionWeight()) {
+            validateOptionalWeight(hints.getAmmunitionWeight(), "ammunition_weight");
+        }
+        if (hints.hasReserveWeaponWeight()) {
+            validateOptionalWeight(hints.getReserveWeaponWeight(), "reserve_weapon_weight");
+        }
+    }
+
+    private static void validateOptionalWeight(Quantity weight, String path) {
+        // 情境权重允许零值排除候选，缺失与非法单位由数量校验器区分。
+        quantity(weight, Unit.RATIO, 0, MAX_WEIGHT, path);
     }
 
     private static void validatePresentation(Presentation presentation) {

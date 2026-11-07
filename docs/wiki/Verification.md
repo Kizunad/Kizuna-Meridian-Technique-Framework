@@ -10,6 +10,10 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 原版 HUD/状态列表与牛奶清除截图；结果写入 `fabric/build/status-client-results.txt`。
 客户端读取真实资源、语言和网络状态，不以静态图标预览代替游戏内验证。
 
+`TechniqueScheduledModifiersTest` 使用真实 Framework 事务覆盖到时登记曲线：登记前打断不产生能力变化、
+登记后取消保留完整曲线、迟到时保留当前插值及原到期、过期待办不登记、承接起播投影、
+同刻曲线先于做功和世界效果，以及响应丢失与存档恢复的去重。
+
 `TechniqueObserverTest` 覆盖调试入口：施放监听收到每条返回路径的同一份回执、观察者异常不改变回执，
 `submitLeap` 接受时返回实际组织做功，无宿主与施放进行中返回对应原因且不扣做功。
 `TechniqueSoundTest` 覆盖声音契约：省略字段按默认值播放；越界、单位错、缺锚点、非法 ID、抖动越出 [0.5, 2] 都拒绝；
@@ -32,7 +36,7 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 
 实现依据为 2026-10-24 的功法方案、2026-10-26 的框架更新，以及
 `technique-combat-plans-2026-10-26.md` 中新版 `plans/06-Technique-Framework.md`。
-当前交付阶段 1–5、6a、6b、目录清单发现、卷轴物品与客户端阅读界面；Fabric 模组负责双端物品与展示及服务端装配，
+当前交付阶段 1–5、6a、6b、7、8、目录清单发现、卷轴物品与客户端阅读界面；Fabric 模组负责双端物品与展示及服务端装配，
 身体和世界效果仍由独立宿主入口提供。
 阶段 5 依赖核对时 Framework 为 `216710d03ff9bb0e4ae13894ab9b0a8cf7be9a45`；
 阶段 6a 验收时为 `e2859475afe6ef4d948f35052e1e112c051ab737`，依赖工作区干净，未修改其受版本控制文件。
@@ -575,3 +579,78 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 | `git diff --check` | 通过 |
 
 本阶段不运行 GameTest，也不修改 Human、Damage 或 Threatening。
+
+## 阶段 7：射击契约与行矢接入（2026-11-03）
+
+在阶段 8 主干 `c3c8ed0` 上合并射击契约，保留腿击、训练做功、着地观察、右键放行及限速 `[0,1]`。
+功法库负责校验、起手选手与相对手臂绑定、原子费用、目标锁定意图、效果时序、承接和 AI 事实权重；
+弓弩实体、弹道求解、附魔、弹药和耐久由具体宿主执行。正式源码不包含行矢目录或人类解剖身份。
+
+| 规则 | 测试与覆盖 |
+|---|---|
+| 武器与弹药 | `TechniqueStage7Test.rangedSelectionChecksWeaponOtherHandAndAmmunition`、`offHandArrowsAndWeaponSpecificAmmunitionAreChecked`：四类中文失败码、副手、弓箭与弩烟花的类别标签覆盖 |
+| 宿主事实与原子费用 | `missingInspectionAndMislabelledWeaponsNeverUseCatalogFallback`、`rejectedCastDoesNotSpendAndOffHandCastUsesFrozenHand`：缺观察拒绝、标签不能代造武器类别、拒绝不扣费，成功保存选定手 |
+| 拉空弓 | `dryDrawOverridesOnlyAmmunitionAndKeepsOtherHandRule`：仅免弹药，仍须持弓、另一手合法，零限速、不生成射击 |
+| 四种方向与非法目录 | `projectileDefinitionAndEffectProtocolRejectMismatchedWeapon`、`lobOffsetAndConvergenceRequireCompleteConsistentParameters`、`invalidRangesAndUnknownEnumsFailCatalogAndWireValidation`：类别、显式开关、数值单位、范围、未知枚举、汇聚后续平射引用 |
+| 起手锁定与原剪辑时刻 | `lockTargetIsFrozenInActiveCastAndProjectileEffect`、`convergenceKeepsOriginalReferenceAcrossFollowUpProjection`：不限速的锁定式也立即发锁定，迟到 tick 不改时刻、不重复，承接保留参考平射与起播偏移 |
+| 远程 AI | `rangedAiContextKeepsDistanceVisibilityVelocityAndReserveWeaponFacts`：距离档、可见、速度、逼近、弹药及备用武器权重各乘一次；缺观察不入选，腿力仍保留 |
+| 跨武器承接 | `crossWeaponFollowUpRequiresMatchingWeaponGroups`、`switchingWeaponInWindowRechecksCurrentHandBeforePaying`：目录前后类别与窗口，换兵后重新选手和扣费，未换时保持前式 |
+| 随手选臂 | `relativeArmBindingUsesSelectedWeaponHandAndActualDominantSide`、`relativeArmCatalogRejectsUnknownAndOverlappingTissues`：左右主手与主副持物四组合，预览等于真实起手；未知或重叠左右组织拒绝 |
+| 弓梢完整伤害 ID | `explicitDamageTypesRequireBothHandsAndDisableTwoHandedStrikes`、`TechniqueWorldDamageTypeTest.explicitIdsOverrideHostNamespaceForBothHands`：主副手成对声明，禁止该模式的双手倍率，完整 ID 不被宿主命名空间覆盖 |
+| 真实服务端 tick | `TechniqueProjectileGameTest.locksAtStartThenDispatchesBothShotsOnServerTicks`：起手锁定、副手、两发原计划时刻、锁定仅一次与收势清理 |
+
+`TechniqueStage7Test` 共 16 项；新增 Fabric JUnit 1 项、GameTest 1 项，既有用例全部保留。
+起手锁定用例先发现 `TechniqueService` 只为限速或前式清理立即推进的缺陷；补入锁定条件后通过。
+测试使用真实 Framework 活动和存储、内存身体宿主；GameTest 使用真实 Fabric 服务端 tick。
+这些验证不包含原版箭实体、附魔、弹道到达误差、正式行矢目录或完整装配，它们由 Human 与内容仓验收。
+
+| 命令或证据 | 结果 |
+|---|---|
+| `./gradlew --no-daemon test build :fabric:runGametest -PgametestRunDir=build/gametest-wayfarer-l1-20261103-a --console=plain` | `BUILD SUCCESSFUL`；JUnit 222/222（server 205、fabric 17）；24 项 required GameTest 全过，其中含原版 `always_pass` |
+| 最后代码形状调整后：`./gradlew --no-daemon test build --console=plain` | `BUILD SUCCESSFUL`；JUnit 222/222，0 失败、0 错误、0 跳过 |
+| 完整验收日志 | `/tmp/wayfarer-l1-validation.log` |
+| 最后构建日志 | `/tmp/wayfarer-l1-final-test-build.log` |
+| GameTest XML | `fabric/build/gametest-wayfarer-l1-20261103-a/build/gametest-results.xml` |
+
+运行前逐次检查共享机器无其他 Gradle；等待期间不启动并行构建。
+`fabric/build.gradle` 增加可选 `gametestRunDir`，本轮使用独立新目录，未删除默认世界。
+最后调整包括 builder 展开、测试重复参数提取、目录加载结果断言及 AI 权重的等价具名计算；
+该轮重跑完整 `test build`，此前 GameTest 记录保留，未再次启动服务端。
+
+### 设计与上游待办
+
+- 分段做功已按 2026-11-03 纠正后的契约落地：Framework 只结算当前身体时刻开始的一段，
+  Technique 在 `TechniqueEffect.work` 的开始事件提交费用，不增加未来偏移字段。
+  下方记录覆盖起手预检、到时原子支付和取消边界。
+- 设计稿要求天地同至「沉身前打断不加曲线」，而既有库在起手原子提交全部延迟曲线，
+  打断不撤销。此项与现有公开契约不一致；本次保留原语义，未把设计差异写成已实现。
+- 横风方向按协议正值向右，副手镜像；天地同至参考原剪辑平射时刻，动态到达时间由宿主求解。
+  本库不硬编码正式功法的效果时刻和占位数值；动画规格与设计稿的内容差异由行矢目录维护方记录。
+
+## 分段做功验证（2026-11-03）
+
+`TechniqueScheduledWorkTest` 的 13 条整体回归使用真实 Framework 事务，覆盖：
+
+- 起手预检所有未跳过段，失败不扣真元；零时刻段与起手合并提交。
+- 两段分别到时支付；同刻多段原子支付，世界效果成功前先确认费用。
+- 到时能力丧失先取消，打断、下线、死亡恢复均不补扣未开始段。
+- 承接跳过旧段、起播点随起手支付、后续段按剪辑偏移投影。
+- 迟到 tick 按事件顺序逐段处理，世界回调取消后不再跨下一边界。
+- 已付快照恢复、活动响应丢失、世界效果暂拒重试均不重复扣款。
+- 64 条声音与 32 条其他效果同时存在时，原目录下标、整条时间线推进及单笔组织上限仍正确。
+- 做功区间越过收势末端时拒绝目录。
+
+最终执行 `bash "gradlew" --no-daemon test build :fabric:runGametest`，使用
+`-PgametestRunDir=/tmp/wayfarer-review-20261103/game-technique-final`。
+结果：235 项 JUnit（server 218、fabric 17）及 24 项必需 GameTest 全部通过，退出码 0。
+日志：`/tmp/wayfarer-review-20261103/technique-final.log`；GameTest XML 在该独立运行目录的
+`build/gametest-results.xml`。正式行矢的真实玩家分段支付、射箭和断线验证由行矢附属维护。
+
+首次迟到 tick 回归曾发现起始游标跳过边界，修复后上述最终回归通过；失败日志保留，
+不以编译成功代替真实运行。所有构建使用 `--no-daemon` 和全机 Gradle 门闸。
+
+代码形状自查：第 1、2 条（`ProjectileTechniqueFixtures` 与 `TechniqueStage7Test` 的 builder 展开、分层构造）；
+第 3 条（`TechniqueHeldItems.validateOtherHand` 分支取手）；第 4、8 条（`TechniqueStage7Test` 复用规则与射击参数、
+显式断言目录加载结果）；第 5 条（`TechniqueSelector.contextWeight`、`TechniqueRelativeArms.moduleIds` 具名中间值）；
+第 6 条（`TargetContext` 观察开关改枚举）；第 7 条（射击测试参数常量）；第 9 条（`TechniqueDefinitions`、
+`TechniqueProtocol`、`TechniqueBinder` 拆出完整业务阶段，测试与世界效果行长）；第 10 条（移除开发过程注释）。

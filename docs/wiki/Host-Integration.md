@@ -82,12 +82,21 @@ Fabric 层据此给实体加临时 `MULTIPLY_TOTAL` 移动修饰，并把 `merid
 施放与查询同样调用 `service.cast(entity.getUUID(), request)`、`service.known(entity.getUUID())`；
 目录使用 `service.registry()`，与命令、状态机共享启动时的同一份不可变目录。
 
+分段做功由 `service.tick()` 在各开始事件提交，先支付再交付同刻效果。
+直接使用 `TechniqueCasting.advance(host, previousMillis)` 的宿主必须交付返回批次并保存
+`advancedMillis`，再继续推进到当前时刻；不能把一次返回当作已经跨完所有到期事件。
+不带游标的阶段接口会逐边界结算费用，但不负责交付世界效果。
+单次操作中的 `inspect`、活动与效果须串行，沿用同一身体时钟，不能为补扣费用伪造历史时刻。
+
 | 宿主方法 | 必须履行的行为 |
 |---|---|
 | `inspect()` | 先按旧动作结算至可信当前身体时刻，再返回 `Inspection(body, heldItems, facts)`；身体、双手、移动状态与鞋事实同时采集 |
 | `findActivity(requestId)` | 重新验证授权，查同一身体、`TechniqueHost.CALLER_ID` 下 Framework 持久活动回执 |
 | `submit(Submission)` | 检查 `expectedRevision`，走 `handleActivity`，原子保存身体、回执及释放账户；返回实际活动和 revision |
 | `submitEffect(EffectSubmission)` | 校验 `EffectIntent`，幂等执行冲量、表现、移动限速、持物打击、劈门或状态增益；本库不直接改世界 |
+
+公开的两参数 `Inspection(body, heldItems)` 保留旧宿主兼容。它不认定宿主已着地，腿法返回
+`NOT_GROUNDED` 且不扣费；普通功法仍可施放。接入腿法须使用三参数构造器提供同次采集的移动事实。
 
 所有调用必须与该身体的其他事件串行。拒绝抛 `TechniqueErrors.HostRejected`，包含原始 Framework 失败码；
 不确定的存储结果由调用方用原 `cast_id` 重试，不允许换 ID 再扣一次。
@@ -172,6 +181,9 @@ ID 补全取当前服务器目录中的书、卷、式身份，去重排序，�
 - `known`：精确功法版本、熟练度、可信来源与学会身体时刻；管理命令是当前学会入口。
 - `cooldowns`：功法 ID 到冷却结束身体毫秒；跨功法版本共用冷却。
 - `curve_ends`：功法 ID 到已提交修正最晚到期毫秒；提前终止也保留完整曲线。
+- `active_cast.pending_modifiers`：选择到时登记的已绑定曲线；起手只保存计划，登记和清除待办原子提交。
+  提前终止丢弃尚未登记项，已经登记项仍自然到期。宿主预测未来能力时可把未到期的待登记曲线
+  加入只读候选；实际做功与伤害只能使用已登记的身体修正。
 - `active_cast`：原始请求、三段固定边界、动作身份、绑定、打断规则、选手、移动限速、冷却长度及表现声明；至多一份。
   同时保存 `clip_start_millis`、起手书级 `held_item_rules` 和直接前式 `predecessor_cleanup`，可跨重试稳定清理。
 - `last_cast`：最近施放的精确式版本、cast ID、原定生效/收势结束边界和终止原因；仅正常结束可用于历史承接窗口。
@@ -285,6 +297,37 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 物品耐久仅在功法末击结算，方块破坏不额外磨损工具。
 `TechniqueWorldImpulses` 分别替换水平推进和竖直跳跃分量，同刻 INPUT 与 UP 可按任意顺序组合；
 宿主按效果身份去重，已成功效果重试不重新修改速度。
+
+## 射击宿主接入
+
+远程起手的物品观察、弹药事实与身体必须来自同一次 inspect；保留阶段 8 的移动和鞋事实。
+公开预判先调用 `TechniqueHeldItems.find(rules, items, definition)`，有手位后再调用
+`TechniqueBinder.bind(body, definition, selectedHand, heldItems.getMainHandSide())`。
+相对手臂槽由内容列出左右组织 ID，库按持武器手和主手解剖侧过滤候选；费用预览不得另固定左右臂。
+没有观察时不能假设有弹药；创造、无限或生物不耗箭也由宿主明确回传可射出事实。
+
+起手成功后立即收到 `target_lock`，包含搜索距离。按 cast 保存目标 ID 或落点、位置和速度；
+没有生物时按视线落点，后续目标消失也不能重新吸附另一个目标。
+锁定先于同刻射击，重复回执须幂等；宿主在结束、取消和卸载时释放 cast 的锁定缓存。
+普通 look/look_offset 仍使用撒放时朝向。偏航正值向右，mirror_by_hand 按起手 selected_hand 镜像；
+左主手与副手不同，不能按实体的主手解剖侧决定扇面镜像。
+
+每发 `launch_projectile` 下发起手手位、书级规则、原计划身体时刻、起手身体时刻与承接剪辑偏移。
+宿主重新检查该手武器与弹药，执行原版箭/烟花创建、附魔、药箭、声音、弹药消耗与耐久；
+中途弹药用尽仍确认效果但只空弦，不退费用、不扣耐久。不得消费或改写弩的原有装填组件。
+拉弦系数按 draw_strength_arm 在撒放时查询，查询不产生做功；箭命中不能再走近战系数重复缩放。
+物理求解、附魔和原版对象行为由 Human/生物宿主实现，本库只验证和转发参数。
+
+汇聚先按 reference_shot_millis 对齐参考平射，扣除 clip_start_millis 后加 cast_started_millis，
+再以参考时刻预计拉弦系数和 reference_speed_multiplier 估算飞行时间，加 arrival_delay_millis。
+按锁定速度外推目标，逐 tick 积分求解；低于 minimum_elevation 或超过 fallback 的速度上限时用普通抛射。
+曲线预测是只读查询，不能提前结算身体或另提交做功。射击时刻迟到也不能改变协议里的计划时刻。
+数值、原版阻力/重力和解的误差验收由宿主记录；本库测试不冒充实体命中、附魔或弹道验收。
+
+弓梢仍调用 `TechniqueWorldEffects.strike`；声明完整主副手 damage_type_id 时直接读对应注册表身份，
+不使用构造器的默认伤害命名空间拼接。构造器与其他持物内容不变。
+施放输入拦截继续使用已有 LOCK/UNLOCK 契约，行矢目录不放行原版右键。
+分段做功仍缺 Framework 活动起始偏移；不能把多个未来拉弦段当成已经得到正确的区间校验。
 
 ## 声音
 

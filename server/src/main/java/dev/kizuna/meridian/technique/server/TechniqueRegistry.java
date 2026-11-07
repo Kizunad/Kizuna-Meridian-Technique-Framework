@@ -123,10 +123,17 @@ public final class TechniqueRegistry {
             TechniqueReference reference = reference(definition);
             try {
                 TechniqueFollowUps.validate(definition, definitions);
-                boolean heldEffects = definition.getEffectsList().stream()
-                        .anyMatch(effect -> effect.hasWeaponStrike() || effect.hasBreakBlocks());
+                boolean heldEffects = definition.hasProjectileWeapon()
+                        || definition.getEffectsList().stream()
+                        .anyMatch(effect -> effect.hasWeaponStrike()
+                                || effect.hasBreakBlocks()
+                                || effect.hasLaunchProjectile());
                 if (heldEffects && bookOf(reference).filter(TechniqueBook::hasHeldItemRules).isEmpty()) {
                     throw TechniqueErrors.invalid(definition.getId(), "持物效果必须归属于声明持物规则的书");
+                }
+                if (definition.hasProjectileWeapon()) {
+                    TechniqueBook book = bookOf(reference).orElseThrow();
+                    TechniqueHeldItems.validateDefinition(book.getHeldItemRules(), definition);
                 }
                 if (TechniqueCombatEffects.hasLegStrike(definition)) {
                     TechniqueBook book = bookOf(reference).orElseThrow(

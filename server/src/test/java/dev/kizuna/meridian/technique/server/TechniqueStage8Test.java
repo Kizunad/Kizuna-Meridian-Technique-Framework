@@ -122,11 +122,39 @@ public final class TechniqueStage8Test {
             assertEquals("要站在地上才能出腿", outcome.getReason());
         }
 
-        host.inspectFacts = TechniqueInspection.defaults();
+        host.inspectFacts = TechniqueInspection.defaults().toBuilder()
+                .setGrounded(true /* grounded */)
+                .build();
         CastOutcome started = casting.cast(host, request(definition, host.current(), CAST_ID));
         assertEquals(CastPhase.WARMUP, started.getPhase());
         assertEquals(legRules(), TechniqueState.read(host.current()).getActiveCast().getLegRules());
         assertEquals(Hand.HAND_UNSPECIFIED, TechniqueState.read(host.current()).getActiveCast().getSelectedHand());
+    }
+
+    @Test
+    public void publicLegacyInspectionRejectsLegsAndKeepsOrdinaryCasting() throws NoSuchMethodException {
+        // 外部宿主仍能调用两参数入口；缺少移动事实不能支付费用并起手腿法。
+        var constructor = TechniqueHost.Inspection.class.getConstructor(BodySnapshot.class, HeldItems.class);
+        assertNotNull(constructor);
+        TechniqueDefinition leg = legDefinition();
+        BodySnapshot prepared = withProgress(body(Shape.TENDRIL), progress(leg));
+        MemoryHost host = new MemoryHost(prepared);
+        var legacy = new TechniqueHost.Inspection(prepared, host.heldItems);
+        host.inspectFacts = legacy.facts();
+        TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(legCatalog(leg, legRules())));
+        CastOutcome refused = new TechniqueCasting(registry).cast(host, request(leg, prepared, "legacy_leg"));
+        assertEquals(TechniqueFailure.NOT_GROUNDED, refused.getFailure());
+        assertFalse(TechniqueState.read(host.current()).hasActiveCast());
+        assertEquals(0, host.activitySubmissions);
+
+        TechniqueDefinition ordinary = definition();
+        BodySnapshot ordinaryBody = withProgress(body(Shape.TENDRIL), progress(ordinary));
+        MemoryHost ordinaryHost = new MemoryHost(ordinaryBody);
+        ordinaryHost.inspectFacts = new TechniqueHost.Inspection(ordinaryBody, ordinaryHost.heldItems).facts();
+        TechniqueRegistry ordinaryRegistry = TechniqueRegistry.load(addons(), List.of(catalog(ordinary)));
+        CastOutcome started = new TechniqueCasting(ordinaryRegistry).cast(ordinaryHost,
+                request(ordinary, ordinaryBody, "legacy_ordinary"));
+        assertEquals(CastPhase.WARMUP, started.getPhase());
     }
 
     @Test

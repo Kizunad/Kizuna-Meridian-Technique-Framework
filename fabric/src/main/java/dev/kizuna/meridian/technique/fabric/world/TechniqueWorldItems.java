@@ -38,7 +38,7 @@ public final class TechniqueWorldItems {
                 .build();
     }
 
-    private static HeldItem item(ItemStack stack) {
+    public static HeldItem item(ItemStack stack) {
         // 排序标签使重试时的事实具有稳定顺序；26.2 的物品标签从物品注册项读取。
         if (stack.isEmpty()) {
             return HeldItem.getDefaultInstance();

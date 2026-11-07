@@ -72,6 +72,8 @@ message HeldItemCategory {
   InjuryKind injury_kind = 6;
   ShieldInteraction shield_interaction = 7;
   optional bool can_break_doors = 8;
+  optional ProjectileWeaponCategory projectile_weapon = 9; // 弓或弩类别；非远程物品缺省
+  repeated string ammunition_tags = 10; // 非空时覆盖书级弹药标签，可区分弓箭与弩用烟花
 }
 message DurabilityRule {
   repeated string item_tags = 1; // 从上到下首次命中；末项空列表兜底，只用于有耐久物品
@@ -87,6 +89,9 @@ message HeldItemRules {
   repeated HeldItemCategory categories = 1;
   repeated DurabilityRule durability = 2;
   repeated HandSelectionCriterion selection_order = 3; // 三项各一次，PREFER_MAIN_HAND 必须最后
+  repeated string ammunition_tags = 4; // 任一标签命中；用于另一只手和弹药查询
+  optional bool require_ammunition = 5;
+  optional bool other_hand_empty_or_ammunition = 6;
 }
 enum Hand {
   HAND_UNSPECIFIED = 0;
@@ -98,6 +103,11 @@ enum HandSide {
   LEFT = 1;
   RIGHT = 2;
 }
+enum ProjectileWeaponCategory {
+  PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED = 0;
+  BOW = 1;
+  CROSSBOW = 2;
+}
 message HeldItem {
   string item_id = 1; // 空字符串表示空手；空手不得携带其他信息
   repeated string tags = 2;
@@ -108,6 +118,9 @@ message HeldItems {
   HeldItem main_hand = 1;
   HeldItem off_hand = 2;
   HandSide main_hand_side = 3;
+  optional ProjectileWeaponCategory main_hand_projectile_weapon = 4;
+  optional ProjectileWeaponCategory off_hand_projectile_weapon = 5;
+  optional bool can_find_ammunition = 6;
 }
 enum Category {
   CATEGORY_UNSPECIFIED = 0;
@@ -133,6 +146,12 @@ message TechniqueSlot {
   optional int32 maximum_count = 6; // [1, 16]，不小于 minimum_count
   optional bool require_opened = 7; // 经脉槽必须显式声明；扣费槽必须为 true
   Quantity minimum_strength = 8; // 可缺省；组织可用力量下限，N
+  RelativeArmSlot relative_arm = 9; // 组织槽按起手武器手选左右候选；仍满足 tags/kind/数量约束
+}
+message RelativeArmSlot {
+  DrawStrengthArm arm = 1;
+  repeated string left_module_ids = 2;
+  repeated string right_module_ids = 3;
 }
 enum QiDistribution {
   QI_DISTRIBUTION_UNSPECIFIED = 0;
@@ -165,6 +184,10 @@ message CastPhases {
   optional int64 recovery_millis = 3;
   optional bool interruptible_by_damage = 4;
 }
+enum ModifierActivation {
+  AT_CAST_START = 0; // 缺省保持起手登记；曲线可以延迟生效。
+  AT_EFFECT_TIME = 1; // 到效果时刻才登记；此前终止不产生曲线。
+}
 message TissueModifier {
   string slot_id = 1;
   // 偏移单位 ms，值为无量纲 [-1, 1]；2–16 点，首点偏移 0，首尾值 0，末点是到期。
@@ -173,6 +196,7 @@ message TissueModifier {
   Quantity burst_peak = 4;
   Quantity endurance_peak = 5;
   Quantity recovery_peak = 6;
+  ModifierActivation activation = 7;
   // 不存在提前移除字段；库添加的每条曲线都完整运行，到期由 Framework 清理。
 }
 enum ImpulseDirection {
@@ -347,6 +371,8 @@ message WeaponStrike {
   optional int64 shield_cooldown_millis = 15; // break_shield=false 时为 0
   optional int64 shield_break_millis = 16; // BREAK_BEFORE_HIT 使用；与挡后冷却分别配置
   string dedup_group = 17; // 必填局部标识，同次施放内同组每目标只命中一次
+  string main_hand_damage_type_id = 18; // 与副手 ID 成对；显式直读模式只支持单手
+  string off_hand_damage_type_id = 19;
 }
 message BreakBlocks {
   Quantity forward_distance = 1; // METER，(0, 1024]
@@ -368,11 +394,57 @@ message BreakBlocksIntent {
   BreakBlocks blocks = 1;
   HeldItemRules held_item_rules = 2;
 }
+message ConvergeProjectile {
+  int64 reference_shot_millis = 1; // 参考平射的原剪辑时刻
+  Quantity reference_speed_multiplier = 2; // RATIO，估算平射飞行时间的初速倍率
+  optional int64 arrival_delay_millis = 3; // 比参考平射晚到的毫秒数
+  LobProjectile fallback = 4; // 求解失败时使用的普通抛射；也规定汇聚初速上限
+  Quantity minimum_elevation = 5; // DEGREE，汇聚解的最小仰角
+}
+message LobProjectile {
+  Quantity maximum_distance = 1; // METER，落点搜索距离上限
+  Quantity radius = 2; // METER，落点水平随机半径
+  Quantity elevation = 3; // DEGREE，普通抛射仰角
+  Quantity maximum_speed_multiplier = 4; // RATIO，求解初速相对原版的上限
+}
+enum DrawStrengthArm {
+  DRAW_STRENGTH_ARM_UNSPECIFIED = 0;
+  OTHER_ARM = 1; // 起手选定武器手的另一条臂
+  WEAPON_ARM = 2;
+}
+message LaunchProjectile {
+  ProjectileWeaponCategory projectile_weapon = 1;
+  Quantity speed_multiplier = 2; // RATIO
+  Quantity damage_multiplier = 3; // RATIO
+  optional bool critical = 4;
+  optional int32 piercing = 5;
+  Quantity spread = 6; // DEGREE
+  oneof direction {
+    bool look = 7;
+    Quantity look_offset = 8; // DEGREE；由宿主按持弩手镜像
+    LobProjectile lob = 9;
+    ConvergeProjectile converge = 10;
+  }
+  optional Quantity target_snap_angle = 11; // DEGREE；在扇面内吸附最近目标
+  optional bool multiply_draw_strength = 12;
+  DrawStrengthArm draw_strength_arm = 13; // multiply_draw_strength=true 时必须明确指定
+  optional int64 shield_cooldown_millis = 14;
+  optional bool mirror_by_hand = 15;
+}
+message LaunchProjectileIntent {
+  LaunchProjectile projectile = 1;
+  HeldItemRules held_item_rules = 2;
+  int64 cast_started_millis = 3; // 本次起手的身体时钟
+  int64 clip_start_millis = 4; // 承接跳过的原剪辑毫秒
+}
+message TargetLockIntent { Quantity maximum_distance = 1; }
 message FollowUp {
   TechniqueReference previous = 1;
   Quantity recovery_start_ratio = 2; // RATIO，[0, 1]；后半段填 0.5
   optional int64 after_recovery_millis = 3; // 结束后窗口；设计值 500
   optional int64 start_millis = 4; // 后式跳过的预备剪辑毫秒，必须小于起手时长
+  optional ProjectileWeaponCategory previous_projectile_weapon = 5;
+  optional ProjectileWeaponCategory next_projectile_weapon = 6;
 }
 message FollowUpRules {
   repeated FollowUp transitions = 1;
@@ -389,6 +461,8 @@ message TechniqueEffect {
     StatusBenefit status_benefit = 7;
     SoundCue sound = 8;
     LegStrike leg_strike = 20;
+    LaunchProjectile launch_projectile = 9;
+    WorkCost work = 10; // 在 at_millis 开始该段做功；排队不扣费，到时与已付序号原子提交。
   }
 }
 message Presentation {
@@ -432,6 +506,18 @@ message CombatAiHints {
   Quantity target_airborne_weight = 9;
   Quantity self_fleeing_weight = 10;
   Quantity minimum_leg_force = 11; // NEWTON；两腿有效力量下限
+  TargetDistanceBand target_distance_band = 12;
+  Quantity target_hidden_weight = 13;
+  Quantity target_moving_weight = 14;
+  Quantity self_approached_weight = 15;
+  Quantity ammunition_weight = 16;
+  Quantity reserve_weapon_weight = 17;
+}
+enum TargetDistanceBand {
+  TARGET_DISTANCE_BAND_UNSPECIFIED = 0;
+  NEAR = 1;
+  MEDIUM = 2;
+  FAR = 3;
 }
 message TechniqueDefinition {
   string id = 1;
@@ -450,6 +536,10 @@ message TechniqueDefinition {
   FollowUpRules follow_up = 13;
   optional double movement_speed_multiplier = 14; // [0,1]，缺省为 1；全程限速，不缩放冲量
   bool allow_use_while_casting = 15; // 施放中放行玩家右键（用物品、放方块、与方块/实体交互）；缺省拦截
+  optional ProjectileWeaponCategory projectile_weapon = 16;
+  optional bool require_ammunition = 17; // 覆盖书级要求；拉空弓显式填 false
+  optional bool lock_target = 18;
+  Quantity target_lock_distance = 19; // lock_target=true 时必须声明，单位 METER
 }
 
 enum TechniqueFailure {
@@ -476,6 +566,10 @@ enum TechniqueFailure {
   FOLLOW_UP_UNAVAILABLE = 20;
   STAGGERED = 21; // 受击僵直未到期，不能起新式
   NOT_GROUNDED = 22; // 腿法要求施放者站在地上
+  BOW_REQUIRED = 23;
+  CROSSBOW_REQUIRED = 24;
+  OTHER_HAND_AMMUNITION_REQUIRED = 25;
+  AMMUNITION_REQUIRED = 26;
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -531,6 +625,7 @@ message EffectIntent {
   string effect_id = 4; // 施放内稳定 ID，独立于 tick 批次；同一 ID 重试不得重复执行
   Hand selected_hand = 5; // 施放起手选定；无持物规则时未指定
   int64 scheduled_millis = 6; // 权威身体时钟；迟到 tick 不改变原生效时刻
+  optional bool lock_target = 7;
   oneof operation {
     Impulse impulse = 10;
     PresentationIntent presentation = 11;
@@ -540,6 +635,8 @@ message EffectIntent {
     StatusBenefit status_benefit = 15;
     SoundCue sound = 16; // 只承载 CASTER，由功法服务交给声音监听者，不提交宿主
     LegStrikeIntent leg_strike = 20;
+    LaunchProjectileIntent launch_projectile = 17;
+    TargetLockIntent target_lock = 18;
   }
 }
 message TechniqueHostRequest {
@@ -614,6 +711,10 @@ message ActiveCast {
   optional double movement_speed_multiplier = 16; // 固定本次限速，缺省为 1
   bool allow_use_while_casting = 17; // 固定本次是否放行右键，旧存档缺省为拦截
   LegRules leg_rules = 30; // 固定本次书级腿法规则
+  optional bool lock_target = 18;
+  Quantity target_lock_distance = 19;
+  repeated int32 paid_work_sequences = 20; // 已付分段做功在原目录 effects 中的序号，随身体保存。
+  repeated kizuna.meridian.v1.CapabilityModifier pending_modifiers = 21; // 已绑定、尚未登记的到时曲线。
 }
 message LastCast {
   TechniqueReference technique = 1;

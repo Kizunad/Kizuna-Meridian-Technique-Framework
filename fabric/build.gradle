@@ -29,6 +29,9 @@ dependencies {
 
 test { useJUnit() }
 
+// 独立验收可指定全新运行目录，避免并行工作区复用已有测试世界。
+def gametestRunDirectory = providers.gradleProperty('gametestRunDir').getOrElse('build/gametest')
+
 processResources {
     inputs.property 'version', project.version
     filesMatching('fabric.mod.json') { expand version: project.version }
@@ -98,7 +101,7 @@ loom {
             server()
             name 'Meridian Technique GameTest'
             source sourceSets.gametest
-            runDir 'build/gametest'
+            runDir gametestRunDirectory
             vmArg '-Dfabric-api.gametest'
             vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
         }
@@ -117,7 +120,9 @@ tasks.named('runGametest') {
     doFirst {
         // 每局从空目录新建世界：GameTest 服务端按自带的平坦预设建世界，旧目录只会累积上一局的区块、实体、假玩家与模组存档。
         // 26.2 把生成设置与游戏规则拆到了 data/minecraft，只留 level.dat 会退回随机种子的默认地形，所以整个目录删掉。
-        file('build/gametest/world').deleteDir()
+        if (!providers.gradleProperty('gametestRunDir').isPresent()) {
+            file('build/gametest/world').deleteDir()
+        }
     }
 }
 

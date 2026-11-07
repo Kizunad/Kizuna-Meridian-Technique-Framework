@@ -13,6 +13,7 @@
   "entrypoints": {
     "fabric-gametest": [
       "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest",
+      "dev.kizuna.meridian.technique.server.TechniqueProjectileGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueScrollGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldBlockingGameTest"

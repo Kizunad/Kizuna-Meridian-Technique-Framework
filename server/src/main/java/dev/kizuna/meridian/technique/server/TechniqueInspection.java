@@ -12,13 +12,13 @@ final class TechniqueInspection {
     }
 
     static TechniqueHostFacts defaults() {
-        // 旧 Java 宿主没有额外事实时保持普通功法兼容，腿法仍会要求显式接入。
+        // 旧宿主未采集移动事实时，只允许普通功法，不能默认认定已着地而放行腿法。
         return TechniqueHostFacts.newBuilder()
-                .setGrounded(true)
-                .setInWater(false)
-                .setClimbing(false)
-                .setRiding(false)
-                .setGliding(false)
+                .setGrounded(false /* grounded */)
+                .setInWater(false /* inWater */)
+                .setClimbing(false /* climbing */)
+                .setRiding(false /* riding */)
+                .setGliding(false /* gliding */)
                 .build();
     }
 

@@ -224,36 +224,58 @@ public final class TechniqueProtocol {
             throw TechniqueErrors.invalid("scheduled_millis", "效果身体时刻不能为负");
         }
         switch (intent.getOperationCase()) {
-            case WEAPON_STRIKE -> {
-                validateHeldEffect(intent);
-                TechniqueCombatEffects.validateStrike(intent.getWeaponStrike().getStrike());
-                TechniqueHeldItems.validateRules(intent.getWeaponStrike().getHeldItemRules());
-                for (SoundCue cue : intent.getWeaponStrike().getHitSoundsList()) {
-                    TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "weapon_strike.hit_sounds");
-                }
-            }
-            case LEG_STRIKE -> {
-                if (intent.getSelectedHand() != Hand.HAND_UNSPECIFIED) {
-                    throw TechniqueErrors.invalid("selected_hand", "腿击效果不能携带出手手位");
-                }
-                TechniqueCombatEffects.validateLegStrike(intent.getLegStrike().getStrike());
-                TechniqueLegRules.validate(intent.getLegStrike().getLegRules());
-                for (SoundCue cue : intent.getLegStrike().getHitSoundsList()) {
-                    TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "leg_strike.hit_sounds");
-                }
-            }
+            case WEAPON_STRIKE -> validateWeaponStrikeIntent(intent);
+            case LEG_STRIKE -> validateLegStrikeIntent(intent);
             case BREAK_BLOCKS -> {
                 validateHeldEffect(intent);
                 TechniqueCombatEffects.validateBlocks(intent.getBreakBlocks().getBlocks());
                 TechniqueHeldItems.validateRules(intent.getBreakBlocks().getHeldItemRules());
+            }
+            case LAUNCH_PROJECTILE -> {
+                validateHeldEffect(intent);
+                TechniqueProjectiles.validateEffect(intent);
+                TechniqueHeldItems.validateRules(intent.getLaunchProjectile().getHeldItemRules());
             }
             case IMPULSE -> TechniqueDefinitions.validateImpulse(intent.getImpulse());
             case STATUS_BENEFIT -> TechniqueBenefits.validate(intent.getStatusBenefit());
             case PRESENTATION -> validatePresentationIntent(intent.getPresentation());
             case MOVEMENT -> TechniqueMovement.validateIntent(intent.getMovement());
             case SOUND -> TechniqueSoundCues.validateAnchor(intent.getSound(), SoundAnchor.CASTER, "sound");
+            case TARGET_LOCK -> validateTargetLockIntent(intent);
             default -> throw TechniqueErrors.invalid("effect", "缺少或未知世界效果");
         }
+    }
+
+    private static void validateWeaponStrikeIntent(EffectIntent intent) {
+        // 持物参数、书规则和目标声音使用同一个效果边界，禁止绕过目录约束。
+        validateHeldEffect(intent);
+        TechniqueCombatEffects.validateStrike(intent.getWeaponStrike().getStrike());
+        TechniqueHeldItems.validateRules(intent.getWeaponStrike().getHeldItemRules());
+        for (SoundCue cue : intent.getWeaponStrike().getHitSoundsList()) {
+            TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "weapon_strike.hit_sounds");
+        }
+    }
+
+    private static void validateLegStrikeIntent(EffectIntent intent) {
+        // 腿击没有持物手位，使用起手保存的腿法规则与本次命中声音。
+        if (intent.getSelectedHand() != Hand.HAND_UNSPECIFIED) {
+            throw TechniqueErrors.invalid("selected_hand", "腿击效果不能携带出手手位");
+        }
+        TechniqueCombatEffects.validateLegStrike(intent.getLegStrike().getStrike());
+        TechniqueLegRules.validate(intent.getLegStrike().getLegRules());
+        for (SoundCue cue : intent.getLegStrike().getHitSoundsList()) {
+            TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "leg_strike.hit_sounds");
+        }
+    }
+
+    private static void validateTargetLockIntent(EffectIntent intent) {
+        // 锁定身份和搜索范围须完整，缺标志不能被宿主解释成普通视线射击。
+        validateHeldEffect(intent);
+        if (!intent.getLockTarget()) {
+            throw TechniqueErrors.invalid("lock_target", "锁定意图必须携带锁定标志");
+        }
+        TechniqueValues.positive(intent.getTargetLock().getMaximumDistance(), Unit.METER,
+                TechniqueValues.MAX_DISTANCE, "target_lock.maximum_distance");
     }
 
     private static void validatePresentationIntent(PresentationIntent presentation) {

@@ -3,11 +3,14 @@ package dev.kizuna.meridian.technique.server;
 import com.google.protobuf.Any;
 import dev.kizuna.meridian.core.AddonProgress;
 import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.core.CapabilityModifier;
+import dev.kizuna.meridian.protocol.CapabilityProtobuf;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** 附属状态只随身体快照保存，不另建知识、冷却或施放账本。 */
 public final class TechniqueState {
@@ -133,6 +136,8 @@ public final class TechniqueState {
         var slots = new HashSet<String>();
         validateCastRules(active);
         validateEntry(active);
+        validatePaidWork(active);
+        validatePendingModifiers(active);
         for (BoundSlot slot : active.getBinding().getSlotsList()) {
             TechniqueValues.localId(slot.getSlotId(), "binding.slot_id");
             if (!slots.add(slot.getSlotId()) || slot.getModuleValue() <= 0
@@ -143,6 +148,49 @@ public final class TechniqueState {
         }
     }
 
+    private static void validatePaidWork(ActiveCast active) {
+        // 已付序号严格递增且有界，重试不能通过重复记录制造第二次扣费。
+        int previous = -1;
+        for (int sequence : active.getPaidWorkSequencesList()) {
+            if (sequence <= previous || sequence >= TechniqueValues.MAX_TIMELINE_EVENTS) {
+                throw TechniqueErrors.invalid("active_cast.paid_work_sequences", "做功序号无序、重复或超限");
+            }
+            previous = sequence;
+        }
+    }
+
+    private static void validatePendingModifiers(ActiveCast active) {
+        // 待登记曲线只能来自本次施放及已绑定组织，不能借进度注入其他来源的修正。
+        if (active.getPendingModifiersCount() > CapabilityModifier.MAX_PER_BODY) {
+            throw TechniqueErrors.invalid("active_cast.pending_modifiers", "待登记曲线数量超限");
+        }
+        Set<String> tissues = boundTissues(active);
+        var identities = new HashSet<String>();
+        String prefix = "meridian_technique:cast/"
+                + TechniqueValues.encodeCastId(active.getRequest().getCastId()) + "/";
+        for (var message : active.getPendingModifiersList()) {
+            CapabilityModifier modifier = CapabilityProtobuf.fromModifier(message);
+            long start = modifier.curve().startMillis();
+            if (!modifier.source().value().equals(TechniqueHost.CALLER_ID)
+                    || !modifier.id().value().startsWith(prefix)
+                    || !identities.add(modifier.id().value()) || !tissues.contains(modifier.tissueId().value())
+                    || start <= active.getStartedMillis() || start > active.getRecoveryEndMillis()) {
+                throw TechniqueErrors.invalid("active_cast.pending_modifiers", "待登记曲线的身份、组织或时刻非法");
+            }
+        }
+    }
+
+    private static Set<String> boundTissues(ActiveCast active) {
+        // 同一组织可以出现在多个槽位，校验引用时只保留身份并集。
+        var tissues = new HashSet<String>();
+        for (BoundSlot slot : active.getBinding().getSlotsList()) {
+            if (slot.getModule() == ModuleKind.TISSUE) {
+                tissues.addAll(slot.getModuleIdsList());
+            }
+        }
+        return tissues;
+    }
+
     private static void validateEntry(ActiveCast active) {
         // 持物规则和前式清理随新施放保存，恢复阶段只能重放停止或解锁。
         TechniqueValues.millis(active.getClipStartMillis(), "clip_start_millis");
@@ -151,6 +199,13 @@ public final class TechniqueState {
         }
         if (active.hasLegRules()) {
             TechniqueLegRules.validate(active.getLegRules());
+        }
+        if (active.getLockTarget() != active.hasTargetLockDistance()) {
+            throw TechniqueErrors.invalid("active_cast.target_lock_distance", "锁定与搜索距离必须同时保存");
+        }
+        if (active.getLockTarget()) {
+            TechniqueValues.positive(active.getTargetLockDistance(), Unit.METER,
+                    TechniqueValues.MAX_DISTANCE, "active_cast.target_lock_distance");
         }
         if (active.getPredecessorCleanupCount() > TechniqueValues.MAX_EFFECTS + 1) {
             throw TechniqueErrors.invalid("predecessor_cleanup", "前式清理数量超限");

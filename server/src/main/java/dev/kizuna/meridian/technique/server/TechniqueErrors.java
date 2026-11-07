@@ -47,6 +47,10 @@ public final class TechniqueErrors {
             case FOLLOW_UP_UNAVAILABLE -> "承接的时机已过，先稳住架势";
             case STAGGERED -> "僵直中";
             case NOT_GROUNDED -> "要站在地上才能出腿";
+            case BOW_REQUIRED -> "这一式需要弓";
+            case CROSSBOW_REQUIRED -> "这一式需要弩";
+            case OTHER_HAND_AMMUNITION_REQUIRED -> "另一只手要空着或拿着箭";
+            case AMMUNITION_REQUIRED -> "没有箭";
             default -> "暂时无法运功";
         };
     }

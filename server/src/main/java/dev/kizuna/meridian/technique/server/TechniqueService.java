@@ -478,7 +478,8 @@ public final class TechniqueService {
                 active.getRecoveryEndMillis(), active.getRecoveryEndMillis());
         Session session = new Session(host, previousMillis, castId, cleanup);
         sessions.put(entityUuid, session);
-        if (TechniqueMovement.multiplier(active) < 1 || active.getPredecessorCleanupCount() > 0) {
+        if (TechniqueMovement.multiplier(active) < 1 || active.getPredecessorCleanupCount() > 0
+                || active.getLockTarget()) {
             advance(entityUuid, session);
         }
     }
@@ -501,21 +502,33 @@ public final class TechniqueService {
                 terminate(entityUuid, session);
                 return;
             }
-            if (session.pendingAdvance == null) {
-                TechniqueCasting.AdvanceResult result = casting.advance(session.host, session.previousMillis);
-                if (!success(result.outcome())) {
-                    handleFailure(entityUuid, session, result.outcome().getFrameworkFailure());
+            // 迟到 tick 逐边界完成做功和效果；异常回执保留当前批次，下次仍从同一边界重试。
+            for (int boundary = 0; boundary <= TechniqueValues.MAX_TIMELINE_EVENTS + 1; boundary++) {
+                if (!advanceBoundary(entityUuid, session)) {
                     return;
                 }
-                session.pendingAdvance = result;
             }
-            deliverPending(entityUuid, session);
         } catch (TechniqueErrors.HostRejected exception) {
             handleFailure(entityUuid, session, exception.failure());
         } catch (IllegalArgumentException exception) {
             // 即使业务进度损坏，已经开始的表现与移动锁仍有清理责任。
             beginTermination(entityUuid, session);
         }
+    }
+
+    private boolean advanceBoundary(UUID entityUuid, Session session) {
+        // 每段做功使用身体进度去重，世界效果继续使用原有稳定效果身份。
+        if (session.pendingAdvance == null) {
+            TechniqueCasting.AdvanceResult result = casting.advance(session.host, session.previousMillis);
+            if (!success(result.outcome())) {
+                handleFailure(entityUuid, session, result.outcome().getFrameworkFailure());
+                return false;
+            }
+            session.pendingAdvance = result;
+        }
+        deliverPending(entityUuid, session);
+        return sessions.get(entityUuid) == session && !session.terminating && session.deferred == null
+                && session.previousMillis < session.host.inspect().body().settledAt().elapsedMillis();
     }
 
     private void deliverPending(UUID entityUuid, Session session) {

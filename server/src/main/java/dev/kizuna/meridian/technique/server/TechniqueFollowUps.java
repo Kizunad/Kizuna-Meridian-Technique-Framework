@@ -7,6 +7,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUp;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUpRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LastCast;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ProjectileWeaponCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProgress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
@@ -39,7 +40,8 @@ final class TechniqueFollowUps {
             TechniqueReference reference = transition.getPrevious();
             TechniqueProtocol.validateReference(reference);
             long startMillis = transition.getStartMillis();
-            if (!definitions.containsKey(reference) || reference.equals(TechniqueRegistry.reference(definition))
+            TechniqueDefinition previousDefinition = definitions.get(reference);
+            if (previousDefinition == null || reference.equals(TechniqueRegistry.reference(definition))
                     || !previous.add(reference) || !transition.hasAfterRecoveryMillis()
                     || !transition.hasStartMillis() || startMillis < 0
                     || startMillis >= definition.getPhases().getWarmupMillis()) {
@@ -49,6 +51,41 @@ final class TechniqueFollowUps {
             }
             TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
             TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
+            validateWeaponGroup(transition, previousDefinition, definition);
+        }
+    }
+
+    private static void validateWeaponGroup(FollowUp transition, TechniqueDefinition previous,
+                                             TechniqueDefinition next) {
+        // 弓弩换兵承接显式记录前后类别，普通近战承接继续省略这两个字段。
+        boolean hasPrevious = transition.hasPreviousProjectileWeapon();
+        boolean hasNext = transition.hasNextProjectileWeapon();
+        if (hasPrevious != hasNext) {
+            throw TechniqueErrors.invalid("follow_up.projectile_weapon", "前后武器类别必须同时声明");
+        }
+        boolean crossesProjectileWeapons = previous.hasProjectileWeapon() && next.hasProjectileWeapon()
+                && previous.getProjectileWeapon() != next.getProjectileWeapon();
+        if (crossesProjectileWeapons && !hasPrevious) {
+            throw TechniqueErrors.invalid("follow_up.projectile_weapon", "换兵承接必须声明前后武器类别");
+        }
+        if (!hasPrevious) {
+            return;
+        }
+        validateWeaponCategory(transition.getPreviousProjectileWeapon(), "previous_projectile_weapon");
+        validateWeaponCategory(transition.getNextProjectileWeapon(), "next_projectile_weapon");
+        if (!previous.hasProjectileWeapon()
+                || previous.getProjectileWeapon() != transition.getPreviousProjectileWeapon()
+                || !next.hasProjectileWeapon()
+                || next.getProjectileWeapon() != transition.getNextProjectileWeapon()) {
+            throw TechniqueErrors.invalid("follow_up.projectile_weapon", "承接类别与前后功法不一致");
+        }
+    }
+
+    private static void validateWeaponCategory(ProjectileWeaponCategory category, String path) {
+        // 未指定和未知值都不能作为换兵分组。
+        if (category == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
+                || category == ProjectileWeaponCategory.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("follow_up." + path, "武器类别必须是弓或弩");
         }
     }
 
@@ -70,7 +107,8 @@ final class TechniqueFollowUps {
             previous = last;
         }
         for (FollowUp transition : definition.getFollowUp().getTransitionsList()) {
-            if (transition.getPrevious().equals(previous.getTechnique()) && inWindow(previous, transition, now)) {
+            if (transition.getPrevious().equals(previous.getTechnique())
+                    && inWindow(previous, transition, now)) {
                 return Optional.of(transition);
             }
         }

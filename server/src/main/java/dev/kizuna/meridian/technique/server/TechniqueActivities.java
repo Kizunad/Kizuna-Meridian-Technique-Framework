@@ -56,10 +56,14 @@ final class TechniqueActivities {
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
         Accounts accounts = accounts(body, definition.getCost().getQiList(), slots);
-        ActiveCast active = activeCast(start);
-        List<BodyMessages.CapabilityModifier> modifiers = TechniqueScheduler.modifiers(definition, active);
+        ActiveCast initialActive = activeCast(start);
+        TechniqueScheduler.ModifierPlan modifierPlan = TechniqueScheduler.modifierPlan(definition, initialActive);
+        ActiveCast active = initialActive.toBuilder().addAllPendingModifiers(modifierPlan.pending()).build();
+        List<BodyMessages.CapabilityModifier> startingModifiers = modifierPlan.starting();
+        List<BodyMessages.CapabilityModifier> modifiers = modifierPlan.all();
         List<ActivityEffort> efforts = efforts(start, slots, modifiers);
-        TechniqueProgress progress = startedProgress(start, active, modifiers);
+        TechniqueScheduledWork.validateStart(start, slots, modifiers);
+        TechniqueProgress progress = startedProgress(start, active, startingModifiers);
         Any payload = TechniqueState.pack(progress);
         ActivityAction action = action(definition, active, slots.values().stream().toList());
         var plan = BodyActivity.newBuilder()
@@ -67,7 +71,7 @@ final class TechniqueActivities {
                 .setReleasedQi(BodyProtobuf.toInventory(accounts.released()))
                 .addAllEfforts(efforts)
                 .addStartActions(action)
-                .addAllAddModifiers(modifiers)
+                .addAllAddModifiers(startingModifiers)
                 .putProgress(TechniqueState.KEY, payload);
         if (start.progress().hasActiveCast()) {
             plan.addStopActions(start.progress().getActiveCast().getActionInstanceId());
@@ -81,7 +85,7 @@ final class TechniqueActivities {
 
     private static TechniqueProgress startedProgress(Start start, ActiveCast active,
                                                      List<BodyMessages.CapabilityModifier> modifiers) {
-        // 承接保存前式原边界，新式独立记录正常冷却及完整曲线到期。
+        // 承接保存前式原边界，新式独立记录正常冷却及起手登记曲线到期。
         TechniqueDefinition definition = start.definition();
         long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
         var progress = start.progress().toBuilder()
@@ -165,11 +169,18 @@ final class TechniqueActivities {
                 .setAllowUseWhileCasting(start.definition().getAllowUseWhileCasting())
                 .setCooldownMillis(start.definition().getCooldownMillis())
                 .setClipStartMillis(clipStart)
+                .addAllPaidWorkSequences(TechniqueScheduledWork.startingSequences(start.definition(), clipStart))
                 .setHeldItemRules(start.selection().entry().heldRules())
                 .addAllPresentations(TechniqueScheduler.presentations(start.definition(), clipStart))
                 .addAllPredecessorCleanup(predecessorCleanup(start.progress(), started));
         if (TechniqueCombatEffects.hasLegStrike(start.definition())) {
             active.setLegRules(start.selection().entry().legRules());
+        }
+        if (start.definition().hasLockTarget()) {
+            active.setLockTarget(start.definition().getLockTarget());
+        }
+        if (start.definition().hasTargetLockDistance()) {
+            active.setTargetLockDistance(start.definition().getTargetLockDistance());
         }
         return active.build();
     }
@@ -184,8 +195,8 @@ final class TechniqueActivities {
                 .filter(effect -> effect.getCastId().equals(previous.getRequest().getCastId())).toList();
     }
 
-    private static long curveEnd(List<BodyMessages.CapabilityModifier> modifiers) {
-        // 修正从起手原子提交，打断也必须等最晚的完整曲线到期后才可重放同一功法。
+    static long curveEnd(List<BodyMessages.CapabilityModifier> modifiers) {
+        // 已登记修正不提前撤销，重施必须等待最晚曲线到期。
         long latest = 0;
         for (BodyMessages.CapabilityModifier modifier : modifiers) {
             long duration = modifier.getCurve(modifier.getCurveCount() - 1).getOffsetMillis();
@@ -290,10 +301,21 @@ final class TechniqueActivities {
 
     private static List<ActivityEffort> efforts(Start start, Map<String, BoundSlot> slots,
                                                 List<BodyMessages.CapabilityModifier> modifiers) {
+        // 原有 cost.work 仍在起手支付，时间线做功由开始事件独立提交。
+        TechniqueDefinition definition = start.definition();
+        var costs = new ArrayList<>(definition.getCost().getWorkList());
+        for (int sequence : TechniqueScheduledWork.startingSequences(definition,
+                start.selection().entry().clipStart())) {
+            costs.add(definition.getEffects(sequence).getWork());
+        }
+        return efforts(withModifiers(start.body(), modifiers), costs, slots);
+    }
+
+    static List<ActivityEffort> efforts(BodySnapshot body, List<WorkCost> costs, Map<String, BoundSlot> slots) {
         // 力量尚无活动字段，按同一 revision 先校验完整做功时段；活动仍复核功率与耐力。
         var efforts = new ArrayList<ActivityEffort>();
-        BodySnapshot candidate = withModifiers(start.body(), modifiers);
-        for (WorkCost work : start.definition().getCost().getWorkList()) {
+        BodySnapshot candidate = body;
+        for (WorkCost work : costs) {
             BoundSlot slot = slots.get(work.getSlotId());
             for (String moduleId : slot.getModuleIdsList()) {
                 var effort = ActivityEffort.newBuilder()
@@ -317,8 +339,8 @@ final class TechniqueActivities {
         return List.copyOf(efforts);
     }
 
-    private static BodySnapshot withModifiers(BodySnapshot body,
-                                               List<BodyMessages.CapabilityModifier> modifiers) {
+    static BodySnapshot withModifiers(BodySnapshot body,
+                                       List<BodyMessages.CapabilityModifier> modifiers) {
         // 预检力量时纳入同一笔起手活动新增的修正，保持预检和 Framework 执行顺序一致。
         if (modifiers.isEmpty()) {
             return body;

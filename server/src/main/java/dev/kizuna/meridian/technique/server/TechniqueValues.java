@@ -17,6 +17,7 @@ final class TechniqueValues {
     /** 每功法非声音效果的上限；声音单独计数，见 MAX_SOUNDS。 */
     static final int MAX_EFFECTS = 32;
     static final int MAX_SOUNDS = 64;
+    static final int MAX_TIMELINE_EVENTS = MAX_EFFECTS + MAX_SOUNDS;
     static final long MAX_MILLIS = 86_400_000;
     static final long MAX_CURVE_MILLIS = 300_000;
     static final double MAX_QUANTITY = 1_000_000_000;

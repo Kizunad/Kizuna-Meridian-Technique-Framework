@@ -26,7 +26,18 @@ public final class TechniqueBinder {
     }
 
     public static BindingOutcome bind(BodySnapshot body, TechniqueDefinition definition) {
+        // 没有手位事实时只允许不依赖相对手臂的槽位。
+        return bind(body, definition, Hand.HAND_UNSPECIFIED, HandSide.HAND_SIDE_UNSPECIFIED);
+    }
+
+    public static BindingOutcome bind(BodySnapshot body, TechniqueDefinition definition,
+                                      Hand selectedHand, HandSide mainHandSide) {
         // 身体与境界先检查，槽位错误随后携带结构化原因码。
+        if (definition.getSlotsList().stream().anyMatch(TechniqueSlot::hasRelativeArm)
+                && ((selectedHand != Hand.MAIN_HAND && selectedHand != Hand.OFF_HAND)
+                        || (mainHandSide != HandSide.LEFT && mainHandSide != HandSide.RIGHT))) {
+            return failure(INVALID_REQUEST);
+        }
         if (body.vitality().dead() || body.vitality().remainingSeconds() == 0) {
             return failure(BODY_UNAVAILABLE);
         }
@@ -34,7 +45,7 @@ public final class TechniqueBinder {
         if (realmNumber < definition.getMinimumRealmValue()) {
             return failure(REALM_TOO_LOW);
         }
-        return bindSlots(body, definition, Purpose.CAST);
+        return bindSlots(body, definition, selectedHand, mainHandSide, Purpose.CAST);
     }
 
     public static BindingOutcome bindBenefit(BodySnapshot body, TechniqueDefinition definition, StatusBenefit benefit) {
@@ -51,18 +62,24 @@ public final class TechniqueBinder {
             return failure(INVALID_REQUEST);
         }
         TechniqueDefinition tissues = definition.toBuilder().clearSlots().addAllSlots(slots).build();
-        return bindSlots(body, tissues, Purpose.STATUS);
+        return bindSlots(body, tissues, Hand.HAND_UNSPECIFIED, HandSide.HAND_SIDE_UNSPECIFIED, Purpose.STATUS);
     }
 
     private static BindingOutcome bindSlots(BodySnapshot body, TechniqueDefinition definition,
-                                            Purpose purpose) {
+                                            Hand selectedHand, HandSide mainHandSide, Purpose purpose) {
         // 对每个定义槽选择同一快照上的有效组织，并保留稳定字典序。
         BodyMessages.BodySnapshot message = BodyProtobuf.toMessage(body);
         var binding = TechniqueBinding.newBuilder()
                 .setBodyId(body.id().value())
                 .setRevision(body.revision());
         for (TechniqueSlot slot : definition.getSlotsList()) {
+            List<String> armIds = List.of();
+            if (slot.hasRelativeArm()) {
+                armIds = TechniqueRelativeArms.moduleIds(slot.getRelativeArm(), selectedHand, mainHandSide);
+            }
+            Set<String> selectedArmIds = Set.copyOf(armIds);
             List<Candidate> matching = candidates(body, message, slot, purpose).stream()
+                    .filter(candidate -> !slot.hasRelativeArm() || selectedArmIds.contains(candidate.id()))
                     .filter(candidate -> candidate.tags().containsAll(slot.getTagsList()))
                     .filter(candidate -> slot.getKind().isEmpty() || slot.getKind().equals(candidate.kind()))
                     .sorted(Comparator.comparing(Candidate::id))

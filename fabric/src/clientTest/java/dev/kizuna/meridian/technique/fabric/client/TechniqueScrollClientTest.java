@@ -40,7 +40,10 @@ public final class TechniqueScrollClientTest implements ClientModInitializer {
             new Scene("upper-end-2", UPPER, GUI_TWO, SCROLL_TO_END),
             new Scene("light-step-3", LIGHT, GUI_THREE, 0),
             new Scene("upper-3", UPPER, GUI_THREE, 0),
-            new Scene("upper-end-3", UPPER, GUI_THREE, SCROLL_TO_END));
+            new Scene("upper-end-3", UPPER, GUI_THREE, SCROLL_TO_END),
+            new Scene("peddler-road-2", "meridian_peddler:road_scroll", GUI_TWO, 0),
+            new Scene("peddler-ambush-2", "meridian_peddler:ambush_scroll", GUI_TWO, 0),
+            new Scene("peddler-journey-2", "meridian_peddler:journey_scroll", GUI_TWO, 0));
     private int ticks;
     private int frames;
     private int sceneIndex;

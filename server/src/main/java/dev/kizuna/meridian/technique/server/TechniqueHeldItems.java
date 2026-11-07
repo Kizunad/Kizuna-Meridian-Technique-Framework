@@ -9,8 +9,10 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCateg
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InjuryKind;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ProjectileWeaponCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ShieldInteraction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
 import java.util.Comparator;
@@ -28,6 +30,11 @@ public final class TechniqueHeldItems {
         // 持物判定没有实体、世界或可变施放缓存。
     }
 
+    enum AmmunitionRequirement {
+        NOT_REQUIRED,
+        REQUIRED
+    }
+
     static void validateRules(HeldItemRules rules) {
         // 有序类别和耐久表必须以空标签兜底，避免运行时出现未定义的物品类别。
         if (rules.getCategoriesCount() == 0 || rules.getCategoriesCount() > MAX_RULES
@@ -37,6 +44,7 @@ public final class TechniqueHeldItems {
         validateCategories(rules.getCategoriesList());
         validateDurability(rules.getDurabilityList());
         validateSelectionOrder(rules.getSelectionOrderList());
+        validateAmmunition(rules);
     }
 
     private static void validateCategories(List<HeldItemCategory> categories) {
@@ -87,6 +95,17 @@ public final class TechniqueHeldItems {
                 || category.getShieldInteraction() == ShieldInteraction.UNRECOGNIZED) {
             throw TechniqueErrors.invalid("category", "选手优先级、致伤、破盾或劈门声明非法");
         }
+        if (category.hasProjectileWeapon()
+                && (category.getProjectileWeapon() == ProjectileWeaponCategory.UNRECOGNIZED
+                        || category.getProjectileWeapon()
+                        == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
+                        || category.getItemTagsCount() == 0)) {
+            throw TechniqueErrors.invalid("category.projectile_weapon", "未知远程武器类别");
+        }
+        validateTags(category.getAmmunitionTagsList());
+        if (category.getAmmunitionTagsCount() > 0 && !category.hasProjectileWeapon()) {
+            throw TechniqueErrors.invalid("category.ammunition_tags", "弹药覆盖须声明远程武器类别");
+        }
         switch (category.getBaseDamageSource()) {
             case ITEM_ATTACK_DAMAGE -> TechniqueValues.positive(category.getBaseDamage(), Unit.RATIO,
                     TechniqueValues.MAX_PEAK, "category.base_damage");
@@ -113,6 +132,32 @@ public final class TechniqueHeldItems {
         }
         validateItem(items.getMainHand());
         validateItem(items.getOffHand());
+        validateProjectileWeapon(items.getMainHand(), items.getMainHandProjectileWeapon(),
+                "main_hand_projectile_weapon");
+        validateProjectileWeapon(items.getOffHand(), items.getOffHandProjectileWeapon(),
+                "off_hand_projectile_weapon");
+    }
+
+    private static void validateAmmunition(HeldItemRules rules) {
+        // 需要弹药或限制另一只手时必须提供可匹配的标签，避免运行时把所有物品
+        // 当成箭。
+        validateTags(rules.getAmmunitionTagsList());
+        if ((rules.getRequireAmmunition() || rules.getOtherHandEmptyOrAmmunition())
+                && rules.getAmmunitionTagsCount() == 0) {
+            throw TechniqueErrors.invalid("ammunition_tags", "弹药规则必须声明至少一个标签");
+        }
+    }
+
+    private static void validateProjectileWeapon(HeldItem item, ProjectileWeaponCategory weapon,
+                                                 String path) {
+        // 空手不携带弓弩类别，非空物品的类别由宿主按同次 inspect 明确提供。
+        if (weapon == ProjectileWeaponCategory.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid(path, "远程武器类别非法");
+        }
+        if (item.getItemId().isEmpty()
+                && weapon != ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED) {
+            throw TechniqueErrors.invalid(path, "空手不能声明远程武器类别");
+        }
     }
 
     private static void validateItem(HeldItem item) {
@@ -141,18 +186,76 @@ public final class TechniqueHeldItems {
     }
 
     public static Hand select(HeldItemRules rules, HeldItems items) {
-        // 装有物品的容器不作为候选；任一可用手仍能按书级顺序选出。
+        // 无式级覆盖时使用书级要求，近战书不要求宿主查询弹药。
+        return select(rules, items, ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED,
+                ammunitionRequirement(TechniqueDefinition.getDefaultInstance(), rules));
+    }
+
+    public static Hand select(HeldItemRules rules, HeldItems items, TechniqueDefinition definition) {
+        // 宿主预判和正式起手共用式级武器与弹药覆盖，避免 AI 误选另一类武器。
+        return select(rules, items, definition.getProjectileWeapon(), ammunitionRequirement(definition, rules));
+    }
+
+    private static AmmunitionRequirement ammunitionRequirement(TechniqueDefinition definition, HeldItemRules rules) {
+        // 单式显式设置覆盖书级要求，训练式可关闭弹药检查。
+        boolean required;
+        if (definition.hasRequireAmmunition()) {
+            required = definition.getRequireAmmunition();
+        } else {
+            required = rules.getRequireAmmunition();
+        }
+        if (required) {
+            return AmmunitionRequirement.REQUIRED;
+        }
+        return AmmunitionRequirement.NOT_REQUIRED;
+    }
+
+    static void validateDefinition(HeldItemRules rules, TechniqueDefinition definition) {
+        // 远程式不能引用书中不存在的武器类别，式级弹药覆盖也必须有可解释的标签。
+        HeldItemCategory category = rules.getCategoriesList().stream()
+                .filter(entry -> entry.getProjectileWeapon() == definition.getProjectileWeapon())
+                .findFirst().orElseThrow(() -> TechniqueErrors.invalid(
+                        definition.getId(), "书级规则没有声明本式武器类别"));
+        if (ammunitionRequirement(definition, rules) == AmmunitionRequirement.REQUIRED
+                && rules.getAmmunitionTagsCount() == 0 && category.getAmmunitionTagsCount() == 0) {
+            throw TechniqueErrors.invalid("require_ammunition", "弹药要求没有对应标签");
+        }
+    }
+
+    static Hand select(HeldItemRules rules, HeldItems items, ProjectileWeaponCategory requiredWeapon,
+                       AmmunitionRequirement ammunition) {
+        // 装有物品的容器不作为候选；远程式先选武器，再检查另一只手和弹药。
+        validateRules(rules);
         validate(items);
+        validateWeapon(requiredWeapon);
+        validateRangedInspection(items, requiredWeapon);
         HeldItem main = items.getMainHand();
         HeldItem off = items.getOffHand();
         if (main.getItemId().isEmpty() && off.getItemId().isEmpty()) {
-            throw TechniqueErrors.rejected(TechniqueFailure.HELD_ITEM_REQUIRED);
+            throw TechniqueErrors.rejected(requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_REQUIRED));
         }
-        Candidate mainCandidate = candidate(rules, main, Hand.MAIN_HAND);
-        Candidate offCandidate = candidate(rules, off, Hand.OFF_HAND);
+        Candidate mainCandidate = candidate(rules, items, main, Hand.MAIN_HAND, requiredWeapon);
+        Candidate offCandidate = candidate(rules, items, off, Hand.OFF_HAND, requiredWeapon);
         if (mainCandidate == null && offCandidate == null) {
-            throw TechniqueErrors.rejected(TechniqueFailure.HELD_ITEM_UNUSABLE);
+            throw TechniqueErrors.rejected(requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_UNUSABLE));
         }
+        Hand selected;
+        if (requiredWeapon != ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
+                && mainCandidate != null) {
+            selected = Hand.MAIN_HAND;
+        } else {
+            selected = selectCandidate(rules, mainCandidate, offCandidate);
+        }
+        validateOtherHand(rules, items, selected);
+        if (ammunition == AmmunitionRequirement.REQUIRED) {
+            validateAmmunitionAvailable(items);
+        }
+        return selected;
+    }
+
+    private static Hand selectCandidate(HeldItemRules rules, Candidate mainCandidate,
+                                        Candidate offCandidate) {
+        // 只有候选存在时才按书级顺序比较，避免远程失败被主手偏好掩盖。
         if (mainCandidate == null) {
             return Hand.OFF_HAND;
         }
@@ -168,21 +271,39 @@ public final class TechniqueHeldItems {
 
     public static Optional<Hand> find(HeldItemRules rules, HeldItems items) {
         // 宿主 AI 预判用：与 select 同一规则，没有可用手时为空而不抛出拒绝。
+        return find(rules, items, ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED,
+                ammunitionRequirement(TechniqueDefinition.getDefaultInstance(), rules));
+    }
+
+    public static Optional<Hand> find(HeldItemRules rules, HeldItems items, TechniqueDefinition definition) {
+        // AI 使用同一式级条件，拒绝不会产生费用或世界副作用。
+        return find(rules, items, definition.getProjectileWeapon(), ammunitionRequirement(definition, rules));
+    }
+
+    static Optional<Hand> find(HeldItemRules rules, HeldItems items,
+                               ProjectileWeaponCategory requiredWeapon,
+                               AmmunitionRequirement ammunition) {
+        // AI 预判复用完整远程持物规则，没有可用手时为空而不抛出拒绝。
         try {
-            return Optional.of(select(rules, items));
+            return Optional.of(select(rules, items, requiredWeapon, ammunition));
         } catch (TechniqueErrors.Rejected rejected) {
             return Optional.empty();
         }
     }
 
-    private static Candidate candidate(HeldItemRules rules, HeldItem item, Hand hand) {
+    private static Candidate candidate(HeldItemRules rules, HeldItems items, HeldItem item, Hand hand,
+                                      ProjectileWeaponCategory requiredWeapon) {
         // 类别和耐久表各取首次命中，无耐久物品用无穷排序值表示一次性消耗。
         if (item.getItemId().isEmpty() || item.getContainsItems()) {
             return null;
         }
-        HeldItemCategory category = rules.getCategoriesList().stream()
+        Optional<HeldItemCategory> categoryResult = rules.getCategoriesList().stream()
                 .filter(entry -> matches(entry.getItemTagsList(), item))
-                .findFirst().orElseThrow();
+                .findFirst();
+        if (categoryResult.isEmpty() || !matchesWeapon(categoryResult.orElseThrow(), items, hand, requiredWeapon)) {
+            return null;
+        }
+        HeldItemCategory category = categoryResult.get();
         double durability = Double.POSITIVE_INFINITY;
         if (item.getDamageable()) {
             durability = rules.getDurabilityList().stream()
@@ -190,6 +311,90 @@ public final class TechniqueHeldItems {
                     .findFirst().orElseThrow().getMultiplier().getValue();
         }
         return new Candidate(hand, category.getSelectionPriority(), durability);
+    }
+
+    private static boolean matchesWeapon(HeldItemCategory category, HeldItems items, Hand hand,
+                                         ProjectileWeaponCategory requiredWeapon) {
+        // 目录标签与宿主武器类别必须同时命中，兜底物品不能冒充射击武器。
+        if (requiredWeapon == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED) {
+            return true;
+        }
+        ProjectileWeaponCategory inspected = inspectedWeapon(items, hand);
+        return inspected == requiredWeapon && category.getProjectileWeapon() == requiredWeapon;
+    }
+
+    private static ProjectileWeaponCategory inspectedWeapon(HeldItems items, Hand hand) {
+        // 使用起手候选所在手的显式观察，不从物品 ID 猜测武器类型。
+        if (hand == Hand.MAIN_HAND && items.hasMainHandProjectileWeapon()) {
+            return items.getMainHandProjectileWeapon();
+        }
+        if (hand == Hand.OFF_HAND && items.hasOffHandProjectileWeapon()) {
+            return items.getOffHandProjectileWeapon();
+        }
+        return ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED;
+    }
+
+    private static void validateOtherHand(HeldItemRules rules, HeldItems items, Hand selected) {
+        // 开启限制时，弓弩的另一只手只能空着或拿对应类别的弹药。
+        if (!rules.getOtherHandEmptyOrAmmunition()) {
+            return;
+        }
+        HeldItem other;
+        HeldItem weapon;
+        if (selected == Hand.MAIN_HAND) {
+            other = items.getOffHand();
+            weapon = items.getMainHand();
+        } else {
+            other = items.getMainHand();
+            weapon = items.getOffHand();
+        }
+        HeldItemCategory category = rules.getCategoriesList().stream()
+                .filter(entry -> matches(entry.getItemTagsList(), weapon))
+                .findFirst().orElseThrow();
+        List<String> ammunitionTags = rules.getAmmunitionTagsList();
+        if (category.getAmmunitionTagsCount() > 0) {
+            ammunitionTags = category.getAmmunitionTagsList();
+        }
+        if (!other.getItemId().isEmpty()
+                && (other.getContainsItems() || !matches(ammunitionTags, other))) {
+            throw TechniqueErrors.rejected(TechniqueFailure.OTHER_HAND_AMMUNITION_REQUIRED);
+        }
+    }
+
+    private static void validateAmmunitionAvailable(HeldItems items) {
+        // 背包事实只有宿主知道，缺少显式回执不能按有弹药继续施放。
+        if (!items.hasCanFindAmmunition()) {
+            throw TechniqueErrors.invalid("can_find_ammunition", "缺少宿主弹药观察");
+        }
+        if (!items.getCanFindAmmunition()) {
+            throw TechniqueErrors.rejected(TechniqueFailure.AMMUNITION_REQUIRED);
+        }
+    }
+
+    private static void validateRangedInspection(HeldItems items, ProjectileWeaponCategory weapon) {
+        // 远程式必须接入双手武器观察；漏报是宿主契约错误，不伪装成玩家没拿弓。
+        if (weapon != ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
+                && (!items.hasMainHandProjectileWeapon() || !items.hasOffHandProjectileWeapon())) {
+            throw TechniqueErrors.invalid("held_items", "远程施放缺少双手武器类别观察");
+        }
+    }
+
+    private static void validateWeapon(ProjectileWeaponCategory weapon) {
+        // 未指定表示旧式持物招式；远程式只接受弓或弩。
+        if (weapon == ProjectileWeaponCategory.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("projectile_weapon", "未知远程武器类别");
+        }
+    }
+
+    private static TechniqueFailure requiredFailure(ProjectileWeaponCategory weapon,
+                                                     TechniqueFailure fallback) {
+        // 武器类别失败需要给动作栏一个可理解的方向，旧式持物仍沿用原失败码。
+        return switch (weapon) {
+            case BOW -> TechniqueFailure.BOW_REQUIRED;
+            case CROSSBOW -> TechniqueFailure.CROSSBOW_REQUIRED;
+            case PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED -> fallback;
+            case UNRECOGNIZED -> TechniqueFailure.INVALID_STATE;
+        };
     }
 
     private static boolean matches(List<String> tags, HeldItem item) {

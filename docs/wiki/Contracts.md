@@ -199,7 +199,8 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 `FOLLOW_UP_UNAVAILABLE`。`only_follow_up=true` 单独起手返回 `FOLLOW_UP_REQUIRED`，附玩家口吻原因。
 没有合法窗口且另有当前施放时仍返回 `ALREADY_CASTING`。学会、资源、身体、冷却和旧曲线限制始终检查。
 承接提前结束前式收势，保留其原定冷却与曲线；后式起手、生效、收势边界均按起播偏移前移。
-原效果时刻小于起播偏移的预备效果不发，包含组织修正；其余效果减去偏移，剩余修正仍在起手完整原子提交。
+原效果时刻小于起播偏移的预备效果不发，包含组织修正；其余效果减去偏移。
+修正默认在起手完整原子提交；显式 `AT_EFFECT_TIME` 的修正按投影后的效果时刻登记。
 跨过起播点的持续表现是例外：在新起手发 START，剪辑起播为原起播值加已跳过时长；一次性预备表现不补发。
 
 `QiCost.matching` 缺省为 `EXACT_VARIANT`，保留旧目录的精确属性、精确相态支付规则。
@@ -226,11 +227,20 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 刷新以同笔活动撤销旧组并登记新组；Framework 拒绝时保留旧组，不发布无能力的成功状态。
 `StatusBenefit.leap=4` 保持原字段号，`tissue=5` 与其恰有一种。
 `TissueBenefitProfile.modifiers` 复用 `TissueModifier` 的组织槽、四项倍率与首尾归零曲线，
-每条曲线末点必须等于状态默认时长；重复槽、空描述或混合能力均拒绝。
+每条曲线末点必须等于状态默认时长；重复槽、相对手臂槽、空描述或混合能力均拒绝。
+组织状态不采用 `TissueModifier.activation` 的施放登记语义，该字段必须为缺省值；
 实际登记只发生于原版效果被接受时，起手中断不会留下待生效的状态曲线。
 Framework 接受常值曲线的能力不等于本目录必须接受任意修正数据。
-不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework。施放起手把每个绑定组织的
-`CapabilityModifier` 与费用、做功、动作和进度放进同一份 `BodyActivity`；修正来源为
+不同功法的曲线可指向同一组织，实际乘积和总上限归 Framework。
+`TissueModifier.activation` 缺省为 `AT_CAST_START`，施放起手把每个绑定组织的
+`CapabilityModifier` 与费用、做功、动作和进度放进同一份 `BodyActivity`。
+显式选择 `AT_EFFECT_TIME` 时，晚于起播点的曲线只保存在 `ActiveCast.pending_modifiers`，
+到效果时刻才与清除待办、更新 `curve_ends` 原子提交；同刻做功及世界效果在登记之后执行。
+起播点上的曲线仍随起手提交，起播点之前的曲线不补发。
+登记前终止施放会丢弃待办，已经登记的曲线完整运行；不生成任何提前移除操作。
+迟到登记保留原绝对拐点和结束时刻：只登记当前插值与剩余曲线，不回写过去的身体时钟；
+已经到期的曲线只清除待办。未登记曲线可用于只读能力预测，不能当作实际能力。
+所有修正来源为
 `meridian_technique:caster`，并使用 `meridian_technique:cast/<cast_id 的 ASCII 小写十六进制>/<序号>`
 形式的有效内容 ID。每个原始字节固定编码为两位，稳定保留大小写差异；例如 `A` 为 `41`、`a` 为 `61`。
 新动作实例 ID 为 `technique.<相同编码>`，可随进度保存并在收势时准确结束。
@@ -255,7 +265,8 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 `expected_revision` 只用于 `activity`，由宿主按 Framework 当前 revision 做原子校验；查询和效果操作必须为 0。
 oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(EffectIntent)`。
 `inspect=false`、缺操作、错误 UUID、非法嵌套活动或效果均拒绝。
-`EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13`、`break_blocks=14` 或 `leg_strike=20`，交给宿主执行；不包含身体修正。
+`EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13`、`break_blocks=14`、`launch_projectile=17`、
+`target_lock=18` 或 `leg_strike=20`，交给宿主执行；不包含身体修正。
 每条意图带起手固定的 `selected_hand`，无持物规则为未指定；`effect_id` 在施放内独立且稳定。
 打击和劈门意图必须有选定手和书级规则。`scheduled_millis` 为非负的权威身体时刻，迟到 tick 不修改原生效时刻。
 表现 STOP 与移动 UNLOCK 始终保留原定收势边界作为 `scheduled_millis`，使提前终止、承接和恢复重试的载荷一致；
@@ -317,3 +328,93 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
   只有起手期且 `ActiveCast.interruptible_by_damage` 为真时可打断。
 - `TechniqueForecasts.firstStrike(definition)` 给出普通起手后的第一次打击；承接只会更早，按普通起手估是保守值。
 - `TechniqueHeldItems.find(rules, items)` 与 `select` 同一规则选手；没有可用手时为空，不抛拒绝。
+
+## 阶段 7：射击与相对手臂
+
+射击只声明意图，纯 Java 库不依赖物品、实体、弹道或具体身体模板。
+`ProjectileWeaponCategory` 为 `BOW/CROSSBOW`。`TechniqueDefinition.projectile_weapon=16`
+声明每式所需武器，所有 `TechniqueEffect.launch_projectile=9` 必须与之相同。
+远程式必须归属于含对应 `HeldItemCategory.projectile_weapon=9` 的持物书；类别不能是末项空标签兜底。
+
+书级 `HeldItemRules.ammunition_tags=4`、`require_ammunition=5`、
+`other_hand_empty_or_ammunition=6` 分别规定弹药标签、起手弹药要求与另一手限制。
+类别级 `HeldItemCategory.ammunition_tags=10` 非空时覆盖书级标签，支持弓只接受箭、弩另接受烟花。
+`TechniqueDefinition.require_ammunition=17` 显式提供时覆盖书级要求；false 只免弹药检查，不免武器或另一手条件。
+同类武器双手都有时优先主手；若书要求另一手为空或弹药，两手同时拿武器仍拒绝。
+
+同次 inspect 的 `HeldItems` 提供可选字段 `main_hand_projectile_weapon=4`、
+`off_hand_projectile_weapon=5`、`can_find_ammunition=6`。
+远程施放必须显式提供双手类别，非弓弩填 UNSPECIFIED；要求弹药时必须提供弹药事实。
+目录标签和宿主类别须同时命中；漏报是契约错误，不按标签兜底。
+弹药事实由宿主计入原版查找顺序、创造、无限与生物规则，库不自行搜索背包。
+四个业务失败为 `BOW_REQUIRED=23`、`CROSSBOW_REQUIRED=24`、
+`OTHER_HAND_AMMUNITION_REQUIRED=25`、`AMMUNITION_REQUIRED=26`，文本分别为
+「这一式需要弓」「这一式需要弩」「另一只手要空着或拿着箭」「没有箭」。
+阶段 8 的 `NOT_GROUNDED=22`、`inspect_facts=20` 保持不变。
+
+| 射击字段 | 单位、范围与约束 |
+|---|---|
+| `projectile_weapon` | 弓或弩，必须等于式级声明 |
+| `speed_multiplier/damage_multiplier` | 显式 Quantity，RATIO，(0, 10] |
+| `critical/piercing/spread` | 暴击与穿透显式；穿透整数 [0, 127]；散布 DEGREE，[0, 180] |
+| `look` | oneof 方向，必须为 true；取撒放时视线 |
+| `look_offset` | DEGREE，[-180, 180]，正值向右；`mirror_by_hand=true` 时副手偏航取反 |
+| `lob` | `LobProjectile`：落点最大距离 METER (0, 1024]、半径 METER [0, 最大距离]、仰角 DEGREE (0, 90]、最大速度倍率 RATIO (0, 10] |
+| `converge` | 引用后续平射的原剪辑时刻、初速倍率、显式到达延迟、普通抛射 fallback 和最小仰角 |
+| `target_snap_angle` | 可省略；DEGREE [0, 180]，目标方向两侧的半角；横风每个 18° 扇区填 9° |
+| `multiply_draw_strength/draw_strength_arm` | 开关显式；true 时选 OTHER_ARM 或 WEAPON_ARM，false 时不得指定手臂 |
+| `shield_cooldown_millis` | 显式，[0, 86400000]，被盾挡住后的冷却 |
+| `mirror_by_hand` | 显式；仅 look_offset 可为 true |
+
+`ConvergeProjectile.reference_shot_millis=1` 指向同式中更晚的一发 `look` 平射；
+`reference_speed_multiplier=2` 必须与该平射一致，武器类别、拉弦开关和手臂也须匹配。
+`arrival_delay_millis=3` 为 [0, 86400000]；`fallback=4` 为普通抛射参数且规定速度上限，
+`minimum_elevation=5` 为 DEGREE (0, 90]。参考时刻不是到达时刻；飞行时间由宿主计算。
+汇聚式须启用 `lock_target=18` 并提供 `target_lock_distance=19`（METER，(0, 1024]）。
+关闭锁定时不得留下距离字段。
+
+`LaunchProjectileIntent` 携带原射击声明、起手书级规则、`cast_started_millis=3` 和
+`clip_start_millis=4`。参考平射身体时刻为
+`cast_started_millis + reference_shot_millis - clip_start_millis`；
+汇聚本发必须早于该时刻。`EffectIntent.scheduled_millis` 始终保留本发原定身体时刻。
+起手先发一次稳定身份 `target_lock`，其 `TargetLockIntent.maximum_distance` 来自快照；
+后续效果的 `lock_target=7` 供宿主复用锁定目标。即使没有限速，也在成功起手时立即提交锁定。
+
+`TechniqueSlot.relative_arm=9` 使用 `RelativeArmSlot(arm, left_module_ids, right_module_ids)`，
+适用于远程式组织槽；左右集合不得重叠、重复或超过 16 项，分别满足槽位最少数量，
+每个 ID 须在引用模板中匹配槽位标签和类型。内容明确列出身体的组织身份，库不解析 ID 前缀。
+`TechniqueHeldItems.find/select(rules, items, definition)` 是公开的同规则预判与选手入口。
+先选手，再调用 `TechniqueBinder.bind(body, definition, selectedHand, mainHandSide)`，
+绑定结果供费用、动作占用和组织曲线共同使用；两参数 bind 在缺少相对手位时返回 INVALID_REQUEST。
+OTHER_ARM 取持武器的另一条解剖臂，左右主手和主副手组合都参与换算。
+
+跨弓弩承接须成对声明 `FollowUp.previous_projectile_weapon=5` 和 `next_projectile_weapon=6`，
+且匹配精确前后式类别。仍逐条引用前式，沿用原窗口和原子替换；新起手重新检查当前武器与弹药。
+同类承接可省略类别字段。库不负责交换物品栏。
+
+`CombatAiHints` 新增距离档（字段 12）、不可见/移动/被逼近/有弹药/有备用武器权重（字段 13–17），
+权重均为 RATIO [0, 100]；阶段 8 的字段 8–11 保留。
+`TechniqueSelector.CombatContext` 可携带 `Optional<TargetContext>`，包含距离档、Visibility、
+目标速度 m/s [0, 100]、Approach、Ammunition 与不可变备用武器类别集合。
+缺少远程观察时远程式不入候选；各项观察只乘一次权重，不重复放入离散 CombatFact。
+`Situation.effectiveLegForceNewtons` 不变。
+
+持物打击可声明 `WeaponStrike.main_hand_damage_type_id=18` 与 `off_hand_damage_type_id=19`。
+必须成对且均为完整命名空间 ID；该单手模式不能启用 can_two_hand。
+世界执行器直接读取对应 ID，其他既有持物声明的执行规则不变。
+
+`cost.work` 保持起手一次支付。分段费用使用 `TechniqueEffect.work=10`，其 `at_millis` 是该段开始事件，
+`WorkCost`、Framework `ActivityEffort` 和 `TissueCapabilities.Exertion` 均不增加未来起始偏移。
+开始时刻及做功持续区间不得超出收势结束。起手用当前身体连续预检全部未跳过段，包含整条已登记曲线；
+预检不模拟未来恢复、不支付未来段，也不保证中途受伤后仍然付得起。
+
+到每段开始，重新读取身体，校验整段力量、功率、耐力和训练资格；同刻多段与已付序号用同一笔
+Framework 活动提交，成功后才交付同刻世界效果。单笔组织/器官费用仍最多 32 项，不同时刻分别检查。
+`ActiveCast.paid_work_sequences=20` 保存原始 `effects` 下标，严格递增；活动身份为
+`technique_work_<cast_id>_<首个原始下标>`。即使提交回执丢失，身体中的已付序号也阻止重复费用。
+原起手真元不变，取消不退已付费用，未开始段直接丢弃；到时付不起会停止施放并清理世界约束。
+
+承接跳过起播点之前的费用，恰好在起播点开始的段随起手支付；后续段减去剪辑偏移。
+迟到 tick 按原事件边界依次付费、交付效果；每次费用以宿主当前身体时刻为准，不回溯身体时钟。
+效果重试不能越过未确认的边界；回调取消须先处理，再决定是否继续下一段。
+恢复入口取消残留施放，不补执行离线期间的费用或射击。

@@ -48,9 +48,24 @@ final class TechniqueCombatEffects {
         validateBudget(strike, twoHand);
         validateShape(strike, angle);
         validateShield(strike);
+        validateDamageTypes(strike);
         if (strike.hasInjuryOverride() && strike.getInjuryOverride() != InjuryKind.CUTTING
                 && strike.getInjuryOverride() != InjuryKind.BLUNT) {
             throw TechniqueErrors.invalid("injury_override", "未知致伤覆盖");
+        }
+    }
+
+    private static void validateDamageTypes(WeaponStrike strike) {
+        // 完整伤害身份必须成对，单手目录不借用双手伤害标签。
+        String main = strike.getMainHandDamageTypeId();
+        String off = strike.getOffHandDamageTypeId();
+        if (main.isEmpty() && off.isEmpty()) {
+            return;
+        }
+        id(main, "weapon_strike.main_hand_damage_type_id");
+        id(off, "weapon_strike.off_hand_damage_type_id");
+        if (strike.getCanTwoHand()) {
+            throw TechniqueErrors.invalid("weapon_strike.can_two_hand", "显式主副手伤害身份不能启用双手握持");
         }
     }
 

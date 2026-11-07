@@ -42,12 +42,25 @@ public final class TechniqueScheduler {
 
     public static List<BodyMessages.CapabilityModifier> modifiers(TechniqueDefinition definition,
                                                                     ActiveCast active) {
-        // 每个组织都获得独立 ID，曲线从起手时钟加上效果偏移开始运行。
-        Map<String, BoundSlot> slots = new HashMap<>();
-        for (BoundSlot slot : active.getBinding().getSlotsList()) {
-            slots.put(slot.getSlotId(), slot);
+        // 预检使用全部计划曲线，但不会因此把待登记曲线写进权威身体。
+        return modifierPlan(definition, active).all();
+    }
+
+    record ModifierPlan(List<BodyMessages.CapabilityModifier> starting,
+                        List<BodyMessages.CapabilityModifier> pending) {
+        List<BodyMessages.CapabilityModifier> all() {
+            // 预检候选同时包含起手登记与到时登记的曲线。
+            var modifiers = new ArrayList<>(starting);
+            modifiers.addAll(pending);
+            return List.copyOf(modifiers);
         }
-        var modifiers = new ArrayList<BodyMessages.CapabilityModifier>();
+    }
+
+    static ModifierPlan modifierPlan(TechniqueDefinition definition, ActiveCast active) {
+        // 每个组织都获得独立 ID，曲线从起手时钟加上效果偏移开始运行。
+        Map<String, BoundSlot> slots = boundSlots(active);
+        var starting = new ArrayList<BodyMessages.CapabilityModifier>();
+        var pending = new ArrayList<BodyMessages.CapabilityModifier>();
         String encodedCastId = TechniqueValues.encodeCastId(active.getRequest().getCastId());
         int sequence = 0;
         for (TechniqueEffect original : definition.getEffectsList()) {
@@ -61,14 +74,30 @@ public final class TechniqueScheduler {
             if (bound == null || bound.getModule() != ModuleKind.TISSUE) {
                 throw new IllegalArgumentException("修正效果引用了无效组织槽位");
             }
-            long startMillis = addTime(active.getStartedMillis(), effect.getAtMillis());
+            long effectOffsetMillis = effect.getAtMillis();
+            long startMillis = addTime(active.getStartedMillis(), effectOffsetMillis);
+            List<BodyMessages.CapabilityModifier> destination;
+            if (tissueModifier.getActivation() == ModifierActivation.AT_EFFECT_TIME && effectOffsetMillis > 0) {
+                destination = pending;
+            } else {
+                destination = starting;
+            }
             for (String tissueId : bound.getModuleIdsList()) {
                 String modifierId = MODIFIER_NAMESPACE + ":cast/" + encodedCastId + "/" + sequence;
-                modifiers.add(modifier(tissueModifier, modifierId, tissueId, startMillis));
+                destination.add(modifier(tissueModifier, modifierId, tissueId, startMillis));
                 sequence++;
             }
         }
-        return List.copyOf(modifiers);
+        return new ModifierPlan(List.copyOf(starting), List.copyOf(pending));
+    }
+
+    private static Map<String, BoundSlot> boundSlots(ActiveCast active) {
+        // 按槽位身份定位本次绑定，不在逐条效果处理中重复扫描。
+        var slots = new HashMap<String, BoundSlot>();
+        for (BoundSlot slot : active.getBinding().getSlotsList()) {
+            slots.put(slot.getSlotId(), slot);
+        }
+        return slots;
     }
 
     public static Due due(TechniqueDefinition definition, ActiveCast active,
@@ -85,6 +114,9 @@ public final class TechniqueScheduler {
         var effects = new ArrayList<EffectIntent>();
         if (previousMillis < startedMillis && currentMillis >= startedMillis) {
             effects.addAll(active.getPredecessorCleanupList());
+            if (active.hasLockTarget() && active.getLockTarget()) {
+                effects.add(targetLock(active));
+            }
         }
         if (movementMultiplier < 1 && previousMillis < startedMillis && currentMillis >= startedMillis) {
             effects.add(movement(active, MovementAction.LOCK));
@@ -113,8 +145,9 @@ public final class TechniqueScheduler {
                 continue;
             }
             TechniqueEffect effect = projected.get();
-            // 组织修正走身体活动；目标锚点的声音已并入同刻打击；两者都不单独成为世界意图。
+            // 修正和做功走身体活动；目标锚点的声音并入同刻打击，不单独成为世界意图。
             if (effect.getOperationCase() == TechniqueEffect.OperationCase.TISSUE_MODIFIER
+                    || effect.hasWork()
                     || TechniqueSoundCues.targetAnchored(effect)) {
                 continue;
             }
@@ -216,6 +249,9 @@ public final class TechniqueScheduler {
                 .setScheduledMillis(addTime(active.getStartedMillis(), effect.getAtMillis()))
                 .setSelectedHand(active.getSelectedHand())
                 .setDirection(active.getRequest().getDirection());
+        if (active.hasLockTarget()) {
+            intent.setLockTarget(active.getLockTarget());
+        }
         switch (effect.getOperationCase()) {
             case IMPULSE -> intent.setImpulse(resolvedImpulse(active, effect.getImpulse()));
             case STATUS_BENEFIT -> intent.setStatusBenefit(effect.getStatusBenefit());
@@ -228,6 +264,8 @@ public final class TechniqueScheduler {
                 intent.setLegStrike(legStrike(active, effect.getLegStrike(), hitSounds));
             }
             case BREAK_BLOCKS -> intent.setBreakBlocks(breakBlocks(active, effect.getBreakBlocks()));
+            case LAUNCH_PROJECTILE -> intent.setLaunchProjectile(
+                    launchProjectile(active, effect.getLaunchProjectile()));
             case SOUND -> intent.setSound(effect.getSound());
             case PRESENTATION -> {
                 PresentationIntent presentation = PresentationIntent.newBuilder()
@@ -267,6 +305,34 @@ public final class TechniqueScheduler {
         return BreakBlocksIntent.newBuilder()
                 .setBlocks(blocks)
                 .setHeldItemRules(active.getHeldItemRules())
+                .build();
+    }
+
+    private static LaunchProjectileIntent launchProjectile(ActiveCast active,
+                                                            LaunchProjectile projectile) {
+        // 射击效果携带起手时冻结的书级持物规则，宿主按选定手执行弹药和方向事实。
+        return LaunchProjectileIntent.newBuilder()
+                .setProjectile(projectile)
+                .setHeldItemRules(active.getHeldItemRules())
+                .setCastStartedMillis(active.getStartedMillis())
+                .setClipStartMillis(active.getClipStartMillis())
+                .build();
+    }
+
+    private static EffectIntent targetLock(ActiveCast active) {
+        // 目标锁定在起手边界发送一次，宿主按施放者和目标事实保存锁定结果。
+        TargetLockIntent targetLock = TargetLockIntent.newBuilder()
+                .setMaximumDistance(active.getTargetLockDistance())
+                .build();
+        return EffectIntent.newBuilder()
+                .setCastId(active.getRequest().getCastId())
+                .setTargetId(active.getRequest().getTargetId())
+                .setEffectId("target_lock")
+                .setScheduledMillis(active.getStartedMillis())
+                .setSelectedHand(active.getSelectedHand())
+                .setDirection(active.getRequest().getDirection())
+                .setLockTarget(true /* lockTarget */)
+                .setTargetLock(targetLock)
                 .build();
     }
 

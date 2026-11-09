@@ -34,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.BiPredicate;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -58,6 +59,7 @@ public final class TechniqueService {
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
     private TechniqueEffectHandler effectHandler;
     private final List<BiPredicate<UUID, CastRequest>> castGuards = new ArrayList<>();
+    private final List<BiFunction<UUID, CastRequest, Optional<String>>> castChecks = new ArrayList<>();
 
     public TechniqueService(TechniqueRegistry registry, TechniqueHostDirectory hosts) {
         // 服务只持有不可变目录和宿主发现器，身体状态始终从宿主读取。
@@ -102,6 +104,14 @@ public final class TechniqueService {
                 return pendingFailure(request);
             }
         }
+        if (previous == null || !previous.castId.equals(request.getCastId())) {
+            for (var check : castChecks) {
+                Optional<String> rejection = check.apply(entityUuid, request);
+                if (rejection.isPresent()) {
+                    return effectRejected(request.getCastId(), rejection.orElseThrow());
+                }
+            }
+        }
         CastOutcome outcome = casting.cast(host, request, staggeredUntil(entityUuid));
         if (success(outcome)) {
             Session registered = register(entityUuid, host);
@@ -121,6 +131,11 @@ public final class TechniqueService {
     public void addCastGuard(BiPredicate<UUID, CastRequest> guard) {
         // 可信宿主在服务启动时登记准入规则，所有起式入口共用且不影响已付款施放的推进。
         castGuards.add(Objects.requireNonNull(guard));
+    }
+
+    public void addCastCheck(BiFunction<UUID, CastRequest, Optional<String>> check) {
+        // 内容宿主在扣费前检查瞬时世界条件，拒绝原因原样返回；已起手的同身份重试不重验。
+        castChecks.add(Objects.requireNonNull(check));
     }
 
     public boolean exertLeap(UUID entityUuid, TechniqueDefinition definition, LeapProfile leap, String requestId) {

@@ -214,6 +214,10 @@ public final class TechniqueHeldItems {
 
     static void validateDefinition(HeldItemRules rules, TechniqueDefinition definition) {
         // 远程式不能引用书中不存在的武器类别，式级弹药覆盖也必须有可解释的标签。
+        if (definition.getProjectileWeapon() == ProjectileWeaponCategory.HELD_SPLASH_BREW
+                && definition.hasBrewItem()) {
+            return;
+        }
         HeldItemCategory category = rules.getCategoriesList().stream()
                 .filter(entry -> entry.getProjectileWeapon() == definition.getProjectileWeapon())
                 .findFirst().orElseThrow(() -> TechniqueErrors.invalid(
@@ -394,6 +398,7 @@ public final class TechniqueHeldItems {
         return switch (weapon) {
             case BOW -> TechniqueFailure.BOW_REQUIRED;
             case CROSSBOW -> TechniqueFailure.CROSSBOW_REQUIRED;
+            case HELD_SPLASH_BREW -> TechniqueFailure.SPLASH_BREW_REQUIRED;
             case PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED -> fallback;
             case UNRECOGNIZED -> TechniqueFailure.INVALID_STATE;
         };

@@ -52,6 +52,11 @@ public final class TechniqueErrors {
             case OTHER_HAND_AMMUNITION_REQUIRED -> "另一只手要空着或拿着箭";
             case AMMUNITION_REQUIRED -> "没有箭";
             case EFFECT_REJECTED -> "功法效果未能落地";
+            case DRINK_BREW_REQUIRED -> "要拿一瓶饮用的巫药";
+            case SPLASH_BREW_REQUIRED -> "要喷溅型的巫药";
+            case BREW_REQUIRED -> "要拿一瓶巫药";
+            case ANOINT_OFF_HAND_REQUIRED -> "敷药要空出副手";
+            case BREW_KIND_REQUIRED -> "这种巫药不能用于这一式";
             default -> "暂时无法运功";
         };
     }

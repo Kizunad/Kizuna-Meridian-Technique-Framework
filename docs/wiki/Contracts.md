@@ -5,6 +5,13 @@
 - `BlockWork` 声明处理器 ID、非空且不重复的目标方块标签、正数米制距离、推进间隔与持续时间。
   间隔必须为正且不超过持续时间，最后一次事件不得超出施放时长。效果身份由原目录序号和周期序号组成。
 - `UseBrew` 声明处理器 ID、非空且不重复的药种 ID 和用法枚举。实际物品消费由认领该处理器的附属执行。
+- `TechniqueDefinition.brew_item=22` 声明允许的主手药种、饮用/喷溅物理形态和空副手要求，扣费前检查。
+  药瓶规则不能替代武器打击或弓弩持物规则；拒绝返回饮用、喷溅、药种或空副手对应原因。
+- `UseBrew.technique` 声明 DRINK/ANOINT/THROW/FAN/MIST 的强度、持续、品质升级、封顶、反胃、残药参数；
+  FAN 另须米制范围、角度及目标上限，MIST 须范围。所有倍率有限且有界。
+  `preparation_sound` 仅供 ANOINT 的 ARMS/LEGS 分组动作，由用药处理器按实际身体分组播放。
+- `ProjectileWeaponCategory.HELD_SPLASH_BREW` 通过 `LaunchProjectile.brew` 交给附属落地处理器，
+  必须声明 THROW、lob、零散布和零落点随机半径。持物事实与事件同次 inspect，框架不执行药瓶消费。
 - `HeldItem.brew_kind_id`、`brew_quality`（0–3）、`brew_use` 必须同时提供或同时缺省；空手不能携带巫药事实。
 - `allow_off_hand_use_while_casting` 开启时必须声明 `off_hand_use_block_tags`；关闭时不能携带标签，标签不得重复。
   两项冻结进 `ActiveCast` 并随移动 LOCK 下发；UNLOCK 清除放行规则。

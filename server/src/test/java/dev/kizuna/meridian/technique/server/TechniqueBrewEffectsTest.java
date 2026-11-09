@@ -26,6 +26,46 @@ public class TechniqueBrewEffectsTest {
     private static final double TOLERANCE = 1e-9;
 
     @Test
+    public void brewRequirementCannotBypassWeaponRules() {
+        // 单式药瓶门禁不能替代弓弩或近战规则，重复形态也不能通过校验。
+        var requirement = BrewItemRequirement.newBuilder()
+                .addKindIds("sample:medicine")
+                .addPhysicalUses(BrewUseMethod.SPLASH)
+                .build();
+        var definition = TechniqueDefinition.newBuilder()
+                .setBrewItem(requirement)
+                .setProjectileWeapon(ProjectileWeaponCategory.BOW)
+                .build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueBrewEffects.validateDefinition(definition));
+        var duplicated = requirement.toBuilder().addPhysicalUses(BrewUseMethod.SPLASH).build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueBrewEffects.validateRequirement(duplicated));
+    }
+
+    @Test
+    public void techniqueBrewParametersRejectUnsupportedMethodAndNonFiniteStrength() {
+        // 通用 use_brew 允许旧物品用法，功法参数只允许已经实现的五种加成方式。
+        var parameters = BrewTechniqueParameters.newBuilder()
+                .setMethod(BrewUseMethod.DRINK)
+                .setStrengthMultiplier(1)
+                .setDurationMultiplier(1)
+                .setMaximumQualityMultiplier(1)
+                .build();
+        var brew = UseBrew.newBuilder()
+                .setProcessorId("sample:brew")
+                .addBrewKindIds("sample:medicine")
+                .addUseMethods(BrewUseMethod.DRINK)
+                .setTechnique(parameters)
+                .build();
+        TechniqueBrewEffects.validateUseBrew(brew);
+        var unsupported = parameters.toBuilder().setMethod(BrewUseMethod.SPLASH).build();
+        var nonFinite = parameters.toBuilder().setStrengthMultiplier(Double.NaN).build();
+        for (var invalid : List.of(unsupported, nonFinite)) {
+            var declaration = brew.toBuilder().setTechnique(invalid).build();
+            assertThrows(IllegalArgumentException.class, () -> TechniqueBrewEffects.validateUseBrew(declaration));
+        }
+    }
+
+    @Test
     public void scaleRoundsUpPreservesZeroAndRejectsInvalidOrOverflow() {
         // 非整除的速度也不能提前发事件，非法时间或倍率不能进入调度器。
         assertEquals(ROUNDED_INTERVAL, TechniqueTempo.scale(INTERVAL, SLOWEST));

@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ProjectileWea
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BrewUseMethod;
 
 import static dev.kizuna.meridian.technique.server.TechniqueValues.MAX_DISTANCE;
 import static dev.kizuna.meridian.technique.server.TechniqueValues.MAX_MILLIS;
@@ -55,6 +56,17 @@ final class TechniqueProjectiles {
         if (weapon == ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
                 || weapon == ProjectileWeaponCategory.UNRECOGNIZED) {
             throw TechniqueErrors.invalid("launch_projectile.projectile_weapon", "武器类别必须是弓或弩");
+        }
+        if (weapon == ProjectileWeaponCategory.HELD_SPLASH_BREW) {
+            if (!projectile.hasBrew() || !projectile.getBrew().hasTechnique()
+                    || projectile.getBrew().getTechnique().getMethod() != BrewUseMethod.THROW
+                    || !projectile.hasLob() || projectile.getSpread().getValue() != 0
+                    || projectile.getLob().getRadius().getValue() != 0) {
+                throw TechniqueErrors.invalid("launch_projectile.brew", "巫药须声明无散布抛射与落地处理器");
+            }
+            TechniqueBrewEffects.validateUseBrew(projectile.getBrew());
+        } else if (projectile.hasBrew()) {
+            throw TechniqueErrors.invalid("launch_projectile.brew", "只有主手喷溅巫药允许落地药效");
         }
         positive(projectile.getSpeedMultiplier(), Unit.RATIO, MAX_PEAK,
                 "launch_projectile.speed_multiplier");

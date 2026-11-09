@@ -128,7 +128,8 @@ public final class TechniqueRegistry {
                         .anyMatch(effect -> effect.hasWeaponStrike()
                                 || effect.hasBreakBlocks()
                                 || effect.hasLaunchProjectile());
-                if (heldEffects && bookOf(reference).filter(TechniqueBook::hasHeldItemRules).isEmpty()) {
+                if (heldEffects && !definition.hasBrewItem()
+                        && bookOf(reference).filter(TechniqueBook::hasHeldItemRules).isEmpty()) {
                     throw TechniqueErrors.invalid(definition.getId(), "持物效果必须归属于声明持物规则的书");
                 }
                 if (definition.hasProjectileWeapon()) {

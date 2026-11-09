@@ -40,6 +40,7 @@ final class TechniqueDefinitions {
         validateTiming(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         validateOffHandUse(definition);
+        TechniqueBrewEffects.validateDefinition(definition);
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
         TechniqueRelativeArms.validate(addons, templates, definition);
         validateCosts(addons, templates, slots, definition);

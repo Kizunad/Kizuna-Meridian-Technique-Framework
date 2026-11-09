@@ -143,4 +143,30 @@ public class TechniqueStaggerTest {
         // 每项测试独立一具已学会测试功法的身体。
         return new MemoryHost(withProgress(body(Shape.TENDRIL), progress(definition())));
     }
+
+    @Test
+    public void charmAndHitKeepIndependentDeadlines() {
+        // 定身中的短重击不能缩短定身；长重击结束较晚也不能延长定身。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        var charm = new TechniqueService.Stagger(LONG_STAGGER, 0, TechniqueService.StaggerKind.CHARM);
+        service.stagger(ENTITY, charm);
+        assertEquals(TechniqueFailure.STAGGERED,
+                service.cast(ENTITY, request(host.current(), "charm-remains")).getFailure());
+        host.nowMillis = SECOND_HIT_MILLIS;
+        service.stagger(ENTITY, new TechniqueService.Stagger(SHORT_STAGGER, STAGGER_MOVEMENT));
+        assertEquals(LONG_STAGGER - SECOND_HIT_MILLIS,
+                service.staggerRemainingMillis(ENTITY, TechniqueService.StaggerKind.CHARM));
+        service.stagger(ENTITY, new TechniqueService.Stagger(LATER_STAGGER, STAGGER_MOVEMENT));
+        host.nowMillis = LONG_STAGGER;
+        service.tick();
+        assertEquals(0, service.staggerRemainingMillis(ENTITY, TechniqueService.StaggerKind.CHARM));
+        assertEquals(SECOND_HIT_MILLIS + LATER_STAGGER - LONG_STAGGER,
+                service.staggerRemainingMillis(ENTITY, TechniqueService.StaggerKind.HIT));
+        assertEquals(TechniqueFailure.STAGGERED,
+                service.cast(ENTITY, request(host.current(), "hit-remains")).getFailure());
+        host.nowMillis = SECOND_HIT_MILLIS + LATER_STAGGER;
+        service.tick();
+        assertEquals(0, service.staggerRemainingMillis(ENTITY));
+    }
 }

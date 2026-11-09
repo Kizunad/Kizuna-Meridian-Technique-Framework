@@ -88,22 +88,28 @@ Human 已导出的 `human.pb` 可直接使用，功法库不依赖 Human Java �
 服务器尚未启动、已停止或没有目录时抛出 `IllegalStateException`，不返回 `null`。
 服务只在服务端主线程使用，网络请求须先切回该线程，客户端不能直接调用。
 
-受击僵直只有一个写入方：原版伤害附属在身体伤害提交、观察者通知之后、死亡处理之前调用：
+僵直有两个写入方：原版伤害附属在非致死命中提交后写 `HIT`，Brewing 按脑力判定写 `CHARM`。
+其他宿主只消费期限与事件，不自行判定受击或魅惑：
 
 ```java
 TechniqueService service = TechniqueFabric.service();
-service.stagger(entity.getUUID(), new TechniqueService.Stagger(durationMillis, movementMultiplier));
+service.stagger(entity.getUUID(),
+        new TechniqueService.Stagger(durationMillis, movementMultiplier, TechniqueService.StaggerKind.HIT));
 ```
 
-玩家、类人和以后的宿主都经过这一入口，宿主自己不再判定受伤打断。服务为每个宿主记一份僵直到期时刻
-（身体时钟毫秒，服务端权威）；多次命中取较晚到期，不累加。时长 0 不记录也不打断。
+玩家、类人和以后的宿主都经过这一入口。每个实体按种类独立保存身体时钟到期毫秒；
+同种多次取较晚到期、不累加，不同种互不缩短或延长。时长 0 不记录也不打断。
+`HIT` 移动倍率在 (0, 1]，Damage 默认给 0.5；`CHARM` 必须为 0。
+旧两参数 `Stagger` 构造器保留 `HIT` 语义，魅惑调用方必须显式传枚举。
 僵直期间新起式回执 `STAGGERED`（「僵直中」），已在出手或收势的施放照常完成；
 起手中且声明 `interruptible_by_damage` 的施放立即打断。到期由 `tick()` 按身体时钟结束。
-`staggerRemainingMillis(entity)` 只读剩余时长；`addStaggerListener` 在开始、延长和结束时通知
-`StaggerChanged(entity, remainingMillis, movementMultiplier)`，结束通知为 `0 / 1.0`。
-Fabric 层据此给实体加临时 `MULTIPLY_TOTAL` 移动修饰，并把 `meridian_technique:stagger`
+`staggerRemainingMillis(entity)` 读取两种期限的最大剩余值，带 `kind` 的重载只读指定种类。
+`addStaggerListener` 在开始、延长和结束时通知
+`StaggerChanged(entity, remainingMillis, movementMultiplier, kind)`，该种类结束通知为 `0 / 1.0`。
+Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动/跳跃属性归零和动作门禁。
+任一种结束都不会撤掉另一种属性。`meridian_technique:stagger` 始终同步两种的最大剩余时间
 （`StaggerStatus` protobuf）发给追踪者和本人，客户端 `TechniqueStaggerClient.remainingMillis` 只供界面读取。
-卸载、下线清除僵直记录。
+卸载、下线和死亡清除两种僵直记录。
 
 施放与查询同样调用 `service.cast(entity.getUUID(), request)`、`service.known(entity.getUUID())`；
 目录使用 `service.registry()`，与命令、状态机共享启动时的同一份不可变目录。

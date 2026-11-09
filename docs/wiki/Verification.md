@@ -126,6 +126,7 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 | 出手、收势中僵直不打断，照常收势 | `TechniqueStaggerTest.staggerOutsideWarmupLetsCastFinish` |
 | 僵直中新起式回执 `STAGGERED`「僵直中」且不改身体，到期后可起手 | `TechniqueStaggerTest.staggerRejectsNewCastUntilExpiry` |
 | 多次命中取较晚到期、不累加 | `TechniqueStaggerTest.laterExpiryWinsWithoutAddingDurations` |
+| 魅惑与受击期限独立，到期互不解除，任一种仍有效时拒绝新式 | `TechniqueStaggerTest.charmAndHitKeepIndependentDeadlines` |
 | tick 按身体时钟结束僵直并通知 `0 / 1.0` | `TechniqueStaggerTest.tickEndsExpiredStaggerAndRestoresMovement` |
 | 僵直时长 [0, 60000]、倍率 (0, 1] | `TechniqueStaggerTest.staggerRejectsDurationAndSpeedupOutsideContract` |
 

@@ -50,7 +50,7 @@ public final class TechniqueService {
     private final TechniqueCasting casting;
     private final Map<UUID, Session> sessions = new LinkedHashMap<>();
     private final List<Consumer<KnownChanged>> knownChangedListeners = new ArrayList<>();
-    private final Map<UUID, Long> staggerEnds = new LinkedHashMap<>();
+    private final Map<StaggerKey, Long> staggerEnds = new LinkedHashMap<>();
     private final List<Consumer<StaggerChanged>> staggerListeners = new ArrayList<>();
     private final List<Consumer<CastObserved>> castListeners = new ArrayList<>();
     private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
@@ -267,15 +267,15 @@ public final class TechniqueService {
                 advance(entityUuid, session);
             }
         }
-        for (UUID entityUuid : List.copyOf(staggerEnds.keySet())) {
-            if (staggerRemainingMillis(entityUuid) == 0) {
-                endStagger(entityUuid);
+        for (StaggerKey key : List.copyOf(staggerEnds.keySet())) {
+            if (staggerRemainingMillis(key.entityUuid(), key.kind()) == 0) {
+                endStagger(key);
             }
         }
     }
 
     public Optional<CastOutcome> stagger(UUID entityUuid, Stagger stagger) {
-        // 伤害附属按命中剂量换算僵直后调用；玩家与类人走同一入口，起手中的可打断式被打断。
+        // Damage 写受击僵直，Brewing 写魅惑定身；两者都拒绝新式并打断可打断的起手。
         Objects.requireNonNull(entityUuid);
         Objects.requireNonNull(stagger);
         if (stagger.durationMillis() == 0 || !recordStagger(entityUuid, stagger)) {
@@ -285,7 +285,7 @@ public final class TechniqueService {
     }
 
     private boolean recordStagger(UUID entityUuid, Stagger stagger) {
-        // 到期时刻使用实体自己的身体时钟；多次命中取较晚到期，不叠加时长。
+        // 各种僵直独立取较晚到期；受击不能覆盖魅惑定身的期限或强度。
         TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
         if (host == null) {
             return false;
@@ -297,18 +297,30 @@ public final class TechniqueService {
             return false;
         }
         long untilMillis = nowMillis + stagger.durationMillis();
-        Long previous = staggerEnds.get(entityUuid);
+        var key = new StaggerKey(entityUuid, stagger.kind());
+        Long previous = staggerEnds.get(key);
         if (previous == null || untilMillis > previous) {
-            staggerEnds.put(entityUuid, untilMillis);
-            publishStagger(new StaggerChanged(entityUuid, stagger.durationMillis(), stagger.movementMultiplier()));
+            staggerEnds.put(key, untilMillis);
+            publishStagger(new StaggerChanged(entityUuid, stagger.durationMillis(),
+                    stagger.movementMultiplier(), stagger.kind()));
         }
         return true;
     }
 
     public long staggerRemainingMillis(UUID entityUuid) {
-        // 未受击、宿主失效或身体时钟已越过到期时刻都视为没有僵直。
-        Long untilMillis = staggerEnds.get(Objects.requireNonNull(entityUuid));
-        if (untilMillis == null) {
+        // 对外总期限用于功法门禁和显示，保留原有查询契约。
+        return remainingMillis(entityUuid, staggeredUntil(entityUuid));
+    }
+
+    public long staggerRemainingMillis(UUID entityUuid, StaggerKind kind) {
+        // 世界宿主可按种类查询期限，不从总期限反推是否定身。
+        var key = new StaggerKey(Objects.requireNonNull(entityUuid), Objects.requireNonNull(kind));
+        return remainingMillis(entityUuid, staggerEnds.getOrDefault(key, NOT_STAGGERED_MILLIS));
+    }
+
+    private long remainingMillis(UUID entityUuid, long untilMillis) {
+        // 宿主失效或身体时钟已越过到期时刻都视为没有僵直。
+        if (untilMillis == NOT_STAGGERED_MILLIS) {
             return 0;
         }
         TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
@@ -324,14 +336,27 @@ public final class TechniqueService {
     }
 
     private long staggeredUntil(UUID entityUuid) {
-        // 尚未清理的过期记录交给状态机按当前身体时钟比较。
-        return staggerEnds.getOrDefault(entityUuid, NOT_STAGGERED_MILLIS);
+        // 任一种僵直仍有效就拒绝起式，各自的过期记录由 tick 单独清理。
+        Objects.requireNonNull(entityUuid);
+        long untilMillis = NOT_STAGGERED_MILLIS;
+        for (StaggerKind kind : StaggerKind.values()) {
+            untilMillis = Math.max(untilMillis,
+                    staggerEnds.getOrDefault(new StaggerKey(entityUuid, kind), NOT_STAGGERED_MILLIS));
+        }
+        return untilMillis;
     }
 
     private void endStagger(UUID entityUuid) {
-        // 结束事件让表现层恢复移动速度并清除界面显示。
-        if (staggerEnds.remove(entityUuid) != null) {
-            publishStagger(new StaggerChanged(entityUuid, 0, 1));
+        // 死亡、卸载与断线同时释放两种期限，逐种通知其输入和属性宿主。
+        for (StaggerKind kind : StaggerKind.values()) {
+            endStagger(new StaggerKey(entityUuid, kind));
+        }
+    }
+
+    private void endStagger(StaggerKey key) {
+        // 单种到期只撤销自己的表现，不解除另一种仍有效的僵直。
+        if (staggerEnds.remove(key) != null) {
+            publishStagger(new StaggerChanged(key.entityUuid(), 0, 1, key.kind()));
         }
     }
 
@@ -1032,23 +1057,37 @@ public final class TechniqueService {
                 .build();
     }
 
-    public record Stagger(long durationMillis, double movementMultiplier) {
+    public enum StaggerKind { HIT, CHARM }
+
+    private record StaggerKey(UUID entityUuid, StaggerKind kind) { }
+
+    public record Stagger(long durationMillis, double movementMultiplier, StaggerKind kind) {
+        public Stagger(long durationMillis, double movementMultiplier) {
+            // 原受击入口保持兼容；魅惑调用方必须明确指定类型。
+            this(durationMillis, movementMultiplier, StaggerKind.HIT);
+        }
+
         public Stagger {
-            // 时长为身体时钟毫秒；倍率只减速不加速，越界说明伤害附属的配置未经校验。
+            // 受击只减速，魅惑必须定身；两种期限都使用身体时钟毫秒。
+            Objects.requireNonNull(kind);
             if (durationMillis < 0 || durationMillis > MAX_STAGGER_MILLIS) {
                 throw new IllegalArgumentException("僵直时长必须在 [0, 60000] 毫秒内");
             }
-            if (Double.isNaN(movementMultiplier) || movementMultiplier <= 0 || movementMultiplier > 1) {
-                throw new IllegalArgumentException("僵直移动倍率必须在 (0, 1] 内");
+            if (!Double.isFinite(movementMultiplier) || movementMultiplier < 0 || movementMultiplier > 1
+                    || kind == StaggerKind.HIT && movementMultiplier == 0
+                    || kind == StaggerKind.CHARM && movementMultiplier != 0) {
+                throw new IllegalArgumentException("受击移动倍率必须在 (0, 1] 内，魅惑倍率必须为 0");
             }
         }
     }
 
     /** 僵直开始或结束；剩余 0 表示结束，表现层据此恢复移动速度。 */
-    public record StaggerChanged(UUID entityUuid, long remainingMillis, double movementMultiplier) {
+    public record StaggerChanged(UUID entityUuid, long remainingMillis,
+                                 double movementMultiplier, StaggerKind kind) {
         public StaggerChanged {
             // 事件只描述一次判定结果，监听器不能借此改写服务状态。
             Objects.requireNonNull(entityUuid);
+            Objects.requireNonNull(kind);
         }
     }
 

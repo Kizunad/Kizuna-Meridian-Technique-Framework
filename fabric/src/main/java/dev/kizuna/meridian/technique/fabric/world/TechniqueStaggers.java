@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.fabric.world;
 
 import dev.kizuna.meridian.fabric.ProtobufChannel;
+import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StaggerStatus;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
@@ -41,10 +42,12 @@ public final class TechniqueStaggers {
         if (entity == null) {
             return;
         }
-        slow(entity, event);
+        if (event.kind() == TechniqueService.StaggerKind.HIT) {
+            slow(entity, event);
+        }
         var message = StaggerStatus.newBuilder()
                 .setEntityId(entity.getId())
-                .setRemainingMillis(event.remainingMillis())
+                .setRemainingMillis(TechniqueFabric.service().staggerRemainingMillis(event.entityUuid()))
                 .build();
         var recipients = new HashSet<>(PlayerLookup.tracking(entity));
         if (entity instanceof ServerPlayer player) {

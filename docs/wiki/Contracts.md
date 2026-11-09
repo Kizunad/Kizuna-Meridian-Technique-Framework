@@ -26,7 +26,7 @@
 `minimum_distance`、`maximum_distance`、`fallback_distance`、`flight_ticks` 已停用，保留编号，非零即拒绝。
 `LeapMotion` 为客户端跳跃请求及服务端运动回执，客户端请求只允许 `REQUEST`，不能上传落点或速度；
 `ready_tick` 是服务端世界时间下可再次起跳的时刻，由 FINISH 回执给出。
-`StaggerStatus(entity_id, remaining_millis)` 是服务端发给追踪者和本人的僵直显示回执，剩余 0 表示结束；
+`StaggerStatus(entity_id, remaining_millis)` 是服务端发给追踪者和本人的僵直显示回执，取受击与魅惑的最大剩余值，0 表示全部结束；
 客户端只用于界面与动作，不参与判定。僵直中起式失败码为 `STAGGERED = 21`，玩家原因「僵直中」。
 `interruptible_by_damage` 字段名保留，含义为「起手中受僵直即打断」。
 状态注册和世界适配见 [宿主接入](Host-Integration.md)。

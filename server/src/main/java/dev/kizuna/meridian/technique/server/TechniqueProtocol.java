@@ -209,20 +209,7 @@ public final class TechniqueProtocol {
     public static void validateEffect(EffectIntent intent) {
         // 世界效果只声明宿主意图，身体能力修正必须使用权威活动。
         TechniqueValues.knownFields(intent);
-        TechniqueValues.castId(intent.getCastId());
-        if (!intent.getEffectId().isEmpty()) {
-            TechniqueValues.localId(intent.getEffectId(), "effect_id");
-        }
-        if (intent.getSelectedHand() == Hand.UNRECOGNIZED) {
-            throw TechniqueErrors.invalid("selected_hand", "未知出手手位");
-        }
-        validateDirection(intent.getDirection());
-        if (intent.getTargetId().length() > TechniqueValues.MAX_TEXT) {
-            throw TechniqueErrors.invalid("target_id", "目标身份过长");
-        }
-        if (intent.getScheduledMillis() < 0) {
-            throw TechniqueErrors.invalid("scheduled_millis", "效果身体时刻不能为负");
-        }
+        validateEffectIdentity(intent);
         switch (intent.getOperationCase()) {
             case WEAPON_STRIKE -> validateWeaponStrikeIntent(intent);
             case LEG_STRIKE -> validateLegStrikeIntent(intent);
@@ -242,7 +229,33 @@ public final class TechniqueProtocol {
             case MOVEMENT -> TechniqueMovement.validateIntent(intent.getMovement());
             case SOUND -> TechniqueSoundCues.validateAnchor(intent.getSound(), SoundAnchor.CASTER, "sound");
             case TARGET_LOCK -> validateTargetLockIntent(intent);
+            case BLOCK_WORK -> {
+                validateHeldEffect(intent);
+                TechniqueBrewEffects.validateBlockWork(intent.getBlockWork());
+            }
+            case USE_BREW -> {
+                validateHeldEffect(intent);
+                TechniqueBrewEffects.validateUseBrew(intent.getUseBrew());
+            }
             default -> throw TechniqueErrors.invalid("effect", "缺少或未知世界效果");
+        }
+    }
+
+    private static void validateEffectIdentity(EffectIntent intent) {
+        // 所有世界效果共享施放身份、手位、方向与时钟边界。
+        TechniqueValues.castId(intent.getCastId());
+        if (!intent.getEffectId().isEmpty()) {
+            TechniqueValues.localId(intent.getEffectId(), "effect_id");
+        }
+        if (intent.getSelectedHand() == Hand.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("selected_hand", "未知出手手位");
+        }
+        validateDirection(intent.getDirection());
+        if (intent.getTargetId().length() > TechniqueValues.MAX_TEXT) {
+            throw TechniqueErrors.invalid("target_id", "目标身份过长");
+        }
+        if (intent.getScheduledMillis() < 0) {
+            throw TechniqueErrors.invalid("scheduled_millis", "效果身体时刻不能为负");
         }
     }
 

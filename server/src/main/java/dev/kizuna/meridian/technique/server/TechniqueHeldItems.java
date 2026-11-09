@@ -166,6 +166,7 @@ public final class TechniqueHeldItems {
             if (!item.equals(HeldItem.getDefaultInstance())) {
                 throw TechniqueErrors.invalid("held_item", "空手不得携带物品信息");
             }
+            TechniqueBrewEffects.validateHeldBrewFacts(item);
             return;
         }
         TechniqueValues.id(item.getItemId(), "held_item.item_id");
@@ -173,6 +174,7 @@ public final class TechniqueHeldItems {
         if (!item.hasDamageable() || !item.hasContainsItems()) {
             throw TechniqueErrors.invalid("held_item", "有物品时须声明耐久和是否装着东西");
         }
+        TechniqueBrewEffects.validateHeldBrewFacts(item);
     }
 
     private static void validateTags(List<String> tags) {

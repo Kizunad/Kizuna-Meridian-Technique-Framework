@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import static dev.kizuna.meridian.core.CapabilityModifier.MAX_PER_BODY;
+
 /** 状态能力的唯一修正入口；原子替换自有修正，不接触施法曲线或施放进度。 */
 public final class TechniqueStatusTissues {
     private static final String PREFIX = "meridian_technique:status/";
@@ -84,7 +86,7 @@ public final class TechniqueStatusTissues {
         // 持久化归属必须属于同一状态，不能借伪造元数据移除其他状态或历史功法。
         TechniqueValues.id(lease.getStatusId(), "status_id");
         if (lease.getBodyId().isBlank() || lease.getTotalTicks() <= 0
-                || lease.getModifierIdsCount() > dev.kizuna.meridian.core.CapabilityModifier.MAX_PER_BODY) {
+                || lease.getModifierIdsCount() > MAX_PER_BODY) {
             throw new IllegalArgumentException("状态修正归属元数据非法");
         }
         String prefix = statusPrefix(lease.getStatusId());
@@ -135,11 +137,20 @@ public final class TechniqueStatusTissues {
                         .setBurstPeak(profile.getBurstPeak().getValue())
                         .setEndurancePeak(profile.getEndurancePeak().getValue())
                         .setRecoveryPeak(profile.getRecoveryPeak().getValue())
+                        .setTempoPeak(tempoPeak(profile))
                         .build();
                 modifiers.add(modifier);
             }
         }
         return List.copyOf(modifiers);
+    }
+
+    private static double tempoPeak(TissueModifier profile) {
+        // 状态曲线缺省动作速度峰值表示不改变速度。
+        if (!profile.hasTempoPeak()) {
+            return 1;
+        }
+        return profile.getTempoPeak().getValue();
     }
 
     private static void commit(TechniqueHost host, BodySnapshot body, BodyActivity activity) {

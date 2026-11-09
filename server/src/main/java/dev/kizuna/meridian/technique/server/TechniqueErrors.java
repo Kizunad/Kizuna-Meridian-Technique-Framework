@@ -51,6 +51,7 @@ public final class TechniqueErrors {
             case CROSSBOW_REQUIRED -> "这一式需要弩";
             case OTHER_HAND_AMMUNITION_REQUIRED -> "另一只手要空着或拿着箭";
             case AMMUNITION_REQUIRED -> "没有箭";
+            case EFFECT_REJECTED -> "功法效果未能落地";
             default -> "暂时无法运功";
         };
     }

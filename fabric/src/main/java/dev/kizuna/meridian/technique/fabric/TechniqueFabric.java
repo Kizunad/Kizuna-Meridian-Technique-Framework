@@ -7,14 +7,19 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
+import dev.kizuna.meridian.technique.server.EffectHandling;
+import dev.kizuna.meridian.technique.server.TechniqueEffectEvent;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueAddonResources;
 import dev.kizuna.meridian.technique.server.TechniqueScrollCatalog;
 import dev.kizuna.meridian.technique.server.TechniqueService;
+import dev.kizuna.meridian.technique.server.TechniqueCastEnded;
 import dev.kizuna.meridian.technique.server.TechniqueSoundCues;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
@@ -61,8 +66,36 @@ public final class TechniqueFabric implements ModInitializer {
                     callback.onCastObserved(entityUuid, outcome);
                 }
             });
+    /** 一次施放结束后通知附属释放方块、实体或物品接管。 */
+    public static final Event<CastEndedCallback> CAST_ENDED = EventFactory.createArrayBacked(
+            CastEndedCallback.class,
+            callbacks -> event -> {
+                for (CastEndedCallback callback : callbacks) {
+                    callback.onCastEnded(event);
+                }
+            });
+    /** 附属模组执行 block_work/use_brew；处理顺序由注册顺序决定。 */
+    public static final Event<EffectHandlerCallback> EFFECT_HANDLER = EventFactory.createArrayBacked(
+            EffectHandlerCallback.class,
+            callbacks -> event -> {
+                for (EffectHandlerCallback callback : callbacks) {
+                    EffectHandling result = callback.onEffect(event);
+                    if (result.status() != EffectHandling.Status.NOT_APPLICABLE) {
+                        return result;
+                    }
+                }
+                return EffectHandling.rejected("没有接受该效果的附属处理器");
+            });
 
     private static TechniqueService service;
+    /** 服务装配完毕后校验附属与最终目录的跨仓契约，拒绝会中止服务器启动。 */
+    public static final Event<ServiceStartedCallback> SERVICE_STARTED = EventFactory.createArrayBacked(
+            ServiceStartedCallback.class,
+            callbacks -> created -> {
+                for (ServiceStartedCallback callback : callbacks) {
+                    callback.onServiceStarted(created);
+                }
+            });
     private TechniqueCatalogPlan catalogs;
 
     public static TechniqueService service() {
@@ -89,6 +122,11 @@ public final class TechniqueFabric implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            if (service != null) {
+                service.cancelOnDeath(entity.getUUID());
+            }
+        });
         registerCommands();
     }
 
@@ -106,10 +144,26 @@ public final class TechniqueFabric implements ModInitializer {
                 .onKnownChanged(event.entityUuid(), event.known()));
         created.addCastListener(event -> CAST_OBSERVED.invoker()
                 .onCastObserved(event.entityUuid(), event.outcome()));
+        created.addCastEndListener(event -> CAST_ENDED.invoker().onCastEnded(event));
+        created.addCastEndListener(event -> reportFailure(server, event));
         created.addStaggerListener(TechniqueStaggers.listener(server));
         created.addSoundListener(TechniqueSounds.listener(server));
+        created.setEffectHandler(event -> EFFECT_HANDLER.invoker().onEffect(event));
         warnUnregisteredSounds(registry);
         service = created;
+        SERVICE_STARTED.invoker().onServiceStarted(created);
+    }
+
+    private static void reportFailure(MinecraftServer server, TechniqueCastEnded event) {
+        // 周期效果的失败晚于起手回执，仍使用施放失败的动作栏消息送回同一玩家。
+        CastOutcome outcome = event.outcome();
+        if (outcome.getFailure() == TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
+            return;
+        }
+        ServerPlayer player = server.getPlayerList().getPlayer(event.entityUuid());
+        if (player != null && player.connection != null) {
+            player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+        }
     }
 
     private static void warnUnregisteredSounds(TechniqueRegistry registry) {
@@ -145,8 +199,8 @@ public final class TechniqueFabric implements ModInitializer {
     }
 
     private void unload(Entity entity) {
-        // 玩家断线由 DISCONNECT 处理，实体卸载事件只取消其他实体，避免重复提交。
-        if (service != null && !(entity instanceof ServerPlayer)) {
+        // 跨维度等卸载也包含玩家；会话按施放身份去重，断线后重复卸载不会重发通知。
+        if (service != null) {
             service.cancelOnUnload(entity.getUUID());
         }
     }
@@ -217,5 +271,23 @@ public final class TechniqueFabric implements ModInitializer {
     public interface CastObservedCallback {
         /** 调试用途，不进正式玩法：转述功法服务返回给施放方的同一份回执。 */
         void onCastObserved(UUID entityUuid, CastOutcome outcome);
+    }
+
+    @FunctionalInterface
+    public interface ServiceStartedCallback {
+        /** 附属在正式目录与服务就绪后验证接线；失败不得静默继续运行。 */
+        void onServiceStarted(TechniqueService created);
+    }
+
+    @FunctionalInterface
+    public interface EffectHandlerCallback {
+        /** 附属模组执行一次声明式世界效果并返回是否接受。 */
+        EffectHandling onEffect(TechniqueEffectEvent event);
+    }
+
+    @FunctionalInterface
+    public interface CastEndedCallback {
+        /** 向附属模组转发一次施放的最终结束事实。 */
+        void onCastEnded(TechniqueCastEnded event);
     }
 }

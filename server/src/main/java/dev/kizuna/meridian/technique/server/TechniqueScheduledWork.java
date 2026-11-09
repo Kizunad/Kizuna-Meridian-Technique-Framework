@@ -26,8 +26,9 @@ final class TechniqueScheduledWork {
         // 起手以当前身体连续预检全部未跳过费用；预检候选不会提交，真元只收一次。
         TechniqueDefinition definition = start.definition();
         long clipStart = start.selection().entry().clipStart();
+        double tempo = TechniqueTempo.multiplier(start.body(), start.binding().getSlotsList());
         BodySnapshot candidate = TechniqueActivities.withModifiers(start.body(), modifiers);
-        for (List<WorkCost> costs : costsByStart(definition, clipStart).values()) {
+        for (List<WorkCost> costs : costsByStart(definition, clipStart, tempo).values()) {
             if (!costs.isEmpty()) {
                 var efforts = TechniqueActivities.efforts(candidate, costs, slots);
                 BodyActivity activity = BodyActivity.newBuilder().addAllEfforts(efforts).build();
@@ -37,14 +38,17 @@ final class TechniqueScheduledWork {
         }
     }
 
-    private static Map<Long, List<WorkCost>> costsByStart(TechniqueDefinition definition, long clipStart) {
+    private static Map<Long, List<WorkCost>> costsByStart(TechniqueDefinition definition, long clipStart,
+                                                            double tempo) {
         // 起手费用与恰在起播点开始的段合并，其余段按时刻保留独立活动边界。
         var groups = new TreeMap<Long, List<WorkCost>>();
-        groups.put(clipStart, new ArrayList<>(definition.getCost().getWorkList()));
+        groups.put(0L, new ArrayList<>(definition.getCost().getWorkList()));
         for (TechniqueEffect effect : definition.getEffectsList()) {
             long atMillis = effect.getAtMillis();
             if (effect.hasWork() && atMillis >= clipStart) {
-                groups.computeIfAbsent(atMillis, ignored -> new ArrayList<>()).add(effect.getWork());
+                long scheduledOffset = TechniqueTempo.scale(atMillis - clipStart, tempo);
+                groups.computeIfAbsent(scheduledOffset, ignored -> new ArrayList<>())
+                        .add(effect.getWork());
             }
         }
         return groups;
@@ -73,6 +77,7 @@ final class TechniqueScheduledWork {
         }
         long startedMillis = active.getStartedMillis();
         long clipStartMillis = active.getClipStartMillis();
+        double tempo = TechniqueTempo.multiplier(active);
         if (previousMillis < startedMillis) {
             return startedMillis;
         }
@@ -81,7 +86,8 @@ final class TechniqueScheduledWork {
             if (atMillis < clipStartMillis) {
                 continue;
             }
-            long scheduledMillis = startedMillis + atMillis - clipStartMillis;
+            long scheduledOffset = TechniqueTempo.scale(atMillis - clipStartMillis, tempo);
+            long scheduledMillis = startedMillis + scheduledOffset;
             if (scheduledMillis > previousMillis && scheduledMillis <= nowMillis) {
                 return scheduledMillis;
             }
@@ -97,6 +103,7 @@ final class TechniqueScheduledWork {
         long startedMillis = active.getStartedMillis();
         long clipStartMillis = active.getClipStartMillis();
         List<Integer> paidSequences = active.getPaidWorkSequencesList();
+        double tempo = TechniqueTempo.multiplier(active);
         var sequences = new ArrayList<Integer>();
         var costs = new ArrayList<WorkCost>();
         for (int index = 0; index < definition.getEffectsCount(); index++) {
@@ -105,7 +112,8 @@ final class TechniqueScheduledWork {
             if (!effect.hasWork() || atMillis < clipStartMillis || paidSequences.contains(index)) {
                 continue;
             }
-            long scheduledMillis = startedMillis + atMillis - clipStartMillis;
+            long scheduledOffset = TechniqueTempo.scale(atMillis - clipStartMillis, tempo);
+            long scheduledMillis = startedMillis + scheduledOffset;
             if (scheduledMillis <= boundaryMillis) {
                 sequences.add(index);
                 costs.add(effect.getWork());

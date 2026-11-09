@@ -39,6 +39,7 @@ final class TechniqueDefinitions {
         }
         validateTiming(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
+        validateOffHandUse(definition);
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
         TechniqueRelativeArms.validate(addons, templates, definition);
         validateCosts(addons, templates, slots, definition);
@@ -261,6 +262,13 @@ final class TechniqueDefinitions {
             switch (effect.getOperationCase()) {
                 case TISSUE_MODIFIER -> validateModifier(slots, definition, effect);
                 case WORK -> validateScheduledWork(addons, templates, slots, effect, durationMillis);
+                case BLOCK_WORK -> {
+                    TechniqueBrewEffects.validateBlockWork(effect.getBlockWork());
+                    if (effect.getBlockWork().getDurationMillis() > durationMillis - atMillis) {
+                        throw TechniqueErrors.invalid("block_work.duration_millis", "周期效果超出施放时长");
+                    }
+                }
+                case USE_BREW -> TechniqueBrewEffects.validateUseBrew(effect.getUseBrew());
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
@@ -279,6 +287,26 @@ final class TechniqueDefinitions {
                 }
                 default -> throw TechniqueErrors.invalid("effects", "未知或缺少算子");
             }
+        }
+    }
+
+    private static void validateOffHandUse(TechniqueDefinition definition) {
+        // 副手放行必须同时声明目标标签，避免把施放中的任意右键操作打开。
+        boolean enabled = definition.hasAllowOffHandUseWhileCasting()
+                && definition.getAllowOffHandUseWhileCasting();
+        if (!enabled && definition.getOffHandUseBlockTagsCount() > 0) {
+            throw TechniqueErrors.invalid(
+                    "off_hand_use_block_tags", "未开启副手放行时不能声明目标标签");
+        }
+        if (enabled && definition.getOffHandUseBlockTagsCount() == 0) {
+            throw TechniqueErrors.invalid("off_hand_use_block_tags", "副手放行必须声明目标方块标签");
+        }
+        if (new HashSet<>(definition.getOffHandUseBlockTagsList()).size()
+                != definition.getOffHandUseBlockTagsCount()) {
+            throw TechniqueErrors.invalid("off_hand_use_block_tags", "目标标签不能重复");
+        }
+        for (String tag : definition.getOffHandUseBlockTagsList()) {
+            id(tag, "off_hand_use_block_tags");
         }
     }
 
@@ -370,11 +398,16 @@ final class TechniqueDefinitions {
                 || endOffsetMillis > maximumDuration) {
             throw TechniqueErrors.invalid("tissue_modifier.curve", "修正曲线结束晚于冷却结束或超过曲线上限");
         }
+        double tempoPeak = 1;
+        if (modifier.hasTempoPeak()) {
+            tempoPeak = positive(modifier.getTempoPeak(), Unit.RATIO, MAX_PEAK, "tempo_peak");
+        }
         double[] peaks = {
                 positive(modifier.getStrengthPeak(), Unit.RATIO, MAX_PEAK, "strength_peak"),
                 positive(modifier.getBurstPeak(), Unit.RATIO, MAX_PEAK, "burst_peak"),
                 positive(modifier.getEndurancePeak(), Unit.RATIO, MAX_PEAK, "endurance_peak"),
-                positive(modifier.getRecoveryPeak(), Unit.RATIO, MAX_PEAK, "recovery_peak")
+                positive(modifier.getRecoveryPeak(), Unit.RATIO, MAX_PEAK, "recovery_peak"),
+                tempoPeak
         };
         validateCurve(modifier, peaks);
     }

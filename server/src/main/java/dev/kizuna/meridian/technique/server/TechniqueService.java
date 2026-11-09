@@ -11,6 +11,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Quantity;
@@ -52,7 +53,9 @@ public final class TechniqueService {
     private final Map<UUID, Long> staggerEnds = new LinkedHashMap<>();
     private final List<Consumer<StaggerChanged>> staggerListeners = new ArrayList<>();
     private final List<Consumer<CastObserved>> castListeners = new ArrayList<>();
+    private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
+    private TechniqueEffectHandler effectHandler;
 
     public TechniqueService(TechniqueRegistry registry, TechniqueHostDirectory hosts) {
         // 服务只持有不可变目录和宿主发现器，身体状态始终从宿主读取。
@@ -94,7 +97,11 @@ public final class TechniqueService {
         }
         CastOutcome outcome = casting.cast(host, request, staggeredUntil(entityUuid));
         if (success(outcome)) {
-            register(entityUuid, host);
+            Session registered = register(entityUuid, host);
+            if (registered != null && registered.terminationOutcome != null
+                    && !success(registered.terminationOutcome)) {
+                return registered.terminationOutcome;
+            }
         }
         return outcome;
     }
@@ -348,6 +355,16 @@ public final class TechniqueService {
         castListeners.remove(listener);
     }
 
+    public void addCastEndListener(Consumer<TechniqueCastEnded> listener) {
+        // 附属模组按实体和 cast_id 释放世界接管，监听器只在服务线程调用。
+        castEndListeners.add(Objects.requireNonNull(listener));
+    }
+
+    public void removeCastEndListener(Consumer<TechniqueCastEnded> listener) {
+        // 服务器停止时移除附属监听器，避免保留旧世界对象。
+        castEndListeners.remove(listener);
+    }
+
     public void addSoundListener(Consumer<SoundDue> listener) {
         // 表现层订阅施放者声音；监听器只在服务线程调用。
         soundListeners.add(Objects.requireNonNull(listener));
@@ -356,6 +373,11 @@ public final class TechniqueService {
     public void removeSoundListener(Consumer<SoundDue> listener) {
         // 服务器停止时移除表现层监听器，避免保留旧服务器对象。
         soundListeners.remove(listener);
+    }
+
+    public void setEffectHandler(TechniqueEffectHandler handler) {
+        // Fabric 事件负责多附属分发；服务本身只保留一个世界效果桥接层。
+        effectHandler = Objects.requireNonNull(handler);
     }
 
     private void publishSound(SoundDue event) {
@@ -376,6 +398,17 @@ public final class TechniqueService {
                 listener.accept(event);
             } catch (RuntimeException ignored) {
                 // 调试记录失败只影响观察输出，施放状态仍以本服务为准。
+            }
+        }
+    }
+
+    private void publishCastEnded(TechniqueCastEnded event) {
+        // 附属清理失败不能改变已经结束的身体状态；监听器只观察最终事实。
+        for (Consumer<TechniqueCastEnded> listener : List.copyOf(castEndListeners)) {
+            try {
+                listener.accept(event);
+            } catch (RuntimeException ignored) {
+                // 世界接管由附属自行补偿，Framework 不重放已完成的身体提交。
             }
         }
     }
@@ -403,6 +436,12 @@ public final class TechniqueService {
         return transition(entityUuid, Transition.DISCONNECT);
     }
 
+    public Optional<CastOutcome> cancelOnDeath(UUID entityUuid) {
+        // 原版实体死亡也要释放附属世界占用，不依赖后续身体 tick 或卸载。
+        endStagger(Objects.requireNonNull(entityUuid));
+        return transition(entityUuid, Transition.DEATH);
+    }
+
     public void recoverOnLoad(UUID entityUuid, TechniqueRecoveryHost host) {
         // 恢复只停止表现并解锁；死体动作已由 Framework 清空。
         // 再通过可信进度入口清除残留施放。
@@ -410,12 +449,28 @@ public final class TechniqueService {
         BodySnapshot body = host.snapshot();
         TechniqueProgress progress = TechniqueState.read(body);
         if (progress.hasActiveCast()) {
-            clearRecoveredEffects(host, progress.getActiveCast(), body.settledAt().elapsedMillis());
+            ActiveCast active = progress.getActiveCast();
+            clearRecoveredEffects(host, active, body.settledAt().elapsedMillis());
             BodyCommand command = recoveryCommand(body, progress);
-            String requestId = "technique_recover_" + progress.getActiveCast().getRequest().getCastId();
+            String requestId = "technique_recover_" + active.getRequest().getCastId();
             long revision = host.submitRecovery(requestId, command);
             if (revision != body.revision() + 1) {
                 throw new IllegalStateException("宿主返回的恢复提交版本不一致");
+            }
+            CastOutcome outcome = CastOutcome.newBuilder()
+                    .setCastId(active.getRequest().getCastId())
+                    .setPhase(CastPhase.CANCELLED)
+                    .setRevision(revision)
+                    .setReason("施放在身体装载时清理")
+                    .build();
+            Session session = sessions.get(entityUuid);
+            if (session != null && session.castId.equals(active.getRequest().getCastId())) {
+                session.terminationOutcome = outcome;
+                session.endReason = TechniqueCastEndReason.UNLOADED;
+                if (body.vitality().dead()) {
+                    session.endReason = TechniqueCastEndReason.DIED;
+                }
+                finishSession(entityUuid, session);
             }
         }
         sessions.remove(entityUuid);
@@ -460,18 +515,24 @@ public final class TechniqueService {
         }
     }
 
-    private void register(UUID entityUuid, TechniqueHost host) {
+    private Session register(UUID entityUuid, TechniqueHost host) {
         // 起手成功后把效果游标放在起手前一毫秒，确保 at=0 的效果只发一次。
         BodySnapshot body = host.inspect().body();
         TechniqueProgress progress = TechniqueState.read(body);
         if (!progress.hasActiveCast()) {
-            return;
+            return null;
         }
         ActiveCast active = progress.getActiveCast();
         String castId = active.getRequest().getCastId();
         Session previous = sessions.get(entityUuid);
         if (previous != null && previous.castId.equals(castId)) {
-            return;
+            return previous;
+        }
+        if (previous != null) {
+            // 后式已原子替换身体中的施放；前式的世界清理由后式携带，附属占用立即释放。
+            previous.endReason = TechniqueCastEndReason.INTERRUPTED;
+            previous.terminationOutcome = cancellationOutcome(previous.castId);
+            finishSession(entityUuid, previous);
         }
         long previousMillis = previousMillis(active.getStartedMillis());
         List<EffectIntent> cleanup = TechniqueScheduler.stopEffects(active,
@@ -482,6 +543,8 @@ public final class TechniqueService {
                 || active.getLockTarget()) {
             advance(entityUuid, session);
         }
+        session.initialResponseDelivered = true;
+        return session;
     }
 
     private void advance(UUID entityUuid, Session session) {
@@ -498,6 +561,14 @@ public final class TechniqueService {
     private void advanceOnce(UUID entityUuid, Session session) {
         // 正常推进与收势共用实际身体时刻；已生成的效果保留到全部收到回执。
         try {
+            BodySnapshot body = session.host.inspect().body();
+            if (body.vitality().dead()) {
+                // Framework 已清空死亡身体的动作，附属进度由恢复入口清理。
+                session.bodyStopped = true;
+                beginTermination(entityUuid, session, TechniqueCastEndReason.DIED,
+                        cancellationOutcome(session.castId));
+                return;
+            }
             if (session.terminating) {
                 terminate(entityUuid, session);
                 return;
@@ -509,10 +580,12 @@ public final class TechniqueService {
                 }
             }
         } catch (TechniqueErrors.HostRejected exception) {
-            handleFailure(entityUuid, session, exception.failure());
+            CastOutcome outcome = hostFailureOutcome(session.castId, exception.failure());
+            handleFailure(entityUuid, session, outcome);
         } catch (IllegalArgumentException exception) {
             // 即使业务进度损坏，已经开始的表现与移动锁仍有清理责任。
-            beginTermination(entityUuid, session);
+            beginTermination(entityUuid, session, TechniqueCastEndReason.FAILED,
+                    invalidStateOutcome(session.castId));
         }
     }
 
@@ -521,31 +594,45 @@ public final class TechniqueService {
         if (session.pendingAdvance == null) {
             TechniqueCasting.AdvanceResult result = casting.advance(session.host, session.previousMillis);
             if (!success(result.outcome())) {
-                handleFailure(entityUuid, session, result.outcome().getFrameworkFailure());
+                handleFailure(entityUuid, session, result.outcome());
                 return false;
             }
             session.pendingAdvance = result;
         }
-        deliverPending(entityUuid, session);
+        if (!deliverPending(entityUuid, session)) {
+            return false;
+        }
         return sessions.get(entityUuid) == session && !session.terminating && session.deferred == null
                 && session.previousMillis < session.host.inspect().body().settledAt().elapsedMillis();
     }
 
-    private void deliverPending(UUID entityUuid, Session session) {
+    private boolean deliverPending(UUID entityUuid, Session session) {
         // 收势可能已提交；效果拒绝时保存原结果和请求 ID，不能重新 inspect 后丢掉意图。
         TechniqueCasting.AdvanceResult result = session.pendingAdvance;
-        dispatch(entityUuid, session, result.effects());
+        Optional<String> rejection = dispatch(entityUuid, session, result.effects());
         session.previousMillis = result.advancedMillis();
         session.pendingAdvance = null;
-        if (result.recoveryCommit().isPresent() || result.outcome().getPhase() == CastPhase.IDLE) {
-            sessions.remove(entityUuid);
+        if (rejection.isPresent()) {
+            CastOutcome outcome = effectRejected(session.castId, rejection.orElseThrow());
+            beginTermination(entityUuid, session, TechniqueCastEndReason.FAILED, outcome);
+            return false;
         }
+        if (result.recoveryCommit().isPresent() || result.outcome().getPhase() == CastPhase.IDLE) {
+            session.bodyStopped = true;
+            session.terminationOutcome = result.outcome();
+            if (session.endReason == null) {
+                session.endReason = TechniqueCastEndReason.COMPLETED;
+            }
+            finishSession(entityUuid, session);
+        }
+        return true;
     }
 
-    private void handleFailure(UUID entityUuid, Session session, FailureCode failure) {
+    private void handleFailure(UUID entityUuid, Session session, CastOutcome outcome) {
         // 暂时拒绝重试原批次；永久业务拒绝转为取消，不再重放剩余业务效果。
+        FailureCode failure = outcome.getFrameworkFailure();
         if (!retryable(failure)) {
-            beginTermination(entityUuid, session);
+            beginTermination(entityUuid, session, TechniqueCastEndReason.FAILED, outcome);
         }
     }
 
@@ -562,10 +649,13 @@ public final class TechniqueService {
         }
     }
 
-    private void beginTermination(UUID entityUuid, Session session) {
+    private void beginTermination(UUID entityUuid, Session session, TechniqueCastEndReason reason,
+                                  CastOutcome outcome) {
         // 清理声明独立于业务游标，覆盖部分成功和身体已先收势的两种情况。
         session.terminating = true;
         session.pendingAdvance = null;
+        session.endReason = reason;
+        session.terminationOutcome = outcome;
         terminate(entityUuid, session);
     }
 
@@ -581,8 +671,11 @@ public final class TechniqueService {
                 // 每项独立重试，表现停止被拒不能阻止移动解锁。
             }
         }
-        if (session.bodyStopped && session.cleanup.isEmpty()) {
-            sessions.remove(entityUuid, session);
+        if (session.bodyStopped) {
+            notifyEnded(entityUuid, session);
+            if (session.cleanup.isEmpty()) {
+                finishSession(entityUuid, session);
+            }
         }
     }
 
@@ -592,27 +685,103 @@ public final class TechniqueService {
             return;
         }
         try {
+            if (session.host.inspect().body().vitality().dead()) {
+                // 死亡身体的动作已经清空；残留进度由可信恢复入口清理。
+                session.bodyStopped = true;
+                return;
+            }
             TechniqueCasting.AdvanceResult stopped = casting.cancelOnUnload(session.host, session.previousMillis);
             if (success(stopped.outcome())) {
                 session.bodyStopped = true;
-                session.terminationOutcome = stopped.outcome();
+                if (session.terminationOutcome == null) {
+                    session.terminationOutcome = stopped.outcome();
+                }
             }
         } catch (TechniqueErrors.HostRejected | IllegalArgumentException exception) {
             // 下一 tick 或生命周期取消仍使用原施放身份。
         }
     }
 
-    private void dispatch(UUID entityUuid, Session session, List<EffectIntent> effects) {
+    private Optional<String> dispatch(UUID entityUuid, Session session, List<EffectIntent> effects) {
         // 请求身份只依赖施放和效果，不受 tick 分组或部分成功重试影响。
         // 施放者声音不提交宿主，交给声音监听者；宿主拒绝后整批重试时，同一请求 ID 只响一次。
         for (EffectIntent effect : effects) {
             String requestId = effectRequestId(effect);
             if (!effect.hasSound()) {
+                if (effect.hasBlockWork() || effect.hasUseBrew()) {
+                    HeldItems heldItems = session.host.inspect().heldItems();
+                    EffectHandling handling = handleExtensionEffect(entityUuid, effect, heldItems);
+                    if (!handling.accepted()) {
+                        return Optional.of(handling.reason());
+                    }
+                    continue;
+                }
                 session.host.submitEffect(new TechniqueHost.EffectSubmission(requestId, effect));
             } else if (session.sounded.add(requestId)) {
                 publishSound(new SoundDue(entityUuid, effect.getSound()));
             }
         }
+        return Optional.empty();
+    }
+
+    private EffectHandling handleExtensionEffect(UUID entityUuid, EffectIntent effect,
+                                                  HeldItems heldItems) {
+        // 附属入口缺失必须明确拒绝，不能把未实现的效果当作普通宿主效果吞掉。
+        if (effectHandler == null) {
+            return EffectHandling.rejected("没有注册该效果的附属处理器");
+        }
+        TechniqueEffectEvent event = new TechniqueEffectEvent(entityUuid, effect, heldItems);
+        EffectHandling result = effectHandler.handle(event);
+        if (result.status() == EffectHandling.Status.NOT_APPLICABLE) {
+            return EffectHandling.rejected("没有接受该效果的附属处理器");
+        }
+        return result;
+    }
+
+    private static CastOutcome effectRejected(String castId, String reason) {
+        // 附属效果拒绝保留原始文本，施放方能区分结构、距离和物品事实问题。
+        return CastOutcome.newBuilder()
+                .setCastId(castId)
+                .setFailure(TechniqueFailure.EFFECT_REJECTED)
+                .setReason(reason)
+                .build();
+    }
+
+    private void finishSession(UUID entityUuid, Session session) {
+        // 先移除会话再通知，避免监听器重入或生命周期重复信号造成二次清理。
+        if (!sessions.remove(entityUuid, session)) {
+            return;
+        }
+        notifyEnded(entityUuid, session);
+    }
+
+    private void notifyEnded(UUID entityUuid, Session session) {
+        // 身体已经结束就释放附属占用，表现清理的重试不阻塞通知，也不能重复通知。
+        if (session.endPublished) {
+            return;
+        }
+        session.endPublished = true;
+        TechniqueCastEndReason reason = session.endReason;
+        if (reason == null) {
+            reason = TechniqueCastEndReason.COMPLETED;
+        }
+        CastOutcome recordedOutcome = session.terminationOutcome;
+        CastOutcome outcome;
+        if (recordedOutcome == null) {
+            outcome = CastOutcome.newBuilder()
+                    .setCastId(session.castId)
+                    .setPhase(CastPhase.CANCELLED)
+                    .setReason("施放结束")
+                    .build();
+        } else if (recordedOutcome.getCastId().isEmpty()) {
+            outcome = recordedOutcome.toBuilder().setCastId(session.castId).build();
+        } else {
+            outcome = recordedOutcome;
+        }
+        if (session.initialResponseDelivered && !success(outcome)) {
+            publishCast(new CastObserved(entityUuid, outcome));
+        }
+        publishCastEnded(new TechniqueCastEnded(entityUuid, session.castId, reason, outcome));
     }
 
     private Optional<CastOutcome> transition(UUID entityUuid, Transition transition) {
@@ -657,36 +826,89 @@ public final class TechniqueService {
     private Optional<CastOutcome> transitionOnce(UUID entityUuid, Session session, Transition transition) {
         // 卸载不再补发尚未确认的业务效果，只完成取消和独立清理。
         if (transition != Transition.STAGGER || session.terminating) {
-            beginTermination(entityUuid, session);
+            if (!session.terminating) {
+                beginTermination(entityUuid, session, endReason(transition), cancellationOutcome(session.castId));
+            } else {
+                terminate(entityUuid, session);
+            }
             return Optional.ofNullable(session.terminationOutcome);
         }
+        return interruptByStagger(entityUuid, session);
+    }
+
+    private Optional<CastOutcome> interruptByStagger(UUID entityUuid, Session session) {
+        // 先完成未交付批次，再按当前起手窗口决定僵直是否终止施放。
         try {
             if (session.pendingAdvance != null) {
                 CastOutcome pendingOutcome = session.pendingAdvance.outcome();
-                deliverPending(entityUuid, session);
+                if (!deliverPending(entityUuid, session)) {
+                    return Optional.ofNullable(session.terminationOutcome);
+                }
                 if (!sessions.containsKey(entityUuid)) {
                     return Optional.of(pendingOutcome);
                 }
             }
-            TechniqueCasting.AdvanceResult result = switch (transition) {
-                case STAGGER -> casting.interruptByStagger(session.host, session.previousMillis);
-                case UNLOAD -> casting.cancelOnUnload(session.host, session.previousMillis);
-                case DISCONNECT -> casting.cancelOnDisconnect(session.host, session.previousMillis);
-            };
+            TechniqueCasting.AdvanceResult result = casting.interruptByStagger(session.host, session.previousMillis);
             if (!success(result.outcome())) {
-                handleFailure(entityUuid, session, result.outcome().getFrameworkFailure());
+                handleFailure(entityUuid, session, result.outcome());
             } else if (result.recoveryCommit().isPresent() || result.outcome().getPhase() == CastPhase.IDLE) {
                 session.pendingAdvance = result;
-                deliverPending(entityUuid, session);
+                session.endReason = TechniqueCastEndReason.COMPLETED;
+                if (result.outcome().getPhase() == CastPhase.INTERRUPTED) {
+                    session.endReason = TechniqueCastEndReason.STAGGERED;
+                }
+                if (!deliverPending(entityUuid, session)) {
+                    return Optional.ofNullable(session.terminationOutcome);
+                }
             }
             return Optional.of(result.outcome());
         } catch (TechniqueErrors.HostRejected exception) {
-            handleFailure(entityUuid, session, exception.failure());
+            CastOutcome outcome = hostFailureOutcome(session.castId, exception.failure());
+            handleFailure(entityUuid, session, outcome);
             return Optional.empty();
         } catch (IllegalArgumentException exception) {
-            beginTermination(entityUuid, session);
+            beginTermination(entityUuid, session, TechniqueCastEndReason.FAILED,
+                    invalidStateOutcome(session.castId));
             return Optional.empty();
         }
+    }
+
+    private static TechniqueCastEndReason endReason(Transition transition) {
+        // 生命周期迁移使用稳定原因，附属无需解释内部状态机分支。
+        return switch (transition) {
+            case STAGGER -> TechniqueCastEndReason.STAGGERED;
+            case UNLOAD -> TechniqueCastEndReason.UNLOADED;
+            case DISCONNECT -> TechniqueCastEndReason.DISCONNECTED;
+            case DEATH -> TechniqueCastEndReason.DIED;
+        };
+    }
+
+    private static CastOutcome hostFailureOutcome(String castId, FailureCode failure) {
+        // 推进与生命周期共享宿主失败映射，保留框架码及同一份玩家提示。
+        return CastOutcome.newBuilder()
+                .setCastId(castId)
+                .setFailure(TechniqueFailure.FRAMEWORK_REJECTED)
+                .setFrameworkFailure(failure)
+                .setReason(TechniqueErrors.frameworkPlayerReason(failure))
+                .build();
+    }
+
+    private static CastOutcome cancellationOutcome(String castId) {
+        // 生命周期清理没有新的业务失败码，回执仍携带施放身份和取消阶段。
+        return CastOutcome.newBuilder()
+                .setCastId(castId)
+                .setPhase(CastPhase.CANCELLED)
+                .setReason("施放已清理")
+                .build();
+    }
+
+    private static CastOutcome invalidStateOutcome(String castId) {
+        // 状态机异常走结构化失败，避免把异常文本当作玩家回执。
+        return CastOutcome.newBuilder()
+                .setCastId(castId)
+                .setFailure(TechniqueFailure.INVALID_STATE)
+                .setReason(TechniqueErrors.playerReason(TechniqueFailure.INVALID_STATE))
+                .build();
     }
 
     public Optional<TechniqueHost> statusHost(UUID entityUuid) {
@@ -921,6 +1143,9 @@ public final class TechniqueService {
         private boolean processing;
         private Transition deferred;
         private CastOutcome terminationOutcome;
+        private TechniqueCastEndReason endReason;
+        private boolean endPublished;
+        private boolean initialResponseDelivered;
 
         private Session(TechniqueHost host, long previousMillis, String castId, List<EffectIntent> cleanup) {
             // 游标只属于一次服务实例；身体和持久进度仍由宿主持有。
@@ -943,6 +1168,7 @@ public final class TechniqueService {
     private enum Transition {
         STAGGER,
         UNLOAD,
-        DISCONNECT
+        DISCONNECT,
+        DEATH
     }
 }

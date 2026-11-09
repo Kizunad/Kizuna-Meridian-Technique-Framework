@@ -6,6 +6,8 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCateg
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import java.util.List;
+import net.fabricmc.fabric.api.event.Event;
+import net.fabricmc.fabric.api.event.EventFactory;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -19,6 +21,14 @@ import net.minecraft.world.item.component.ItemContainerContents;
 
 /** 玩家和生物共用的服务端持物事实与数据包规则匹配。 */
 public final class TechniqueWorldItems {
+    public static final Event<HeldItemFactsCallback> ITEM_FACTS = EventFactory.createArrayBacked(
+            HeldItemFactsCallback.class,
+            callbacks -> (stack, item) -> {
+                for (HeldItemFactsCallback callback : callbacks) {
+                    callback.apply(stack, item);
+                }
+            });
+
     private TechniqueWorldItems() {
         // 工具只读取实体当前持物，不保存身体或背包状态。
     }
@@ -43,12 +53,13 @@ public final class TechniqueWorldItems {
         if (stack.isEmpty()) {
             return HeldItem.getDefaultInstance();
         }
-        return HeldItem.newBuilder()
+        HeldItem.Builder result = HeldItem.newBuilder()
                 .setItemId(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
                 .addAllTags(stack.typeHolder().tags().map(tag -> tag.location().toString()).sorted().toList())
                 .setDamageable(stack.getMaxDamage() > 0)
-                .setContainsItems(containsItems(stack))
-                .build();
+                .setContainsItems(containsItems(stack));
+        ITEM_FACTS.invoker().apply(stack, result);
+        return result.build();
     }
 
     public static boolean usable(ItemStack stack) {
@@ -81,5 +92,10 @@ public final class TechniqueWorldItems {
         // 同一项中的多个标签使用任一命中语义。
         return tags.isEmpty() || tags.stream().anyMatch(id ->
                 stack.is(TagKey.create(Registries.ITEM, Identifier.parse(id))));
+    }
+
+    @FunctionalInterface
+    public interface HeldItemFactsCallback {
+        void apply(ItemStack stack, HeldItem.Builder item);
     }
 }

@@ -1,5 +1,31 @@
 # 宿主与施放流程
 
+## 附属周期效果与施放结束
+
+`TechniqueService.setEffectHandler` 安装一个附属桥接器；Fabric 的 `EFFECT_HANDLER` 统一完成多附属分发。
+处理器返回 `EffectHandling.handled()`、`rejected(reason)` 或 `notApplicable()`。
+未认领才继续分发，已认领的拒绝保留原始原因。没有处理器或业务拒绝均返回
+`TechniqueFailure.EFFECT_REJECTED`，不转交普通宿主 `submitEffect`，也不以异常控制拒绝流程。
+周期拒绝晚于起手回执时，经施放结果监听和结束通知报告；Fabric 将同一原因发给施放者动作栏。
+
+`addCastEndListener` / `TechniqueFabric.CAST_ENDED` 提供
+`TechniqueCastEnded(entityUuid, castId, reason, outcome)`。原因包括正常完成、失败、后式替换、僵直、
+死亡、卸载和下线。身体结束后通知一次；表现清理重试不阻塞附属释放资源，也不重复通知。
+附属应按实体和 `cast_id` 保存幂等记录，并在结束时整组删除。
+重载时冷存档的残留进度由 `recoverOnLoad` 清理，只有本服务仍持有的活动会话需要通知世界接管者。
+
+Fabric 接入原版死亡、实体卸载与玩家下线；其他宿主应在撤销身体访问前调用对应的
+`cancelOnDeath`、`cancelOnUnload` 或 `cancelOnDisconnect`。
+`TechniqueFabric.SERVICE_STARTED` 在最终目录及服务装配完毕后触发，附属可校验自己的跨仓声明；
+校验异常中止启动，不能依赖不同模组 `SERVER_STARTED` 回调的注册顺序。
+
+`block_work` 的首次与各周期事件携带稳定 `effect_id`。绑定组织的最慢 `tempo_peak` 在起手冻结，
+阶段与事件时刻向上取整缩放，间隔和持续时间共同拉长；每个原始周期边界单独缩放，避免累计取整丢事件。
+没有绑定组织或旧存档没有速度字段时倍率为 1。
+
+`TechniqueWorldItems.ITEM_FACTS` 让内容附属补充服务端持物巫药种类、品质与用法。
+副手放行开关和方块标签随活动与移动锁下发；实际输入拦截由实体宿主实现。
+
 `TechniqueCasting` 只持有不可变 `TechniqueRegistry`。
 身体、时钟、释放账户和持久回执都归实现 `TechniqueHost` 的宿主；本库不保留身体缓存或独立账本。
 `server/src/test/java/.../MemoryHost.java` 是内存假宿主，底层调用真实 Framework 的 `handleActivity`。

@@ -62,9 +62,10 @@ public final class TechniqueScheduler {
         var starting = new ArrayList<BodyMessages.CapabilityModifier>();
         var pending = new ArrayList<BodyMessages.CapabilityModifier>();
         String encodedCastId = TechniqueValues.encodeCastId(active.getRequest().getCastId());
+        double tempo = TechniqueTempo.multiplier(active);
         int sequence = 0;
         for (TechniqueEffect original : definition.getEffectsList()) {
-            Optional<TechniqueEffect> projected = project(original, active.getClipStartMillis());
+            Optional<TechniqueEffect> projected = project(original, active.getClipStartMillis(), tempo);
             if (projected.isEmpty() || !projected.get().hasTissueModifier()) {
                 continue;
             }
@@ -111,6 +112,7 @@ public final class TechniqueScheduler {
         long previousOffset = relativeOffset(startedMillis, previousMillis);
         long currentOffset = relativeOffset(startedMillis, currentMillis);
         double movementMultiplier = TechniqueMovement.multiplier(active);
+        double tempo = TechniqueTempo.multiplier(active);
         var effects = new ArrayList<EffectIntent>();
         if (previousMillis < startedMillis && currentMillis >= startedMillis) {
             effects.addAll(active.getPredecessorCleanupList());
@@ -121,7 +123,7 @@ public final class TechniqueScheduler {
         if (movementMultiplier < 1 && previousMillis < startedMillis && currentMillis >= startedMillis) {
             effects.add(movement(active, MovementAction.LOCK));
         }
-        effects.addAll(worldEffects(definition, active, previousOffset, currentOffset));
+        effects.addAll(worldEffects(definition, active, previousOffset, currentOffset, tempo));
         if (movementMultiplier < 1
                 && previousMillis < recoveryEndMillis && currentMillis >= recoveryEndMillis) {
             effects.add(movement(active, MovementAction.UNLOCK));
@@ -134,13 +136,14 @@ public final class TechniqueScheduler {
     }
 
     private static List<EffectIntent> worldEffects(TechniqueDefinition definition, ActiveCast active,
-                                                   long previousOffset, long currentOffset) {
+                                                   long previousOffset, long currentOffset, double tempo) {
         // 表现停止按表现声明次序编号，相同内容和时刻的两个效果仍有独立身份。
         var effects = new ArrayList<EffectIntent>();
         int presentationIndex = 0;
         long recoveryOffset = active.getRecoveryEndMillis() - active.getStartedMillis();
         for (int index = 0; index < definition.getEffectsCount(); index++) {
-            Optional<TechniqueEffect> projected = project(definition.getEffects(index), active.getClipStartMillis());
+            Optional<TechniqueEffect> projected = project(definition.getEffects(index), active.getClipStartMillis(),
+                    tempo);
             if (projected.isEmpty()) {
                 continue;
             }
@@ -151,9 +154,15 @@ public final class TechniqueScheduler {
                     || TechniqueSoundCues.targetAnchored(effect)) {
                 continue;
             }
+            if (effect.hasBlockWork()) {
+                addBlockWorkEffects(effects, new BlockWorkContext(definition, active, effect, index,
+                        previousOffset, currentOffset, tempo));
+                continue;
+            }
             long atMillis = effect.getAtMillis();
             if (atMillis > previousOffset && atMillis <= currentOffset) {
-                effects.add(effectIntent(definition, active, effect, index));
+                effects.add(effectIntent(new EffectContext(definition, active, effect, index,
+                        atMillis, "effect_" + index, tempo)));
             }
             if (effect.getOperationCase() == TechniqueEffect.OperationCase.PRESENTATION
                     && effect.getPresentation().getDuration() == PresentationDuration.UNTIL_RECOVERY_END
@@ -169,12 +178,30 @@ public final class TechniqueScheduler {
         return List.copyOf(effects);
     }
 
+    private static void addBlockWorkEffects(List<EffectIntent> effects, BlockWorkContext context) {
+        // 每个原始边界单独缩放，避免间隔向上取整的累计误差丢掉最后一次推进。
+        TechniqueEffect original = context.definition().getEffects(context.index());
+        BlockWork work = original.getBlockWork();
+        long firstOffset = original.getAtMillis() - context.active().getClipStartMillis();
+        long count = work.getDurationMillis() / work.getIntervalMillis();
+        for (long sequence = 0; sequence <= count; sequence++) {
+            long originalOffset = firstOffset + sequence * work.getIntervalMillis();
+            long atMillis = TechniqueTempo.scale(originalOffset, context.tempo());
+            if (atMillis > context.previousOffset() && atMillis <= context.currentOffset()) {
+                String effectId = "block_work_" + context.index() + "_" + sequence;
+                effects.add(effectIntent(new EffectContext(context.definition(), context.active(),
+                        context.effect(), context.index(), atMillis, effectId, context.tempo())));
+            }
+        }
+    }
+
     public static List<EffectIntent> stopEffects(TechniqueDefinition definition, ActiveCast active,
                                                   long previousMillis, long currentMillis) {
         // 显式提供目录的调用方从该定义获取表现声明，其他状态保持起手时的值。
+        double tempo = TechniqueTempo.multiplier(active);
         ActiveCast saved = active.toBuilder()
                 .clearPresentations()
-                .addAllPresentations(presentations(definition, active.getClipStartMillis()))
+                .addAllPresentations(presentations(definition, active.getClipStartMillis(), tempo))
                 .build();
         return stopEffects(saved, previousMillis, currentMillis);
     }
@@ -236,17 +263,29 @@ public final class TechniqueScheduler {
                 .setBurstPeak(definition.getBurstPeak().getValue())
                 .setEndurancePeak(definition.getEndurancePeak().getValue())
                 .setRecoveryPeak(definition.getRecoveryPeak().getValue())
+                .setTempoPeak(tempoPeak(definition))
                 .build();
     }
 
-    private static EffectIntent effectIntent(TechniqueDefinition definition, ActiveCast active,
-                                             TechniqueEffect effect, int index) {
+    private static double tempoPeak(TissueModifier definition) {
+        // 缺省动作速度峰值表示不改变速度，不能把 optional 的零默认值写进身体。
+        if (!definition.hasTempoPeak()) {
+            return 1;
+        }
+        return definition.getTempoPeak().getValue();
+    }
+
+    private static EffectIntent effectIntent(EffectContext context) {
         // 目标和输入方向沿用起手请求；宿主决定实体朝向和实际世界变化。
+        TechniqueDefinition definition = context.definition();
+        ActiveCast active = context.active();
+        TechniqueEffect effect = context.effect();
+        int index = context.index();
         EffectIntent.Builder intent = EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
                 .setTargetId(active.getRequest().getTargetId())
-                .setEffectId("effect_" + index)
-                .setScheduledMillis(addTime(active.getStartedMillis(), effect.getAtMillis()))
+                .setEffectId(context.effectId())
+                .setScheduledMillis(addTime(active.getStartedMillis(), context.scheduledOffset()))
                 .setSelectedHand(active.getSelectedHand())
                 .setDirection(active.getRequest().getDirection());
         if (active.hasLockTarget()) {
@@ -266,18 +305,33 @@ public final class TechniqueScheduler {
             case BREAK_BLOCKS -> intent.setBreakBlocks(breakBlocks(active, effect.getBreakBlocks()));
             case LAUNCH_PROJECTILE -> intent.setLaunchProjectile(
                     launchProjectile(active, effect.getLaunchProjectile()));
+            case BLOCK_WORK -> intent.setBlockWork(effect.getBlockWork());
+            case USE_BREW -> intent.setUseBrew(effect.getUseBrew());
             case SOUND -> intent.setSound(effect.getSound());
-            case PRESENTATION -> {
-                PresentationIntent presentation = PresentationIntent.newBuilder()
-                        .setId(effect.getPresentation().getId())
-                        .setAction(presentationAction(effect.getPresentation().getDuration()))
-                        .setStartMillis(effect.getPresentation().getStartMillis())
-                        .build();
-                intent.setPresentation(presentation);
-            }
+            case PRESENTATION -> intent.setPresentation(presentationIntent(effect.getPresentation(), context.tempo()));
             default -> throw new IllegalArgumentException("组织修正与目标声音不产生独立的世界效果意图");
         }
         return intent.build();
+    }
+
+    private static PresentationIntent presentationIntent(PresentationEffect presentation, double tempo) {
+        // 同一施放的表现与事件使用同一个起手倍率。
+        return PresentationIntent.newBuilder()
+                .setId(presentation.getId())
+                .setAction(presentationAction(presentation.getDuration()))
+                .setStartMillis(presentation.getStartMillis())
+                .setPlaybackSpeedMultiplier(tempo)
+                .build();
+    }
+
+    private record BlockWorkContext(TechniqueDefinition definition, ActiveCast active,
+                                    TechniqueEffect effect, int index, long previousOffset,
+                                    long currentOffset, double tempo) {
+    }
+
+    private record EffectContext(TechniqueDefinition definition, ActiveCast active,
+                                 TechniqueEffect effect, int index, long scheduledOffset,
+                                 String effectId, double tempo) {
     }
 
     private static WeaponStrikeIntent weaponStrike(ActiveCast active, WeaponStrike strike,
@@ -378,6 +432,8 @@ public final class TechniqueScheduler {
         if (action == MovementAction.LOCK) {
             movement.setMovementSpeedMultiplier(TechniqueMovement.multiplier(active));
             movement.setAllowUseWhileCasting(active.getAllowUseWhileCasting());
+            movement.setAllowOffHandUseWhileCasting(active.getAllowOffHandUseWhileCasting());
+            movement.addAllOffHandUseBlockTags(active.getOffHandUseBlockTagsList());
         }
         String effectId = "movement_lock";
         if (action == MovementAction.UNLOCK) {
@@ -400,25 +456,40 @@ public final class TechniqueScheduler {
         return active.getRecoveryEndMillis();
     }
 
-    static List<TechniqueEffect> presentations(TechniqueDefinition definition, long clipStart) {
+    static List<TechniqueEffect> presentations(TechniqueDefinition definition, long clipStart,
+                                                double tempo) {
         // 保存投影后的持续表现，缺少目录时仍能用相同序号停止。
         return definition.getEffectsList().stream()
-                .map(effect -> project(effect, clipStart))
+                .map(effect -> project(effect, clipStart, tempo))
                 .flatMap(Optional::stream)
                 .filter(TechniqueEffect::hasPresentation)
                 .toList();
     }
 
-    private static Optional<TechniqueEffect> project(TechniqueEffect effect, long clipStart) {
+    private static Optional<TechniqueEffect> project(TechniqueEffect effect, long clipStart,
+                                                     double tempo) {
         // 预备段世界效果和修正不发；跨过起播点的持续剪辑从对应时刻接着播放。
         long originalAt = effect.getAtMillis();
         if (originalAt >= clipStart) {
-            return Optional.of(effect.toBuilder().setAtMillis(originalAt - clipStart).build());
+            long projectedAt = TechniqueTempo.scale(originalAt - clipStart, tempo);
+            TechniqueEffect.Builder projected = effect.toBuilder().setAtMillis(projectedAt);
+            if (effect.hasBlockWork()) {
+                projected.setBlockWork(TechniqueTempo.scale(effect.getBlockWork(), tempo));
+            }
+            if (effect.hasPresentation()) {
+                PresentationEffect presentation = effect.getPresentation().toBuilder()
+                        .setStartMillis(TechniqueTempo.scale(
+                                effect.getPresentation().getStartMillis(), tempo))
+                        .build();
+                projected.setPresentation(presentation);
+            }
+            return Optional.of(projected.build());
         }
         PresentationEffect originalPresentation = effect.getPresentation();
         if (effect.hasPresentation() && originalPresentation.getDuration() == PresentationDuration.UNTIL_RECOVERY_END) {
             PresentationEffect presentation = originalPresentation.toBuilder()
-                    .setStartMillis(addTime(originalPresentation.getStartMillis(), clipStart - originalAt))
+                    .setStartMillis(TechniqueTempo.scale(
+                            addTime(originalPresentation.getStartMillis(), clipStart - originalAt), tempo))
                     .build();
             TechniqueEffect projected = effect.toBuilder()
                     .setAtMillis(0)

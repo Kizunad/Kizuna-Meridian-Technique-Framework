@@ -1,5 +1,19 @@
 # 数据契约与校验
 
+## 周期方块效果、巫药事实与动作速度
+
+- `BlockWork` 声明处理器 ID、非空且不重复的目标方块标签、正数米制距离、推进间隔与持续时间。
+  间隔必须为正且不超过持续时间，最后一次事件不得超出施放时长。效果身份由原目录序号和周期序号组成。
+- `UseBrew` 声明处理器 ID、非空且不重复的药种 ID 和用法枚举。实际物品消费由认领该处理器的附属执行。
+- `HeldItem.brew_kind_id`、`brew_quality`（0–3）、`brew_use` 必须同时提供或同时缺省；空手不能携带巫药事实。
+- `allow_off_hand_use_while_casting` 开启时必须声明 `off_hand_use_block_tags`；关闭时不能携带标签，标签不得重复。
+  两项冻结进 `ActiveCast` 并随移动 LOCK 下发；UNLOCK 清除放行规则。
+- `TissueModifier.tempo_peak` 缺省为 1，显式值采用 RATIO 与其他能力峰值同一校验边界。
+  `ActiveCast.tempo_multiplier` 保存起手绑定组织的最慢速度；表现意图携带 `playback_speed_multiplier`。
+  所有事件与阶段按速度倒数缩放并向上取整，零时长仍为零。
+- `TechniqueFailure.EFFECT_REJECTED` 携带附属或缺失处理器的原因文本。生命周期通知与失败交付见
+  [宿主集成](Host-Integration.md#附属周期效果与施放结束)。
+
 协议包为 `kizuna.meridian.technique.v1`，Java 生成类为 `TechniqueMessages`。
 `TechniqueCatalog`、`TechniqueProgress` 的 `schema_version` 为 1。
 字段删除必须保留编号，未知字段、枚举和算子拒绝，不做静默降级。

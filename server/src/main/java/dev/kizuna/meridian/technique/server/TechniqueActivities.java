@@ -148,41 +148,85 @@ final class TechniqueActivities {
 
     private static ActiveCast activeCast(Start start) {
         // 固定本次边界与原始请求，目录卸载、升级和重启都不改变收势行为。
-        long started = start.body().settledAt().elapsedMillis();
+        CastTiming timing = castTiming(start);
+        ActiveCast.Builder active = activeBuilder(start, timing);
+        addOptionalCastRules(active, start);
+        return active.build();
+    }
+
+    private static CastTiming castTiming(Start start) {
+        // 起手只读取一次组织动作速度，并把缩放后的阶段边界冻结进活动存档。
+        BodySnapshot body = start.body();
+        long started = body.settledAt().elapsedMillis();
         CastPhases phases = start.definition().getPhases();
         long clipStart = start.selection().entry().clipStart();
-        long warmupEnd = addTime(started, phases.getWarmupMillis() - clipStart);
-        long activeEnd = addTime(warmupEnd, phases.getActiveMillis());
-        long recoveryEnd = addTime(activeEnd, phases.getRecoveryMillis());
-        String encodedCastId = TechniqueValues.encodeCastId(start.request().getCastId());
-        var active = ActiveCast.newBuilder()
-                .setRequest(start.request())
-                .setStartedMillis(started)
-                .setWarmupEndMillis(warmupEnd)
-                .setActiveEndMillis(activeEnd)
-                .setRecoveryEndMillis(recoveryEnd)
+        double tempo = TechniqueTempo.multiplier(body, start.binding().getSlotsList());
+        long warmupMillis = remainingWarmup(phases.getWarmupMillis(), clipStart);
+        long warmupEnd = addTime(started, TechniqueTempo.scale(warmupMillis, tempo));
+        long activeEnd = addTime(warmupEnd, TechniqueTempo.scale(phases.getActiveMillis(), tempo));
+        long recoveryEnd = addTime(activeEnd, TechniqueTempo.scale(phases.getRecoveryMillis(), tempo));
+        return new CastTiming(started, clipStart, warmupEnd, activeEnd, recoveryEnd, tempo);
+    }
+
+    private static ActiveCast.Builder activeBuilder(Start start, CastTiming timing) {
+        // 活动主体保存起手请求、费用序号和效果时序，供重启后继续使用同一事实。
+        TechniqueDefinition definition = start.definition();
+        CastPhases phases = definition.getPhases();
+        CastRequest request = start.request();
+        CastBinding selection = start.selection();
+        Entry entry = selection.entry();
+        long startedMillis = timing.startedMillis();
+        long clipStartMillis = timing.clipStartMillis();
+        double tempo = timing.tempo();
+        String encodedCastId = TechniqueValues.encodeCastId(request.getCastId());
+        return ActiveCast.newBuilder()
+                .setRequest(request)
+                .setStartedMillis(startedMillis)
+                .setWarmupEndMillis(timing.warmupEndMillis())
+                .setActiveEndMillis(timing.activeEndMillis())
+                .setRecoveryEndMillis(timing.recoveryEndMillis())
                 .setActionInstanceId("technique." + encodedCastId)
                 .setBinding(start.binding())
                 .setInterruptibleByDamage(phases.getInterruptibleByDamage())
-                .setSelectedHand(start.selection().hand())
-                .setMovementSpeedMultiplier(TechniqueMovement.multiplier(start.definition()))
-                .setAllowUseWhileCasting(start.definition().getAllowUseWhileCasting())
-                .setCooldownMillis(start.definition().getCooldownMillis())
-                .setClipStartMillis(clipStart)
-                .addAllPaidWorkSequences(TechniqueScheduledWork.startingSequences(start.definition(), clipStart))
-                .setHeldItemRules(start.selection().entry().heldRules())
-                .addAllPresentations(TechniqueScheduler.presentations(start.definition(), clipStart))
-                .addAllPredecessorCleanup(predecessorCleanup(start.progress(), started));
-        if (TechniqueCombatEffects.hasLegStrike(start.definition())) {
+                .setSelectedHand(selection.hand())
+                .setMovementSpeedMultiplier(TechniqueMovement.multiplier(definition))
+                .setTempoMultiplier(tempo)
+                .setAllowUseWhileCasting(definition.getAllowUseWhileCasting())
+                .setAllowOffHandUseWhileCasting(definition.getAllowOffHandUseWhileCasting())
+                .addAllOffHandUseBlockTags(definition.getOffHandUseBlockTagsList())
+                .setCooldownMillis(definition.getCooldownMillis())
+                .setClipStartMillis(clipStartMillis)
+                .addAllPaidWorkSequences(TechniqueScheduledWork.startingSequences(definition, clipStartMillis))
+                .setHeldItemRules(entry.heldRules())
+                .addAllPresentations(TechniqueScheduler.presentations(definition, clipStartMillis, tempo))
+                .addAllPredecessorCleanup(predecessorCleanup(start.progress(), startedMillis));
+    }
+
+    private static void addOptionalCastRules(ActiveCast.Builder active, Start start) {
+        // 只有目录明确声明的附加规则才写入活动，缺省状态保持协议兼容。
+        TechniqueDefinition definition = start.definition();
+        if (TechniqueCombatEffects.hasLegStrike(definition)) {
             active.setLegRules(start.selection().entry().legRules());
         }
-        if (start.definition().hasLockTarget()) {
-            active.setLockTarget(start.definition().getLockTarget());
+        if (definition.hasLockTarget()) {
+            active.setLockTarget(definition.getLockTarget());
         }
-        if (start.definition().hasTargetLockDistance()) {
-            active.setTargetLockDistance(start.definition().getTargetLockDistance());
+        if (definition.hasTargetLockDistance()) {
+            active.setTargetLockDistance(definition.getTargetLockDistance());
         }
-        return active.build();
+    }
+
+    private record CastTiming(long startedMillis, long clipStartMillis, long warmupEndMillis,
+                              long activeEndMillis, long recoveryEndMillis, double tempo) {
+    }
+
+    private static long remainingWarmup(long warmupMillis, long clipStart) {
+        // 承接只能跳过预备段，负值代表损坏的目录或承接记录，不能截成零继续施放。
+        long remaining = warmupMillis - clipStart;
+        if (remaining < 0) {
+            throw new IllegalArgumentException("承接跳过的预备时长超过起手时长");
+        }
+        return remaining;
     }
 
     private static List<EffectIntent> predecessorCleanup(TechniqueProgress progress, long started) {

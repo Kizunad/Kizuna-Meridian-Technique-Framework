@@ -113,6 +113,9 @@ message HeldItem {
   repeated string tags = 2;
   optional bool damageable = 3;
   optional bool contains_items = 4;
+  string brew_kind_id = 5; // 巫药种类；非巫药为空
+  optional int32 brew_quality = 6; // 巫药品质组件值 [0, 3]
+  optional BrewUseMethod brew_use = 7;
 }
 message HeldItems {
   HeldItem main_hand = 1;
@@ -121,6 +124,15 @@ message HeldItems {
   optional ProjectileWeaponCategory main_hand_projectile_weapon = 4;
   optional ProjectileWeaponCategory off_hand_projectile_weapon = 5;
   optional bool can_find_ammunition = 6;
+}
+enum BrewUseMethod {
+  BREW_USE_METHOD_UNSPECIFIED = 0;
+  DRINK = 1;
+  ANOINT = 2;
+  THROW = 3;
+  SPLASH = 4;
+  FAN = 5;
+  MIST = 6;
 }
 enum Category {
   CATEGORY_UNSPECIFIED = 0;
@@ -197,6 +209,7 @@ message TissueModifier {
   Quantity endurance_peak = 5;
   Quantity recovery_peak = 6;
   ModifierActivation activation = 7;
+  Quantity tempo_peak = 8; // RATIO，动作速度倍率；缺省为 1
   // 不存在提前移除字段；库添加的每条曲线都完整运行，到期由 Framework 清理。
 }
 enum ImpulseDirection {
@@ -463,7 +476,21 @@ message TechniqueEffect {
     LegStrike leg_strike = 20;
     LaunchProjectile launch_projectile = 9;
     WorkCost work = 10; // 在 at_millis 开始该段做功；排队不扣费，到时与已付序号原子提交。
+    BlockWork block_work = 21;
+    UseBrew use_brew = 22;
   }
+}
+message BlockWork {
+  string processor_id = 1;
+  repeated string block_tags = 2; // 目标方块任一标签命中
+  Quantity maximum_distance = 3; // METER
+  int64 interval_millis = 4;
+  int64 duration_millis = 5;
+}
+message UseBrew {
+  string processor_id = 1;
+  repeated string brew_kind_ids = 2;
+  repeated BrewUseMethod use_methods = 3;
 }
 message Presentation {
   string icon_id = 1;
@@ -540,6 +567,8 @@ message TechniqueDefinition {
   optional bool require_ammunition = 17; // 覆盖书级要求；拉空弓显式填 false
   optional bool lock_target = 18;
   Quantity target_lock_distance = 19; // lock_target=true 时必须声明，单位 METER
+  optional bool allow_off_hand_use_while_casting = 20;
+  repeated string off_hand_use_block_tags = 21;
 }
 
 enum TechniqueFailure {
@@ -570,6 +599,7 @@ enum TechniqueFailure {
   CROSSBOW_REQUIRED = 24;
   OTHER_HAND_AMMUNITION_REQUIRED = 25;
   AMMUNITION_REQUIRED = 26;
+  EFFECT_REJECTED = 27;
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -606,6 +636,7 @@ message PresentationIntent {
   string id = 1;
   PresentationAction action = 2;
   int64 start_millis = 3; // STOP 必须为 0
+  optional double playback_speed_multiplier = 4; // 动作速度倍率；缺省为 1
 }
 enum MovementAction {
   MOVEMENT_ACTION_UNSPECIFIED = 0;
@@ -616,6 +647,8 @@ message MovementIntent {
   MovementAction action = 1;
   optional double movement_speed_multiplier = 2; // LOCK 为 [0,1]，缺省 1；UNLOCK 不携带倍率
   bool allow_use_while_casting = 3; // 只随 LOCK 下发本次是否放行右键；UNLOCK 不携带
+  bool allow_off_hand_use_while_casting = 4;
+  repeated string off_hand_use_block_tags = 5;
 }
 // 世界效果只交给宿主，不包含身体修正。
 message EffectIntent {
@@ -637,6 +670,8 @@ message EffectIntent {
     LegStrikeIntent leg_strike = 20;
     LaunchProjectileIntent launch_projectile = 17;
     TargetLockIntent target_lock = 18;
+    BlockWork block_work = 21;
+    UseBrew use_brew = 22;
   }
 }
 message TechniqueHostRequest {
@@ -715,6 +750,9 @@ message ActiveCast {
   Quantity target_lock_distance = 19;
   repeated int32 paid_work_sequences = 20; // 已付分段做功在原目录 effects 中的序号，随身体保存。
   repeated kizuna.meridian.v1.CapabilityModifier pending_modifiers = 21; // 已绑定、尚未登记的到时曲线。
+  optional bool allow_off_hand_use_while_casting = 22;
+  repeated string off_hand_use_block_tags = 23;
+  optional double tempo_multiplier = 24; // 起手冻结的最慢组织动作速度
 }
 message LastCast {
   TechniqueReference technique = 1;

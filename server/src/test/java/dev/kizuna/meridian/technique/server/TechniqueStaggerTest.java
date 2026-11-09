@@ -39,6 +39,20 @@ public class TechniqueStaggerTest {
     private static final double SPEEDUP = 1.5;
 
     @Test
+    public void castGuardRejectsBeforeBodyMutationAndAllowsOnlyDelegatedRequest() {
+        // 可信宿主可只放行本次代发，拒绝的玩家请求不扣费、不写活动和冷却。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        var before = host.current();
+        var delegated = request(before, "delegated");
+        service.addCastGuard((entity, candidate) -> candidate == delegated);
+        var denied = service.cast(ENTITY, request(before, "player"));
+        assertEquals(TechniqueFailure.FRAMEWORK_REJECTED, denied.getFailure());
+        assertEquals(before, host.current());
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, delegated).getPhase());
+    }
+
+    @Test
     public void staggerInterruptsInterruptibleWarmup() {
         // 起手中的可打断式受僵直即打断，费用不退、施放清除。
         MemoryHost host = learnedHost();

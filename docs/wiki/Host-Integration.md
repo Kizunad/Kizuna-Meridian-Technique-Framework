@@ -435,6 +435,14 @@ Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、�
 正常维度切换保留剩余效果，死亡清理归属，复活不沿用旧组织。
 生命周期操作在服务端身体事件线程串行执行，常规 tick 只检查是否需要加载对账或长曲线续接。
 
+## 可信施放准入
+
+宿主可在 `SERVICE_STARTED` 回调中通过 `TechniqueService.addCastGuard(BiPredicate<UUID, CastRequest>)`
+登记施放准入。所有 `cast` 在读取或修改身体前依次检查；任一返回 false，回执为 Framework `ACCESS_DENIED`，
+并沿同一施放观察者发布。已支付施放的推进、费用、冷却和结束流程保持既有语义。
+准入仅属于可信服务端装配，不能由客户端注册。Human 受控会话只在一次同步代发调用内放行该请求对象，
+不能以相同 cast ID 或另一份请求复制品绕过主动施放拒绝。
+
 ## 调试入口
 
 调试用途，不进正式玩法。以下两个登记点只在服务端回调，由调试附属在初始化时登记一次；权限检查留在调试命令层。

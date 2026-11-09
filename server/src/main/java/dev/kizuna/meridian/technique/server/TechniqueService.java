@@ -33,6 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -56,6 +57,7 @@ public final class TechniqueService {
     private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
     private TechniqueEffectHandler effectHandler;
+    private final List<BiPredicate<UUID, CastRequest>> castGuards = new ArrayList<>();
 
     public TechniqueService(TechniqueRegistry registry, TechniqueHostDirectory hosts) {
         // 服务只持有不可变目录和宿主发现器，身体状态始终从宿主读取。
@@ -72,7 +74,12 @@ public final class TechniqueService {
     }
 
     private CastOutcome resolveCast(UUID entityUuid, CastRequest request) {
-        // 先确认实体有唯一宿主，再让状态机校验身体、目录、学会和冷却。
+        // 先经可信宿主准入，再确认唯一身体并校验目录、学会和冷却。
+        for (var guard : castGuards) {
+            if (!guard.test(entityUuid, request)) {
+                return hostFailureOutcome(request.getCastId(), FailureCode.ACCESS_DENIED);
+            }
+        }
         Session current = sessions.get(entityUuid);
         if (current != null && (current.processing || current.terminating)) {
             return pendingFailure(request);
@@ -109,6 +116,11 @@ public final class TechniqueService {
     public TechniqueRegistry registry() {
         // 命令和宿主复用服务启动时固定的目录，不再次查询内容入口。
         return registry;
+    }
+
+    public void addCastGuard(BiPredicate<UUID, CastRequest> guard) {
+        // 可信宿主在服务启动时登记准入规则，所有起式入口共用且不影响已付款施放的推进。
+        castGuards.add(Objects.requireNonNull(guard));
     }
 
     public boolean exertLeap(UUID entityUuid, TechniqueDefinition definition, LeapProfile leap, String requestId) {

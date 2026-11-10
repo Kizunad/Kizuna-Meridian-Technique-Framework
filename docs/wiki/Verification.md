@@ -77,6 +77,14 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 | 大写、大小写不同、最长施放 ID 的动作与修正合法且不碰撞 | `TechniqueCastingTest.castIdsProduceLegalDistinctFrameworkIds` |
 | 旧格式修正与新编码施放共存 | `TechniqueCastingTest.encodedCastIdsCoexistWithLegacyModifiers` |
 | `EVEN` 任一经脉不足整笔拒绝 | `TechniqueCastingTest.evenDistributionRejectsWhenOneBoundMeridianCannotPay` |
+| 指定属性只扣本行，接受更高相态 | `TechniqueQiPaymentTest.elementMinimumPaysOnlyNamedAttributeAndAcceptsHigherPhase` |
+| 无属性、别的行、相态不够、本行不足均报本行真元不足 | `TechniqueQiPaymentTest.elementMinimumRejectsUnattributedOtherElementLowerPhaseAndShortage` |
+| `BY_BALANCE` 按余额比例分摊，空经脉不分摊，合计不足拒绝 | `TechniqueQiPaymentTest.byBalanceSplitsTotalByPayableBalanceAndSkipsEmptyMeridians` |
+| 器官炼化按间隔在窗口内起批并携带起手绑定 | `TechniqueOrganRefineTest.batchesStartEveryIntervalInsideWindowAndCarryBinding` |
+| 器官炼化随动作速度拉长间隔与窗口，批数不变 | `TechniqueOrganRefineTest.slowTempoStretchesIntervalAndWindowWithoutChangingCount` |
+| 打断后不再交付后续批次，结束通知一次 | `TechniqueOrganRefineTest.staggerStopsLaterBatchesAndPublishesCastEndOnce` |
+| 非法炼化声明与意图拒绝 | `TechniqueOrganRefineTest.invalidDeclarationsAndIntentsAreRejected` |
+| 本行费用卷轴文字标出行名 | `TechniqueScrollTextTest.elementCostNamesItsElementAndBalanceKeepsTotal` |
 | 真元不足整笔拒绝 | `TechniqueCastingTest.insufficientQiRejectsWholeActivity` |
 | 后续做功预算不足不留下先前资源变化 | `TechniqueCastingTest.insufficientWorkBudgetRollsBackQiActionsAndProgress` |
 | 只能从已开拓经脉扣费 | `TechniqueCastingTest.onlyOpenedMeridiansCanFundCasting` |

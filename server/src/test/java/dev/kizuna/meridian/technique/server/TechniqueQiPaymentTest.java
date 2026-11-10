@@ -21,6 +21,9 @@ import org.junit.Test;
 import java.util.List;
 import java.util.Random;
 
+import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.INSUFFICIENT_ATTRIBUTE_QI;
+import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.INSUFFICIENT_QI;
+
 import static dev.kizuna.meridian.technique.server.Fixtures.COST_QI;
 import static dev.kizuna.meridian.technique.server.Fixtures.GAS_DENSITY;
 import static dev.kizuna.meridian.technique.server.Fixtures.LIQUID_DENSITY;
@@ -52,6 +55,14 @@ public class TechniqueQiPaymentTest {
     private static final double MINIMUM_FRAGMENT_RATIO = 0.1;
     private static final double MAXIMUM_FRAGMENT_RATIO = 0.9;
     private static final long RANDOM_SEED = 837;
+    private static final String FIRE = "meridian:fire";
+    private static final String WATER = "meridian:water";
+    private static final String METAL = "meridian:metal";
+    private static final double RICH_FIRE = 30;
+    private static final double POOR_FIRE = 10;
+    private static final double BALANCE_COST = 8;
+    private static final double RICH_SHARE = 6;
+    private static final double POOR_SHARE = 2;
 
     @Test
     public void flexiblePaymentUsesMixedAttributesAndPhasesAndPreservesReleasedInventory() {
@@ -140,6 +151,55 @@ public class TechniqueQiPaymentTest {
     }
 
     @Test
+    public void elementMinimumPaysOnlyNamedAttributeAndAcceptsHigherPhase() {
+        // 本行模式只扣指定属性；液态水满足气态下限，库存里的别的属性即使够也不抵价。
+        MemoryHost fire = castSuccessfully(body(Shape.TENDRIL), withCost(element(FIRE, QiPhase.FREE, COST_QI)));
+        Qi paidFire = new Qi(Qi.QiAttribute.FIRE, COST_QI, GAS_DENSITY);
+        assertEquals(new QiInventory(List.of(paidFire)), fire.store.environmentQi());
+        MemoryHost water = castSuccessfully(body(Shape.TENDRIL), withCost(element(WATER, QiPhase.GAS, COST_QI)));
+        Qi paidWater = new Qi(Qi.QiAttribute.WATER, COST_QI, LIQUID_DENSITY);
+        assertEquals(new QiInventory(List.of(paidWater)), water.store.environmentQi());
+    }
+
+    @Test
+    public void elementMinimumRejectsUnattributedOtherElementLowerPhaseAndShortage() {
+        // 无属性、别的行、相态不够和本行余额不足都报本行真元不足，且不落任何账。
+        Qi unattributed = new Qi(Qi.QiAttribute.NONE, QI_AMOUNT, LIQUID_DENSITY);
+        BodySnapshot neutral = withInventory(body(Shape.TENDRIL), new QiInventory(List.of(unattributed)));
+        assertUnpaid(neutral, withCost(element(FIRE, QiPhase.FREE, COST_QI)), INSUFFICIENT_ATTRIBUTE_QI);
+        List<QiCost> invalid = List.of(
+                element(METAL, QiPhase.FREE, COST_QI),
+                element(FIRE, QiPhase.LIQUID, COST_QI),
+                element(FIRE, QiPhase.FREE, TOTAL_COST));
+        for (QiCost cost : invalid) {
+            assertUnpaid(body(Shape.TENDRIL), withCost(cost), INSUFFICIENT_ATTRIBUTE_QI);
+        }
+        assertEquals("身上没有足够的本行真元", TechniqueErrors.playerReason(INSUFFICIENT_ATTRIBUTE_QI));
+    }
+
+    @Test
+    public void byBalanceSplitsTotalByPayableBalanceAndSkipsEmptyMeridians() {
+        // 两脉本行余额 3:1 时按比例分摊；另一脉没有本行真元时由有余额的一脉独付，合计不足时拒绝。
+        TechniqueDefinition balanced = withPairedSource(withCost(balance(BALANCE_COST)));
+        Qi rich = new Qi(Qi.QiAttribute.FIRE, RICH_FIRE, GAS_DENSITY);
+        Qi poor = new Qi(Qi.QiAttribute.FIRE, POOR_FIRE, GAS_DENSITY);
+        Qi water = new Qi(Qi.QiAttribute.WATER, WATER_AMOUNT, LIQUID_DENSITY);
+        BodySnapshot uneven = withInventories(body(Shape.PAIRED), List.of(rich, water), List.of(poor, water));
+        MemoryHost split = castSuccessfully(uneven, balanced);
+        assertEquals(RICH_FIRE - RICH_SHARE, fire(split, "a"), TOLERANCE);
+        assertEquals(POOR_FIRE - POOR_SHARE, fire(split, "b"), TOLERANCE);
+        assertEquals(BALANCE_COST, split.store.environmentQi().totalQi(), TOLERANCE);
+
+        BodySnapshot oneSided = withInventories(body(Shape.PAIRED), List.of(rich, water), List.of(water));
+        MemoryHost single = castSuccessfully(oneSided, balanced);
+        assertEquals(RICH_FIRE - BALANCE_COST, fire(single, "a"), TOLERANCE);
+        assertEquals(WATER_AMOUNT, lumen(single, "b").totalQi(), TOLERANCE);
+
+        BodySnapshot shortage = withInventories(body(Shape.PAIRED), List.of(poor), List.of(water));
+        assertUnpaid(shortage, withPairedSource(withCost(balance(RICH_FIRE))), INSUFFICIENT_ATTRIBUTE_QI);
+    }
+
+    @Test
     public void defaultExactMatchingKeepsAttributePhaseAndSingleVariantRequirements() {
         // 缺省匹配仍精确支付火气态，不能借用其他属性、更高相态或合计余额。
         QiCost exact = definition().getCost().getQi(0);
@@ -185,6 +245,64 @@ public class TechniqueQiPaymentTest {
                 .build();
     }
 
+    private static QiCost element(String attribute, QiPhase minimumPhase, double amount) {
+        // 本行模式固定属性并给出最低相态，单脉样本逐脉收取声明费用。
+        return definition().getCost().getQi(0).toBuilder()
+                .setAttribute(attribute)
+                .setPhase(minimumPhase)
+                .setMatching(QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE)
+                .setAmount(quantity(amount, Unit.QI))
+                .build();
+    }
+
+    private static QiCost balance(double amount) {
+        // 火行游炁以上的总费用按两脉可付余额分摊。
+        return element(FIRE, QiPhase.FREE, amount).toBuilder()
+                .setDistribution(QiDistribution.BY_BALANCE)
+                .build();
+    }
+
+    private static TechniqueDefinition withPairedSource(TechniqueDefinition base) {
+        // 来源槽绑定两条经脉，才能比较分摊比例。
+        TechniqueSlot source = base.getSlots(0).toBuilder()
+                .setMinimumCount(PAIRED_MERIDIANS)
+                .setMaximumCount(PAIRED_MERIDIANS)
+                .build();
+        return base.toBuilder()
+                .setSlots(0, source)
+                .build();
+    }
+
+    private static BodySnapshot withInventories(BodySnapshot body, List<Qi> first, List<Qi> second) {
+        // 按结构顺序分别替换两条经脉的内腔，外壁和其余状态不变。
+        var source = BodyProtobuf.toMessage(body);
+        var replacement = source.toBuilder().clearMeridianStates();
+        List<List<Qi>> inventories = List.of(first, second);
+        for (int index = 0; index < source.getMeridianStatesCount(); index++) {
+            var lumen = BodyProtobuf.toInventory(new QiInventory(inventories.get(index)));
+            var updated = source.getMeridianStates(index).toBuilder().setLumenQi(lumen).build();
+            replacement.addMeridianStates(updated);
+        }
+        return BodyProtobuf.fromMessage(replacement.build());
+    }
+
+    private static QiInventory lumen(MemoryHost host, String meridianId) {
+        // 按局部 ID 查找，避免依赖快照列表顺序。
+        return host.current().meridianStates().stream()
+                .filter(state -> state.id().value().equals(meridianId))
+                .findFirst()
+                .orElseThrow()
+                .lumenQi();
+    }
+
+    private static double fire(MemoryHost host, String meridianId) {
+        // 只统计火行余额，确认分摊没有动到同脉的其他属性。
+        return lumen(host, meridianId).entries().stream()
+                .filter(qi -> qi.attribute().equals(Qi.QiAttribute.FIRE))
+                .mapToDouble(Qi::amount)
+                .sum();
+    }
+
     private static TechniqueDefinition withCost(QiCost qi) {
         // 只替换费用声明，其余槽位和行为沿用公开施放样本。
         TechniqueDefinition base = definition();
@@ -216,11 +334,16 @@ public class TechniqueQiPaymentTest {
     }
 
     private static void assertUnpaid(BodySnapshot before, TechniqueDefinition definition) {
+        // 任意属性与精确模式的余额问题沿用通用真元不足原因。
+        assertUnpaid(before, definition, INSUFFICIENT_QI);
+    }
+
+    private static void assertUnpaid(BodySnapshot before, TechniqueDefinition definition, TechniqueFailure failure) {
         // 失败须发生在原子提交前，不能留下冷却、做功、释放或部分余额更新。
         var host = new MemoryHost(before);
         var casting = new TechniqueCasting(registry(definition));
         CastOutcome outcome = casting.cast(host, request(before, "unpaid"));
-        assertEquals(TechniqueFailure.INSUFFICIENT_QI, outcome.getFailure());
+        assertEquals(failure, outcome.getFailure());
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
         assertTrue(host.store.environmentQi().entries().isEmpty());

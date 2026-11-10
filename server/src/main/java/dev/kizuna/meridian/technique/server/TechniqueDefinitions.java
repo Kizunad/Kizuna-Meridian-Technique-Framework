@@ -182,7 +182,8 @@ final class TechniqueDefinitions {
     private static void validateQiMatching(AddonRegistry addons, QiCost cost) {
         // 旧目录保持精确匹配，任意属性模式拒绝同时填写属性以免产生两种解释。
         switch (cost.getMatching()) {
-            case EXACT_VARIANT -> validateSymbol(addons, cost.getAttribute(), ContentSymbolKind.QI_ATTRIBUTE);
+            case EXACT_VARIANT, ATTRIBUTE_AT_LEAST_PHASE -> validateSymbol(addons, cost.getAttribute(),
+                    ContentSymbolKind.QI_ATTRIBUTE);
             case ANY_ATTRIBUTE_AT_LEAST_PHASE -> {
                 if (!cost.getAttribute().isEmpty()) {
                     throw TechniqueErrors.invalid("cost.qi.attribute", "任意属性匹配时属性必须为空");
@@ -270,6 +271,7 @@ final class TechniqueDefinitions {
                     }
                 }
                 case USE_BREW -> TechniqueBrewEffects.validateUseBrew(effect.getUseBrew());
+                case ORGAN_REFINE -> validateOrganRefine(slots, effect, durationMillis);
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
@@ -288,6 +290,21 @@ final class TechniqueDefinitions {
                 }
                 default -> throw TechniqueErrors.invalid("effects", "未知或缺少算子");
             }
+        }
+    }
+
+    private static void validateOrganRefine(Map<String, TechniqueSlot> slots, TechniqueEffect effect,
+                                            long durationMillis) {
+        // 炼化从经脉槽取料送入器官槽；起批窗口越过施放时长时，施放结束后仍会排出新批。
+        OrganRefine refine = effect.getOrganRefine();
+        TechniqueOrganRefines.validate(refine);
+        TechniqueSlot organs = requireSlot(slots, refine.getOrganSlotId(), ModuleKind.ORGAN);
+        TechniqueSlot meridians = requireSlot(slots, refine.getMeridianSlotId(), ModuleKind.MERIDIAN);
+        if (organs.getMinimumCount() == 0 || meridians.getMinimumCount() == 0 || !meridians.getRequireOpened()) {
+            throw TechniqueErrors.invalid("organ_refine", "器官槽与经脉槽都不可缺省，经脉槽须要求已开拓");
+        }
+        if (refine.getDurationMillis() > durationMillis - effect.getAtMillis()) {
+            throw TechniqueErrors.invalid("organ_refine.duration_millis", "起批窗口超出施放时长");
         }
     }
 

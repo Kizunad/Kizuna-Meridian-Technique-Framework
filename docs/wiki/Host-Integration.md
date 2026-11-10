@@ -23,6 +23,11 @@ Fabric 接入原版死亡、实体卸载与玩家下线；其他宿主应在撤�
 阶段与事件时刻向上取整缩放，间隔和持续时间共同拉长；每个原始周期边界单独缩放，避免累计取整丢事件。
 没有绑定组织或旧存档没有速度字段时倍率为 1。
 
+`organ_refine` 每批是一次附属效果，经 `TechniqueFabric.EFFECT_HANDLER` 交给认领该配方族的宿主，
+`cast_id` 与 `effect_id` 组成幂等身份。批次间隔与窗口终点同样按起手冻结的速度缩放。
+施放结束或打断后功法库不再交付后续批次；宿主用 `TechniqueFabric.CAST_ENDED` 释放该施放占用的器官任务，
+已开始的那一批照宿主规则做完。
+
 `TechniqueWorldItems.ITEM_FACTS` 让内容附属补充服务端持物巫药种类、品质与用法。
 副手放行开关和方块标签随活动与移动锁下发；实际输入拦截由实体宿主实现。
 
@@ -141,7 +146,7 @@ Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动
 2. 按 `technique_start_<cast_id>` 查持久回执；相同请求返回原起手结果并标记 `replayed`，不同请求返回冲突。
 3. 宿主结算时间并提供身体、双手与 `TechniqueHostFacts`。检查存活、精确功法版本、可信 `known`、冷却及旧曲线结束；
    有其他施放时必须存在合法承接窗口。重新绑定并按书级规则选手，没有可用手时拒绝。
-4. 按每项 `QiCost.distribution` 扣除绑定经脉的内腔费用：`EACH` 每条经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount`；释放实际扣除的真元，不能扣外壁、未开拓经脉或其他属性余额。
+4. 按每项 `QiCost.distribution` 扣除绑定经脉的内腔费用：`EACH` 每条经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount`，`BY_BALANCE` 按各经脉可付余额比例分摊总 `amount`；释放实际扣除的真元，不能扣外壁、未开拓经脉或不符合 `matching` 的余额。
 5. 生成一份 `BodyActivity`，包括 `accounts`、`released_qi`、`efforts`、`start_actions`、`add_modifiers`、`progress`。
    组织和器官占用取并集。经脉不因施放自动接管自然扩散；新增修正和扣费同一 revision 原子生效。
    承接时在同一活动中加入前式 `stop_actions`，原子替换动作，不先独立取消前式，也不提前其冷却。

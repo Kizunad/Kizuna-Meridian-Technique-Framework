@@ -15,6 +15,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -39,7 +40,12 @@ public final class TechniqueAddonResources {
             TechniqueValues.id(id, "binding_templates[" + index + "].id");
             pending.add(id.substring(0, id.indexOf(':')));
         }
-        Map<String, AddonBundle> bundles = bundles(pending);
+        return registry(pending);
+    }
+
+    public AddonRegistry registry(Set<String> namespaces) {
+        // 宿主按配方族等命名空间直接取内容包时，与模板校验共用读取、依赖展开和 Framework 校验。
+        Map<String, AddonBundle> bundles = bundles(new TreeSet<>(namespaces));
         AddonRegistration registration = AddonRegistration.newBuilder()
                 .setProtocolVersion(MeridianProtocol.VERSION)
                 .setHost(VALIDATION_HOST)

@@ -291,15 +291,13 @@ final class TechniqueActivities {
                 .collect(Collectors.toMap(state -> state.id().value(), Function.identity()));
         var replacements = new LinkedHashMap<String, QiInventory>();
         var released = new ArrayList<QiInventory>();
+        Function<String, QiInventory> balance = moduleId -> replacements.getOrDefault(moduleId,
+                opened(states.get(moduleId)).lumenQi());
         for (QiCost cost : costs) {
             BoundSlot slot = slots.get(cost.getSlotId());
-            for (CostAllocation allocation : allocations(cost, slot)) {
+            for (CostAllocation allocation : allocations(cost, slot, balance)) {
                 String moduleId = allocation.moduleId();
-                MeridianState state = states.get(moduleId);
-                if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
-                    throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED);
-                }
-                QiInventory previous = replacements.getOrDefault(moduleId, state.lumenQi());
+                QiInventory previous = balance.apply(moduleId);
                 QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount());
                 replacements.put(moduleId, QiAccounting.debit(previous, debit));
                 released.add(debit);
@@ -318,7 +316,16 @@ final class TechniqueActivities {
         return new Accounts(List.copyOf(changes), QiInventory.combine(released));
     }
 
-    private static List<CostAllocation> allocations(QiCost cost, BoundSlot slot) {
+    private static MeridianState opened(MeridianState state) {
+        // 扣费前确认经脉仍已开拓；按余额分摊也先检查全部绑定经脉，再计算可付余额。
+        if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
+            throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED);
+        }
+        return state;
+    }
+
+    private static List<CostAllocation> allocations(QiCost cost, BoundSlot slot,
+                                                    Function<String, QiInventory> balance) {
         // EVEN 使用稳定的经脉顺序，最后一条吸收浮点余数，确保总扣费仍等于声明总量。
         List<String> moduleIds = slot.getModuleIdsList().stream()
                 .sorted(Comparator.naturalOrder())
@@ -329,8 +336,48 @@ final class TechniqueActivities {
                     .map(moduleId -> new CostAllocation(moduleId, amount))
                     .toList();
             case EVEN -> evenAllocations(moduleIds, amount);
+            case BY_BALANCE -> balanceAllocations(cost, moduleIds, balance);
             default -> throw TechniqueErrors.rejected(INVALID_STATE);
         };
+    }
+
+    private static List<CostAllocation> balanceAllocations(QiCost cost, List<String> moduleIds,
+                                                           Function<String, QiInventory> balance) {
+        // 各经脉按可付余额比例分担；没有可付余额的经脉不分摊，合计不足时与单脉不足给出同一原因。
+        double amount = cost.getAmount().getValue();
+        var payable = new LinkedHashMap<String, Double>();
+        for (String moduleId : moduleIds) {
+            double available = TechniqueQiPayment.payable(balance.apply(moduleId), cost).stream()
+                    .mapToDouble(Qi::amount)
+                    .sum();
+            if (available >= QiAccounting.MIN_TRANSFER_QI) {
+                payable.put(moduleId, available);
+            }
+        }
+        double total = payable.values().stream().mapToDouble(Double::doubleValue).sum();
+        if (payable.isEmpty() || total < amount) {
+            throw TechniqueErrors.rejected(TechniqueQiPayment.shortage(cost));
+        }
+        // 余额最大的经脉（同额取字典序靠前者）吸收余数和不足最小转移量的小份额。
+        String largest = payable.entrySet().stream()
+                .max(Map.Entry.<String, Double>comparingByValue()
+                        .thenComparing(Map.Entry.comparingByKey(Comparator.reverseOrder())))
+                .orElseThrow()
+                .getKey();
+        var allocations = new ArrayList<CostAllocation>();
+        double assigned = 0;
+        for (Map.Entry<String, Double> entry : payable.entrySet()) {
+            double share = Math.min(entry.getValue(), amount * entry.getValue() / total);
+            if (entry.getKey().equals(largest) || share < QiAccounting.MIN_TRANSFER_QI) {
+                continue;
+            }
+            allocations.add(new CostAllocation(entry.getKey(), share));
+            assigned += share;
+        }
+        // total ≥ amount 时余数至多超出最大余额一个最小转移量级，截断只舍去这类零头和浮点尾差。
+        double rest = Math.min(payable.get(largest), amount - assigned);
+        allocations.add(new CostAllocation(largest, rest));
+        return List.copyOf(allocations);
     }
 
     private static List<CostAllocation> evenAllocations(List<String> moduleIds, double amount) {

@@ -15,6 +15,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
@@ -41,6 +42,26 @@ public final class TechniqueAddonResourcesTest {
         write(root, TechniqueAddonResources.RESOURCE_PREFIX + "dependency.pb", bundle("dependency"));
         try (var loader = loader(root)) {
             assertNotNull(new TechniqueAddonResources(loader).registry(catalog()));
+        }
+    }
+
+    @Test
+    public void namespaceRequestsShareDependencyClosureAndMissingReport() throws Exception {
+        // 宿主按命名空间取配方时同样装配依赖；缺包直接报出资源路径，不退化为空配方表。
+        Path root = files.newFolder("mods").toPath();
+        AddonDependency dependency = AddonDependency.newBuilder()
+                .setNamespace("dependency")
+                .setVersions(versions())
+                .build();
+        AddonBundle base = bundle("sample");
+        AddonManifest manifest = base.getManifest().toBuilder().addDependencies(dependency).build();
+        write(root, RESOURCE, base.toBuilder().setManifest(manifest).build());
+        try (var loader = loader(root)) {
+            var resources = new TechniqueAddonResources(loader);
+            String missing = TechniqueAddonResources.RESOURCE_PREFIX + "dependency.pb";
+            assertFailure(() -> resources.registry(Set.of("sample")), missing);
+            write(root, missing, bundle("dependency"));
+            assertNotNull(resources.registry(Set.of("sample")));
         }
     }
 

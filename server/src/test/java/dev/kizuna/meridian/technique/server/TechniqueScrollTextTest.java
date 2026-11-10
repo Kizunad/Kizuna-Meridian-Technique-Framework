@@ -48,4 +48,20 @@ public final class TechniqueScrollTextTest {
         assertTrue(TechniqueScrollText.details(empty).get(0).startsWith("真元：0 元"));
         assertFalse(TechniqueScrollText.details(empty).get(2).contains("是"));
     }
+
+    @Test
+    public void elementCostNamesItsElementAndBalanceKeepsTotal() {
+        // 本行真元费用标出行名，按余额分摊写整式总额而非每脉费用。
+        var catalog = TechniqueCatalogManifest.parseText("scroll_element", """
+                schema_version: 1 namespace: "sample"
+                definitions {
+                  id: "sample:metal" version: 1
+                  cost { qi { amount { value: 0.3 unit: QI } distribution: BY_BALANCE
+                    matching: ATTRIBUTE_AT_LEAST_PHASE attribute: "meridian:metal" phase: FREE } }
+                  phases { warmup_millis: 2600 recovery_millis: 2400 }
+                  cooldown_millis: 22000
+                }
+                """);
+        assertEquals("真元：0.3 元（金）　冷却：22 秒", TechniqueScrollText.details(catalog.getDefinitions(0)).get(0));
+    }
 }

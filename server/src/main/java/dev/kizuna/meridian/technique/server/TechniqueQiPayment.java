@@ -4,11 +4,14 @@ import dev.kizuna.meridian.core.Qi;
 import dev.kizuna.meridian.core.QiAccounting;
 import dev.kizuna.meridian.core.QiInventory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCost;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCostMatching;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.INSUFFICIENT_ATTRIBUTE_QI;
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.INSUFFICIENT_QI;
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.INVALID_STATE;
 
@@ -23,7 +26,36 @@ final class TechniqueQiPayment {
         Qi.QiPhase phase = Qi.QiPhase.valueOf(cost.getPhase().name());
         return switch (cost.getMatching()) {
             case EXACT_VARIANT -> exact(inventory, cost, phase, amount);
-            case ANY_ATTRIBUTE_AT_LEAST_PHASE -> flexible(inventory, phase, amount);
+            case ANY_ATTRIBUTE_AT_LEAST_PHASE, ATTRIBUTE_AT_LEAST_PHASE -> take(payable(inventory, cost), amount,
+                    shortage(cost));
+            default -> throw TechniqueErrors.rejected(INVALID_STATE);
+        };
+    }
+
+    static List<Qi> payable(QiInventory inventory, QiCost cost) {
+        // 只列出本项能付的库存；从低相态到高相态、同相态按属性 ID 取用，排序不受库存消息的排列影响。
+        Qi.QiPhase phase = Qi.QiPhase.valueOf(cost.getPhase().name());
+        return inventory.entries().stream()
+                .filter(qi -> matches(qi, cost, phase))
+                .sorted(Comparator.comparing(Qi::phase).thenComparing(qi -> qi.attribute().id().value()))
+                .toList();
+    }
+
+    static TechniqueFailure shortage(QiCost cost) {
+        // 指定属性的费用单列原因，玩家能分清是缺本行真元还是缺任意真元。
+        if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
+            return INSUFFICIENT_ATTRIBUTE_QI;
+        }
+        return INSUFFICIENT_QI;
+    }
+
+    private static boolean matches(Qi qi, QiCost cost, Qi.QiPhase phase) {
+        // 三种匹配共用同一过滤，按余额分摊与实际扣款看到相同的可付库存。
+        boolean attributeMatches = qi.attribute().id().value().equals(cost.getAttribute());
+        return switch (cost.getMatching()) {
+            case EXACT_VARIANT -> qi.phase() == phase && attributeMatches;
+            case ANY_ATTRIBUTE_AT_LEAST_PHASE -> qi.phase().compareTo(phase) >= 0;
+            case ATTRIBUTE_AT_LEAST_PHASE -> qi.phase().compareTo(phase) >= 0 && attributeMatches;
             default -> throw TechniqueErrors.rejected(INVALID_STATE);
         };
     }
@@ -43,16 +75,7 @@ final class TechniqueQiPayment {
         return debit;
     }
 
-    private static QiInventory flexible(QiInventory inventory, Qi.QiPhase minimumPhase, double amount) {
-        // 从低相态到高相态、同相态按属性 ID 取用，排序不受库存消息的排列影响。
-        List<Qi> candidates = inventory.entries().stream()
-                .filter(qi -> qi.phase().compareTo(minimumPhase) >= 0)
-                .sorted(Comparator.comparing(Qi::phase).thenComparing(qi -> qi.attribute().id().value()))
-                .toList();
-        return take(candidates, amount);
-    }
-
-    private static QiInventory take(List<Qi> candidates, double amount) {
+    private static QiInventory take(List<Qi> candidates, double amount, TechniqueFailure shortage) {
         // 剩余费用归零表示已支付；不对重新累加的浮点总额要求逐位相等。
         var selected = new ArrayList<Qi>();
         double remaining = amount;
@@ -68,7 +91,7 @@ final class TechniqueQiPayment {
             }
         }
         if (remaining != 0) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_QI);
+            throw TechniqueErrors.rejected(shortage);
         }
         return new QiInventory(selected);
     }

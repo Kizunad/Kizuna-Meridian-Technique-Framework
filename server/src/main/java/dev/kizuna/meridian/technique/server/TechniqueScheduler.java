@@ -154,8 +154,8 @@ public final class TechniqueScheduler {
                     || TechniqueSoundCues.targetAnchored(effect)) {
                 continue;
             }
-            if (effect.hasBlockWork()) {
-                addBlockWorkEffects(effects, new BlockWorkContext(definition, active, effect, index,
+            if (effect.hasBlockWork() || effect.hasOrganRefine()) {
+                addPeriodicEffects(effects, new PeriodicContext(definition, active, effect, index,
                         previousOffset, currentOffset, tempo));
                 continue;
             }
@@ -178,21 +178,31 @@ public final class TechniqueScheduler {
         return List.copyOf(effects);
     }
 
-    private static void addBlockWorkEffects(List<EffectIntent> effects, BlockWorkContext context) {
+    private static void addPeriodicEffects(List<EffectIntent> effects, PeriodicContext context) {
         // 每个原始边界单独缩放，避免间隔向上取整的累计误差丢掉最后一次推进。
         TechniqueEffect original = context.definition().getEffects(context.index());
-        BlockWork work = original.getBlockWork();
+        Period period = period(original);
         long firstOffset = original.getAtMillis() - context.active().getClipStartMillis();
-        long count = work.getDurationMillis() / work.getIntervalMillis();
-        for (long sequence = 0; sequence <= count; sequence++) {
-            long originalOffset = firstOffset + sequence * work.getIntervalMillis();
+        for (long sequence = 0; sequence < period.count(); sequence++) {
+            long originalOffset = firstOffset + sequence * period.intervalMillis();
             long atMillis = TechniqueTempo.scale(originalOffset, context.tempo());
             if (atMillis > context.previousOffset() && atMillis <= context.currentOffset()) {
-                String effectId = "block_work_" + context.index() + "_" + sequence;
+                String effectId = period.prefix() + context.index() + "_" + sequence;
                 effects.add(effectIntent(new EffectContext(context.definition(), context.active(),
                         context.effect(), context.index(), atMillis, effectId, context.tempo())));
             }
         }
+    }
+
+    private static Period period(TechniqueEffect original) {
+        // block_work 含持续时间终点那一次推进；炼化的窗口终点不再起批。
+        if (original.hasOrganRefine()) {
+            OrganRefine refine = original.getOrganRefine();
+            return new Period(refine.getBatchMillis(), TechniqueOrganRefines.batchCount(refine), "organ_refine_");
+        }
+        BlockWork work = original.getBlockWork();
+        long count = work.getDurationMillis() / work.getIntervalMillis() + 1;
+        return new Period(work.getIntervalMillis(), count, "block_work_");
     }
 
     public static List<EffectIntent> stopEffects(TechniqueDefinition definition, ActiveCast active,
@@ -307,6 +317,8 @@ public final class TechniqueScheduler {
                     launchProjectile(active, effect.getLaunchProjectile()));
             case BLOCK_WORK -> intent.setBlockWork(effect.getBlockWork());
             case USE_BREW -> intent.setUseBrew(effect.getUseBrew());
+            case ORGAN_REFINE -> intent.setOrganRefine(
+                    TechniqueOrganRefines.intent(active, definition.getEffects(index), context.tempo()));
             case SOUND -> intent.setSound(effect.getSound());
             case PRESENTATION -> intent.setPresentation(presentationIntent(effect.getPresentation(), context.tempo()));
             default -> throw new IllegalArgumentException("组织修正与目标声音不产生独立的世界效果意图");
@@ -324,9 +336,12 @@ public final class TechniqueScheduler {
                 .build();
     }
 
-    private record BlockWorkContext(TechniqueDefinition definition, ActiveCast active,
-                                    TechniqueEffect effect, int index, long previousOffset,
-                                    long currentOffset, double tempo) {
+    private record PeriodicContext(TechniqueDefinition definition, ActiveCast active,
+                                   TechniqueEffect effect, int index, long previousOffset,
+                                   long currentOffset, double tempo) {
+    }
+
+    private record Period(long intervalMillis, long count, String prefix) {
     }
 
     private record EffectContext(TechniqueDefinition definition, ActiveCast active,

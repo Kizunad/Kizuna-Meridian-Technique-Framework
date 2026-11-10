@@ -57,6 +57,7 @@ public final class TechniqueErrors {
             case BREW_REQUIRED -> "要拿一瓶巫药";
             case ANOINT_OFF_HAND_REQUIRED -> "敷药要空出副手";
             case BREW_KIND_REQUIRED -> "这种巫药不能用于这一式";
+            case INSUFFICIENT_ATTRIBUTE_QI -> "身上没有足够的本行真元";
             default -> "暂时无法运功";
         };
     }

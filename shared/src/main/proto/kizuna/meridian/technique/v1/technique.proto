@@ -170,18 +170,20 @@ enum QiDistribution {
   QI_DISTRIBUTION_UNSPECIFIED = 0;
   EACH = 1;
   EVEN = 2;
+  BY_BALANCE = 3; // 总费用按各经脉可付余额比例分摊；余额合计够即可，空经脉不分摊
 }
 enum QiCostMatching {
   EXACT_VARIANT = 0; // 缺省保留精确属性与相态匹配
   ANY_ATTRIBUTE_AT_LEAST_PHASE = 1; // 任意属性，库存相态不得低于 phase
+  ATTRIBUTE_AT_LEAST_PHASE = 2; // 属性固定为 attribute，库存相态不得低于 phase
 }
 message QiCost {
   string slot_id = 1;
   string attribute = 2;
   kizuna.meridian.v1.QiPhase phase = 3;
-  Quantity amount = 4; // EACH 为每条经脉的费用，EVEN 为这一项的总费用，元
+  Quantity amount = 4; // EACH 为每条经脉的费用，EVEN 与 BY_BALANCE 为这一项的总费用，元
   QiDistribution distribution = 5; // 必须显式声明；EVEN 按经脉 ID 字典序分配余数
-  QiCostMatching matching = 6; // 任意属性模式下 attribute 必须为空；扣款保留实际密度
+  QiCostMatching matching = 6; // 任意属性模式下 attribute 必须为空，其余模式必填；扣款保留实际密度
 }
 message WorkCost {
   string slot_id = 1; // 组织或器官，每个绑定模块各做一次功
@@ -480,7 +482,17 @@ message TechniqueEffect {
     WorkCost work = 10; // 在 at_millis 开始该段做功；排队不扣费，到时与已付序号原子提交。
     BlockWork block_work = 21;
     UseBrew use_brew = 22;
+    OrganRefine organ_refine = 23;
   }
+}
+// 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
+// 施放结束或被打断后不再下发新批；已开始的批次由宿主照常完成。
+message OrganRefine {
+  string organ_slot_id = 1; // ORGAN 槽，至少绑定一个器官
+  string meridian_slot_id = 2; // MERIDIAN 槽，取料与送回的经脉
+  string recipe_family = 3; // namespace:path，宿主按 器官种类 × 相态 解析
+  int64 batch_millis = 4; // 每批间隔，> 0
+  int64 duration_millis = 5; // 起批窗口，> 0；批次在 [at, at + duration) 内起
 }
 message BlockWork {
   string processor_id = 1;
@@ -636,6 +648,7 @@ enum TechniqueFailure {
   BREW_REQUIRED = 30;
   ANOINT_OFF_HAND_REQUIRED = 31;
   BREW_KIND_REQUIRED = 32;
+  INSUFFICIENT_ATTRIBUTE_QI = 33; // 指定属性的真元不足或相态不够
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -708,7 +721,15 @@ message EffectIntent {
     TargetLockIntent target_lock = 18;
     BlockWork block_work = 21;
     UseBrew use_brew = 22;
+    OrganRefineIntent organ_refine = 23;
   }
+}
+message OrganRefineIntent {
+  repeated string organ_ids = 1; // 起手绑定的器官
+  repeated string meridian_ids = 2; // 起手绑定的经脉
+  string recipe_family = 3;
+  int64 batch_millis = 4; // 已按施放速度缩放
+  int64 window_end_millis = 5; // 权威身体时钟上的起批窗口终点；不得在此后起新批
 }
 message TechniqueHostRequest {
   string entity_uuid = 1;

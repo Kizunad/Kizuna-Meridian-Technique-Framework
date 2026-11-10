@@ -1,16 +1,24 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCostMatching;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiDistribution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 /** 阅读文字只投影目录，不执行绑定或推测玩家当前支付能力。 */
 public final class TechniqueScrollText {
     private static final long MILLIS_PER_SECOND = 1000;
+    private static final Map<String, String> ELEMENT_NAMES = Map.of(
+            "meridian:metal", "金",
+            "meridian:wood", "木",
+            "meridian:water", "水",
+            "meridian:fire", "火",
+            "meridian:earth", "土");
 
     private TechniqueScrollText() {
         // 纯展示计算供界面与两端测试复用。
@@ -63,7 +71,12 @@ public final class TechniqueScrollText {
             if (cost.getDistribution() == QiDistribution.EACH) {
                 suffix = " 元/脉";
             }
-            costs.add(decimal(cost.getAmount().getValue()) + suffix);
+            String attribute = "";
+            if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
+                // 指定属性的费用标出行名；内置五行之外的属性没有可读名称，只写「指定属性」。
+                attribute = "（" + ELEMENT_NAMES.getOrDefault(cost.getAttribute(), "指定属性") + "）";
+            }
+            costs.add(decimal(cost.getAmount().getValue()) + suffix + attribute);
         }
         if (costs.isEmpty()) {
             return "0 元";

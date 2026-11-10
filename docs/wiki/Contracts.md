@@ -10,6 +10,17 @@
 - `UseBrew.technique` 声明 DRINK/ANOINT/THROW/FAN/MIST 的强度、持续、品质升级、封顶、反胃、残药参数；
   FAN 另须米制范围、角度及目标上限，MIST 须范围。所有倍率有限且有界。
   `preparation_sound` 仅供 ANOINT 的 ARMS/LEGS 分组动作，由用药处理器按实际身体分组播放。
+
+## 器官炼化
+
+- `OrganRefine` 声明器官槽、经脉槽、配方族、批次间隔和起批窗口。器官槽与经脉槽都至少绑定一个模块，
+  经脉槽必须 `require_opened`；配方族是 `namespace:path`，由宿主按器官种类与身体相态解析成具体配方。
+- 间隔为正且不超过窗口；批次在 `[at, at + duration)` 内按间隔起，窗口终点本身不再起批，
+  因此批数为 `ceil(duration / batch)`。窗口终点不得晚于施放结束。效果身份为 `organ_refine_<原目录序号>_<批序号>`。
+- `OrganRefineIntent` 携带起手绑定的器官与经脉 ID、配方族、已按动作速度缩放的批次间隔，
+  以及权威身体时钟上的窗口终点。宿主在窗口终点之后不得起新批。
+- 功法库只排定起批时刻。施放结束或被打断后不再交付后续批次，并经 `TechniqueCastEnded` 通知附属；
+  已交付批次是否做完、取料上限、产物去向和损耗都由宿主按 Framework 器官规则决定。
 - `ProjectileWeaponCategory.HELD_SPLASH_BREW` 通过 `LaunchProjectile.brew` 交给附属落地处理器，
   必须声明 THROW、lob、零散布和零落点随机半径。持物事实与事件同次 inspect，框架不执行药瓶消费。
 - `HeldItem.brew_kind_id`、`brew_quality`（0–3）、`brew_use` 必须同时提供或同时缺省；空手不能携带巫药事实。
@@ -99,7 +110,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 | 数据 | 单位、范围与约束 |
 |---|---|
 | `Quantity` | 显式 `value` 和 `unit`，有限数；缺失、错单位均拒绝 |
-| 真元费用 | `QI`（元），[10⁻¹², 10⁹]；按 `matching` 匹配，保留库存属性与密度；`EACH` 按每条绑定经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount` |
+| 真元费用 | `QI`（元），[10⁻¹², 10⁹]；按 `matching` 匹配，保留库存属性与密度；`EACH` 按每条绑定经脉扣 `amount`，`EVEN` 在全部绑定经脉间平摊总 `amount`，`BY_BALANCE` 按可付余额比例分摊总 `amount` |
 | 组织做功 | 力 `NEWTON`：[0, 10⁹]；功率 `WATT`：(0, 10⁹]；时间 `SECOND`：(0, 86400]；`training=true` 只允许模板中声明 `TissueTraining` 的组织 |
 | 器官做功 | 功率与时间同上，不允许力字段，疲劳由 Framework 唯一预算计算 |
 | 最低组织力量 | 可省略；提供时必须是 `NEWTON`，[0, 10⁹] |
@@ -227,7 +238,9 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 `QiCost.matching` 缺省为 `EXACT_VARIANT`，保留旧目录的精确属性、精确相态支付规则。
 `ANY_ATTRIBUTE_AT_LEAST_PHASE` 必须将 `attribute` 留空，`phase` 为最低可用相态；
 例如最低 `FREE` 允许气态库存支付，最低 `GAS` 不接受游离态库存。所有模式都必须声明有效相态，未知匹配模式拒绝。
-任意属性支付按相态由低到高、同相态按属性 ID 排序取足费用，可以合计同一经脉内的多种库存。
+`ATTRIBUTE_AT_LEAST_PHASE` 固定属性为已登记的 `attribute`，相态不低于 `phase`；无属性和其他属性的库存都不能抵价。
+付不了时返回 `INSUFFICIENT_ATTRIBUTE_QI`（「身上没有足够的本行真元」），其余模式仍返回 `INSUFFICIENT_QI`。
+任意属性与指定属性支付都按相态由低到高、同相态按属性 ID 排序取足费用，可以合计同一经脉内的多种相态库存。
 每一项扣除和释放都保留原始属性与实际密度，不发生相态转换，也不按密度放大或缩小元数。
 取用复用 Framework 最小流转单位与可见减法限制；不能足额支付就拒绝整次起手，不提交部分费用。
 
@@ -236,6 +249,11 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 若末份仅因浮点尾差低于最小单位，则取最小单位后仍须使顺序合计严格等于 `amount`，否则拒绝。
 目录对允许的每个绑定数量和起手扣费共用同一分配规则，Framework 的最小单位校验保持不变。
 每条经脉都先单独预检余额，任一经脉不足就拒绝整次施放，不在经脉之间挪补。扣费后的不平衡由 Framework 的 `PassiveQiDiffusion` 自然扩散，本库不再次分配。
+
+`BY_BALANCE` 的 `amount` 是这一项的总费用，按各绑定经脉可付余额（按 `matching` 过滤、每条不低于最小流转单位）的比例分摊。
+可付余额合计不低于 `amount` 就放，余额为零的经脉不分摊；例如只有脏经有本行真元、腑经为空时由脏经独付。
+余额最大的经脉（同额取 ID 较小者）承担比例份额的取整余数，其余经脉份额低于最小流转单位时跳过。
+目录不对 `BY_BALANCE` 做逐绑定数量的平摊预检，余额是否足够只在起手时按实际身体判断。
 
 同一功法的**每条**修正必须满足：
 `effect.at_millis + curve.last.offset_millis <= warmup_millis + active_millis + recovery_millis + cooldown_millis`。

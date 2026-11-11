@@ -65,7 +65,7 @@ Fabric 装配纯 Java `TechniqueService`，负责主线程 tick、学会命令�
 阶段只控制目录回调时机。不同阶段的贡献者保留原发现位置，最终服务端注册表仍统一校验。
 
 卷轴学习自动走本页的服务端宿主入口，内容附属不需要另写右键代码或注册物品。
-完整身份、创造栏、tooltip 和消耗规则见[数据契约](Contracts.md)。内容包可提供
+完整身份、创造栏、tooltip、生存掉落和消耗规则见[数据契约](Contracts.md)。内容包可提供
 `assets/<namespace>/textures/item/<卷路径>_scroll.png` 和同路径的 `models/item/<卷路径>_scroll.json`；
 无专用贴图时会使用功法库的通用卷轴，缺失只警告一次，不影响学习。
 
@@ -419,6 +419,10 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 `TechniqueStatusBenefits` 只注册原版状态与不可变目录关联，`TechniqueTissueEffects` 适配实体生命周期，
 `TechniqueStatusTissues` 负责纯 Java 绑定、修正计划和归属校验。身体修改仍由现有宿主提交到
 Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、语言和 `textures/mob_effect/`。
+
+背包效果栏的悬停说明由功法库客户端提供（`TechniqueEffectTooltipMixin` 包住原版 `EffectsInInventory.extractText`），
+宿主不用接线；内容包为每条修正写部位语言 `effect.<namespace>.<状态路径>.<slot_id>`，例如「两臂」。
+写法和总时长的取法见[数据契约](Contracts.md#状态提示)。
 
 `activeLeap` 明确筛选跃步能力，旧 `active` 是兼容宿主与 AI 的同义入口，不能把组织状态当轻身。
 输入、预测、飞行和 AI 都只消费跃步配置，状态的注册顺序及原版添加顺序不改变结果。

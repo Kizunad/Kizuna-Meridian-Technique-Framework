@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.server;
 
 import com.google.protobuf.TextFormat;
 import com.google.protobuf.UnknownFieldSet;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ScrollDrop;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCatalog;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -110,6 +111,34 @@ public final class TechniqueCatalogManifestTest {
                 .build();
         assertRejected(catalog.toBuilder().setVolumes(0, missing).build(),
                 "volumes[0]", "prerequisite_volume_ids[0]");
+    }
+
+    @Test
+    public void scrollDropsNeedValidDistinctEntitiesAndChanceWithinOne() {
+        // 掉落声明定位到卷和条目：实体须是 namespace:path、同卷不重复，概率在 (0, 1]，至多 16 项。
+        TechniqueCatalog catalog = groupedCatalog();
+        TechniqueVolume volume = catalog.getVolumes(0);
+        ScrollDrop evoker = ScrollDrop.newBuilder().setEntityType("minecraft:evoker").setChance(0.25).build();
+        TechniqueVolume valid = volume.toBuilder().addScrollDrops(evoker)
+                .addScrollDrops(evoker.toBuilder().setEntityType("minecraft:pillager").setChance(1)).build();
+        var accepted = new TechniqueCatalogs();
+        accepted.register(SOURCE, addons(), catalog.toBuilder().setVolumes(0, valid).build());
+        assertEquals(valid.getScrollDropsList(), accepted.build().volumes().getFirst().getScrollDropsList());
+        for (ScrollDrop bad : List.of(evoker.toBuilder().setChance(0).build(),
+                evoker.toBuilder().setChance(1.5).build(),
+                evoker.toBuilder().setChance(Double.NaN).build())) {
+            TechniqueVolume invalid = volume.toBuilder().addScrollDrops(bad).build();
+            assertRejected(catalog.toBuilder().setVolumes(0, invalid).build(), "volumes[0]", "scroll_drops[0]");
+        }
+        TechniqueVolume duplicate = volume.toBuilder().addScrollDrops(evoker).addScrollDrops(evoker).build();
+        assertRejected(catalog.toBuilder().setVolumes(0, duplicate).build(), "volumes[0]", "scroll_drops[1]");
+        TechniqueVolume badId = volume.toBuilder().addScrollDrops(evoker.toBuilder().setEntityType("Evoker")).build();
+        assertRejected(catalog.toBuilder().setVolumes(0, badId).build(), "volumes[0]", "scroll_drops[0].entity_type");
+        var many = volume.toBuilder();
+        for (int index = 0; index <= 16; index++) {
+            many.addScrollDrops(evoker.toBuilder().setEntityType("sample:mob_" + index));
+        }
+        assertRejected(catalog.toBuilder().setVolumes(0, many.build()).build(), "volumes[0]", "至多 16 项");
     }
 
     @Test

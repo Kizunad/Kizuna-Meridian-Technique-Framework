@@ -71,7 +71,9 @@ Fabric 在两端模组初始化时读取 `fabric.mod.json` 的 `custom["meridian
 生成身份与已有物品冲突时中止启动；创造栏 `meridian_technique:techniques` 显示「功法」，
 按书声明顺序归组，书内保留卷序，图标使用展示的第一卷。未装内容时遵循原版空栏隐藏规则。
 物品名组合书 `display_name` 与卷 `display_name`，格式为「书名·卷名」；卷名已经包含书名前缀时只显示一次。
-物品语言键为 `item.<namespace>.<卷路径>_scroll`；tooltip 列出卷内各式及前置卷。
+物品语言键为 `item.<namespace>.<卷路径>_scroll`。tooltip 每式一行，写式短名、最低境界和真元费用，
+例如「金臂：游炁，金行真元 0.3」；没有费用写「不耗真元」，EACH 费用标「/脉」，未声明境界时只写费用。
+语言里有 `technique.<namespace>.<path>.note` 时用「，」接在该行后面，没有这条就不显示；末行列前置卷。
 式短名使用 `technique.<namespace>.<path>`，路径中的 `/` 转成 `.`；缺键时使用
 `presentation.display_name`（Protobuf 字段 5），旧目录缺省时显示「未命名招式」，不显示资源 ID。
 `presentation.description` 单独保存完整说明。内容包提供 zh_cn/en_us 的式、书、卷和卷轴物品名称；
@@ -239,7 +241,8 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 `ANY_ATTRIBUTE_AT_LEAST_PHASE` 必须将 `attribute` 留空，`phase` 为最低可用相态；
 例如最低 `FREE` 允许气态库存支付，最低 `GAS` 不接受游离态库存。所有模式都必须声明有效相态，未知匹配模式拒绝。
 `ATTRIBUTE_AT_LEAST_PHASE` 固定属性为已登记的 `attribute`，相态不低于 `phase`；无属性和其他属性的库存都不能抵价。
-付不了时返回 `INSUFFICIENT_ATTRIBUTE_QI`（「身上没有足够的本行真元」），其余模式仍返回 `INSUFFICIENT_QI`。
+付不了时返回 `INSUFFICIENT_ATTRIBUTE_QI`，其余模式仍返回 `INSUFFICIENT_QI`；回执说明写出缺的真元、
+要多少和可付多少，见下文「拒绝说明」。
 任意属性与指定属性支付都按相态由低到高、同相态按属性 ID 排序取足费用，可以合计同一经脉内的多种相态库存。
 每一项扣除和释放都保留原始属性与实际密度，不发生相态转换，也不按密度放大或缩小元数。
 取用复用 Framework 最小流转单位与可见减法限制；不能足额支付就拒绝整次起手，不提交部分费用。
@@ -457,3 +460,57 @@ Framework 活动提交，成功后才交付同刻世界效果。单笔组织/器
 迟到 tick 按原事件边界依次付费、交付效果；每次费用以宿主当前身体时刻为准，不回溯身体时钟。
 效果重试不能越过未确认的边界；回调取消须先处理，再决定是否继续下一段。
 恢复入口取消残留施放，不补执行离线期间的费用或射击。
+
+## 拒绝说明、卷轴掉落与状态提示
+
+### 拒绝说明
+
+`CastOutcome.reason` 和 `BindingOutcome.reason` 写给玩家看，说清缺的是哪一样；失败码不变，宿主仍按码区分。
+部位名取身体快照的 `display_name`，最多列 4 处，再多写「等 N 处」；名字为空时写「某处」。
+
+| 情形 | 失败码 | 说明 |
+|---|---|---|
+| 境界不够 | `REALM_TOO_LOW` | 「境界不够：这一式要真炁，你现在是游炁」 |
+| 经脉未开 | `MERIDIAN_NOT_OPENED` | 「经脉未通：左肺经、右肺经，还要开通 1 条」，数目为槽位下限减去可用条数 |
+| 经脉断了 | `MODULE_UNAVAILABLE` | 「左肺经已断，这一式用不了」 |
+| 器官或组织 HP 为零、所在部位 HP 为零 | `MODULE_UNAVAILABLE` | 「左肺、右肺都伤了，这一式用不了」，只有一处时写「伤了」 |
+| 组织疲劳达到上限 | `MODULE_UNAVAILABLE` | 「左肱二头肌力竭」 |
+| 组织可用力量低于槽位下限 | `INSUFFICIENT_CAPABILITY` | 「左肱二头肌力量不够」 |
+| 身体没有带这些标签的部位 | `MISSING_MODULE` | 「这具身体没有这一式要用的器官」，按槽位种类写经脉、器官或筋肉 |
+| 真元不够 | `INSUFFICIENT_ATTRIBUTE_QI` / `INSUFFICIENT_QI` | 「金行真元不够：要 0.3，可付 0.12」；要的额向上、可付额向下取两位 |
+| 组织出不了这份力 | `INSUFFICIENT_CAPABILITY` | 「左肱二头肌出不了这份力：要 20 W × 0.5 s」 |
+| 器官没有余力 | `INSUFFICIENT_CAPABILITY` | 「左肺没有余力：要 10 W × 2 s」 |
+
+同一槽位里有多种不可用原因时，按排序后第一个不可用候选的原因，列出同一原因的全部部位。
+器官余力在起手时用 Framework `OrganCapabilities.workBudget` 预检，规则和活动提交相同，预检不过不扣任何费用。
+其他失败仍用通用说明，例如冷却中「气息尚未平复」。
+
+### 卷轴掉落
+
+`TechniqueVolume.scroll_drops=6` 声明生存来源，每项 `ScrollDrop{entity_type=1, chance=2}`：
+实体 ID 须是 `namespace:path`，同卷不重复，概率在 (0, 1]，每卷至多 16 项；不合格时目录加载报出卷和 `scroll_drops[i]`。
+服务器启动时实体未注册直接中止启动，不静默失效。
+
+Fabric 端用 `LootTableEvents.MODIFY` 只往该实体自带的掉落表（`EntityType.getDefaultLootTable()`）加池，
+数据包替换过的表不动。每项一个池，掉一份本卷卷轴，三个条件都满足才掉：
+被玩家杀死（`minecraft:killed_by_player`）、`minecraft:random_chance` 等于声明概率、
+`meridian_technique:knows_volume`（字段 `volume`，死者学会了本卷全部式）。
+`knows_volume` 只读 `this_entity`，在掉落那一刻问 `TechniqueService.known(uuid)`；没有功法宿主、服务未起或卷未知都判不会。
+数据包也可以在自己的表里写这个条件。
+
+### 状态提示
+
+鼠标指向背包效果栏里带组织修正的状态时，客户端按目录和原版剩余时间出说明，不读身体：
+
+```
+金臂
+两臂力量 ×1.25（最高 ×1.25 到第 20 s，第 24 s 归零）
+第 4 s，剩 20 s
+```
+
+每条修正每项不等于 1 的峰值一行（力量、功率、耐力、恢复、动作速度），当前倍率按 Framework 的
+`1 + (峰值 − 1) × 曲线值` 算；括号里写最高值保持到第几秒、曲线低于零的一段落到多少、何时归零。
+部位名来自语言键 `effect.<namespace>.<状态路径>.<slot_id>`，缺键时不加部位前缀，不露出语言键。
+总时长取目录时长与剩余时间的较大者。用原版命令给出非目录时长、又在中途查看时，服务端按给出时的时长拉伸曲线，
+客户端不知道当初给了多久，提示的相位可能与实际不同；功法施放给出的状态总是目录时长，不受影响。
+原版只在名字被截断时出提示；功法状态先登记提示，同一帧原版的紧凑提示不再覆盖。

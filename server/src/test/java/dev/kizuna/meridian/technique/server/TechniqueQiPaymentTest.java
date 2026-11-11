@@ -197,6 +197,9 @@ public class TechniqueQiPaymentTest {
 
         BodySnapshot shortage = withInventories(body(Shape.PAIRED), List.of(poor), List.of(water));
         assertUnpaid(shortage, withPairedSource(withCost(balance(RICH_FIRE))), INSUFFICIENT_ATTRIBUTE_QI);
+        CastOutcome told = new TechniqueCasting(registry(withPairedSource(withCost(balance(RICH_FIRE)))))
+                .cast(new MemoryHost(shortage), request(shortage, "told"));
+        assertEquals("火行真元不够：要 30，可付 10", told.getReason());
     }
 
     @Test

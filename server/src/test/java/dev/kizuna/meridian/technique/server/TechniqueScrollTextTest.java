@@ -64,4 +64,27 @@ public final class TechniqueScrollTextTest {
                 """);
         assertEquals("真元：0.3 元（金）　冷却：22 秒", TechniqueScrollText.details(catalog.getDefinitions(0)).get(0));
     }
+
+    @Test
+    public void summaryLineGivesRealmAndQiCostFromTheCatalog() {
+        // 卷轴每式一行：最低境界加费用；本行费用写成「金行真元」，不耗真元也写明，EACH 标出每脉。
+        var catalog = TechniqueCatalogManifest.parseText("scroll_summary", """
+                schema_version: 1 namespace: "sample"
+                definitions {
+                  id: "sample:metal" version: 1 minimum_realm: WANDERING_QI
+                  cost { qi { amount { value: 0.3 unit: QI } distribution: BY_BALANCE
+                    matching: ATTRIBUTE_AT_LEAST_PHASE attribute: "meridian:metal" phase: FREE } }
+                }
+                definitions { id: "sample:refine" version: 1 minimum_realm: TRUE_QI }
+                definitions {
+                  id: "sample:step" version: 1
+                  cost { qi { amount { value: 2.5 unit: QI } distribution: EACH }
+                    qi { amount { value: 1 unit: QI } distribution: BY_BALANCE
+                      matching: ATTRIBUTE_AT_LEAST_PHASE attribute: "sample:void" phase: FREE } }
+                }
+                """);
+        assertEquals("游炁，金行真元 0.3", TechniqueScrollText.summary(catalog.getDefinitions(0)));
+        assertEquals("真炁，不耗真元", TechniqueScrollText.summary(catalog.getDefinitions(1)));
+        assertEquals("真元 2.5/脉 + 指定属性真元 1", TechniqueScrollText.summary(catalog.getDefinitions(2)));
+    }
 }

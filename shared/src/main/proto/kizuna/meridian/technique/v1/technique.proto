@@ -46,6 +46,12 @@ message TechniqueVolume {
   string display_name = 3;
   repeated TechniqueReference techniques = 4; // 精确版本；一个式版本只属于一卷
   repeated string prerequisite_volume_ids = 5; // 同书前置卷，无环；学会其中全部式才满足
+  repeated ScrollDrop scroll_drops = 6; // 生存来源：哪些生物掉本卷卷轴；至多 16 项，实体不重复
+}
+// 生物被玩家杀死、且死者会本卷全部式时，按概率掉一份本卷卷轴；只加进该实体自带的掉落表。
+message ScrollDrop {
+  string entity_type = 1; // 实体类型 ID，namespace:path，须已注册
+  double chance = 2; // (0, 1]
 }
 enum BaseDamageSource {
   BASE_DAMAGE_SOURCE_UNSPECIFIED = 0;

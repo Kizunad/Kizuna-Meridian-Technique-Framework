@@ -3,6 +3,7 @@ package dev.kizuna.meridian.technique.fabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.server.TechniqueScrollCatalog;
+import dev.kizuna.meridian.technique.server.TechniqueScrollText;
 import dev.kizuna.meridian.technique.server.TechniqueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
@@ -49,8 +51,10 @@ public final class TechniqueScrollItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, Item.TooltipContext context, TooltipDisplay display,
             Consumer<Component> tooltip, TooltipFlag flag) {
-        // 提示列出全部式和前置卷，客户端不根据本地进度猜测能否学习；26.2 逐行交给 tooltip 回调。
-        tooltip.accept(Component.literal("功法：").append(techniqueNames()));
+        // 每式一行写境界和真元费用，语言里有补充说明就接在后面；客户端不根据本地进度猜测能否学习。
+        for (var technique : scroll.techniques()) {
+            tooltip.accept(techniqueLine(technique));
+        }
         List<String> prerequisites = scroll.prerequisites();
         if (!prerequisites.isEmpty()) {
             tooltip.accept(Component.literal("前置卷：" + String.join("、", prerequisites)));
@@ -108,6 +112,18 @@ public final class TechniqueScrollItem extends Item {
             LOG.warn("学习卷轴 {} 失败", volumeId, exception);
             return Component.literal("暂时无法学会这卷功法，请稍后再试");
         }
+    }
+
+    private static Component techniqueLine(TechniqueScrollCatalog.NamedTechnique technique) {
+        // 「金臂：游炁，金行真元 0.3」；补充说明键为式短名键加 .note，缺键时不显示，不影响其他书。
+        String key = TechniqueScrollText.key("technique", technique.reference().getId());
+        MutableComponent line = Component.translatableWithFallback(key, technique.fallbackName()).copy()
+                .append("：" + TechniqueScrollText.summary(technique.definition()));
+        String noteKey = key + ".note";
+        if (Language.getInstance().has(noteKey)) {
+            line.append("，").append(Component.translatable(noteKey));
+        }
+        return line;
     }
 
     private MutableComponent techniqueNames() {

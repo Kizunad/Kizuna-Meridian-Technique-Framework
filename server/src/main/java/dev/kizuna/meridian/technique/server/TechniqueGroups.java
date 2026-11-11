@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ScrollDrop;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCatalog;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -16,6 +17,7 @@ import java.util.Map;
 /** 目录中的书卷引用及学习前置关系，加载完成后不可变。 */
 final class TechniqueGroups {
     private static final int MAX_GROUPS = 1024;
+    private static final int MAX_SCROLL_DROPS = 16;
     final Map<String, TechniqueBook> books;
     final Map<String, TechniqueVolume> volumes;
     final Map<TechniqueReference, String> membership;
@@ -118,6 +120,7 @@ final class TechniqueGroups {
             try {
                 validateVolume(volume, definitions, members);
                 validatePrerequisites(volume);
+                validateScrollDrops(volume);
             } catch (IllegalArgumentException exception) {
                 throw TechniqueErrors.at(locations.get(volume.getId()), exception);
             }
@@ -162,6 +165,24 @@ final class TechniqueGroups {
                     || !prerequisite.getBookId().equals(bookId)) {
                 throw TechniqueErrors.invalid("prerequisite_volume_ids[" + index + "]",
                         "前置卷不存在、自引用或不属于同书：" + id);
+            }
+        }
+    }
+
+    private static void validateScrollDrops(TechniqueVolume volume) {
+        // 掉落声明只校验形状：实体 ID 合法且不重复、概率在 (0, 1]；实体是否已注册由 Fabric 端在启动时检查。
+        List<ScrollDrop> drops = volume.getScrollDropsList();
+        if (drops.size() > MAX_SCROLL_DROPS) {
+            throw TechniqueErrors.invalid("scroll_drops", "至多 " + MAX_SCROLL_DROPS + " 项");
+        }
+        var entities = new HashSet<String>();
+        for (int index = 0; index < drops.size(); index++) {
+            ScrollDrop drop = drops.get(index);
+            String path = "scroll_drops[" + index + "]";
+            TechniqueValues.id(drop.getEntityType(), path + ".entity_type");
+            double chance = drop.getChance();
+            if (!entities.add(drop.getEntityType()) || !Double.isFinite(chance) || chance <= 0 || chance > 1) {
+                throw TechniqueErrors.invalid(path, "实体重复或概率不在 (0, 1]：" + drop.getEntityType());
             }
         }
     }

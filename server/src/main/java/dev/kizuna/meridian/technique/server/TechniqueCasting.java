@@ -48,7 +48,7 @@ public final class TechniqueCasting {
         try {
             return startOrReplay(host, request, staggeredUntilMillis);
         } catch (TechniqueErrors.Rejected exception) {
-            return failure(request.getCastId(), exception.code);
+            return failure(request.getCastId(), exception);
         } catch (TechniqueErrors.HostRejected exception) {
             return hostFailure(request.getCastId(), exception);
         } catch (MeridianErrors.CapabilityRejected | MeridianErrors.IntakeRejected exception) {
@@ -95,7 +95,7 @@ public final class TechniqueCasting {
         BindingOutcome result = TechniqueBinder.bind(inspection.body(), definition,
                 hand, inspection.heldItems().getMainHandSide());
         if (!result.hasBinding()) {
-            throw TechniqueErrors.rejected(result.getFailure());
+            throw TechniqueErrors.rejected(result.getFailure(), result.getReason());
         }
         LegRules legRules = book.map(TechniqueBook::getLegRules).orElse(LegRules.getDefaultInstance());
         var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules);
@@ -269,7 +269,7 @@ public final class TechniqueCasting {
             castId = active.getRequest().getCastId();
             return advanceActive(host, body, active, previousMillis);
         } catch (TechniqueErrors.Rejected exception) {
-            CastOutcome rejected = failure(castId, exception.code);
+            CastOutcome rejected = failure(castId, exception);
             return new AdvanceResult(rejected, List.of(), Optional.empty(), previousMillis);
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome failure = hostFailure(castId, exception);
@@ -432,6 +432,13 @@ public final class TechniqueCasting {
                 .setCastId(castId)
                 .setFailure(code)
                 .setReason(TechniqueErrors.playerReason(code))
+                .build();
+    }
+
+    private static CastOutcome failure(String castId, TechniqueErrors.Rejected rejected) {
+        // 拒绝已带具体说明时原样交给玩家，失败码仍供宿主区分。
+        return failure(castId, rejected.code).toBuilder()
+                .setReason(rejected.reason)
                 .build();
     }
 

@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.server;
 
 import com.google.protobuf.Any;
 import dev.kizuna.meridian.core.*;
+import dev.kizuna.meridian.error.MeridianErrors;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.*;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
@@ -356,7 +357,8 @@ final class TechniqueActivities {
         }
         double total = payable.values().stream().mapToDouble(Double::doubleValue).sum();
         if (payable.isEmpty() || total < amount) {
-            throw TechniqueErrors.rejected(TechniqueQiPayment.shortage(cost));
+            throw TechniqueErrors.rejected(TechniqueQiPayment.shortage(cost),
+                    TechniqueQiPayment.shortageReason(cost, amount, total));
         }
         // 余额最大的经脉（同额取字典序靠前者）吸收余数和不足最小转移量的小份额。
         String largest = payable.entrySet().stream()
@@ -414,11 +416,10 @@ final class TechniqueActivities {
                         .setSeconds(work.getDuration().getValue())
                         .setTraining(work.getTraining());
                 if (slot.getModule() == ModuleKind.TISSUE) {
-                    var load = new TissueCapabilities.Exertion(new Anatomy.TissueId(moduleId),
-                            work.getForce().getValue(), work.getPower().getValue(), work.getDuration().getValue());
-                    candidate = TissueCapabilities.exert(candidate, load);
+                    candidate = exertTissue(candidate, moduleId, work);
                     effort.setTissueId(moduleId);
                 } else {
+                    requireOrganWork(candidate, moduleId, work);
                     effort.setOrganId(moduleId);
                 }
                 efforts.add(effort.build());
@@ -428,6 +429,41 @@ final class TechniqueActivities {
             throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY);
         }
         return List.copyOf(efforts);
+    }
+
+    private static BodySnapshot exertTissue(BodySnapshot body, String tissueId, WorkCost work) {
+        // 组织做功沿用 Framework 预检；出不了这份力时说出是哪块筋肉、要多大功。
+        var load = new TissueCapabilities.Exertion(new Anatomy.TissueId(tissueId),
+                work.getForce().getValue(), work.getPower().getValue(), work.getDuration().getValue());
+        try {
+            return TissueCapabilities.exert(body, load);
+        } catch (MeridianErrors.CapabilityRejected exception) {
+            String name = body.structure().tissues().stream().filter(tissue -> tissue.id().value().equals(tissueId))
+                    .map(Anatomy.TissueDefinition::displayName).findFirst().orElse("");
+            String force = work.getForce().getValue() > 0
+                    ? TechniqueScrollText.decimalText(work.getForce().getValue()) + " N、" : "";
+            throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY, TechniqueScrollText.safeName(name, "筋肉")
+                    + "出不了这份力：要 " + force + workText(work));
+        }
+    }
+
+    private static void requireOrganWork(BodySnapshot body, String organId, WorkCost work) {
+        // 器官起手前按 Framework 同一做功预算预检，免得活动提交时只剩一句「过于疲惫」。
+        var id = new Anatomy.OrganId(organId);
+        OrganCapabilities.WorkBudget budget = OrganCapabilities.workBudget(body, id);
+        if (budget.allows(work.getPower().getValue(), work.getDuration().getValue())) {
+            return;
+        }
+        String name = body.structure().organs().stream().filter(organ -> organ.id().equals(id))
+                .map(Anatomy.OrganDefinition::displayName).findFirst().orElse("");
+        throw TechniqueErrors.rejected(INSUFFICIENT_CAPABILITY, TechniqueScrollText.safeName(name, "器官")
+                + "没有余力：要 " + workText(work));
+    }
+
+    private static String workText(WorkCost work) {
+        // 功率和时长按目录原值写出，例如「10 W × 2 s」。
+        return TechniqueScrollText.decimalText(work.getPower().getValue()) + " W × "
+                + TechniqueScrollText.decimalText(work.getDuration().getValue()) + " s";
     }
 
     static BodySnapshot withModifiers(BodySnapshot body,

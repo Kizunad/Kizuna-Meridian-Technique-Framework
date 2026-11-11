@@ -20,8 +20,13 @@ public final class TechniqueErrors {
     }
 
     static Rejected rejected(TechniqueFailure code) {
-        // 运行拒绝只携带结构化原因码，玩家文本统一由 playerReason 生成。
-        return new Rejected(code);
+        // 没有更具体事实的拒绝使用 playerReason 的通用感受。
+        return new Rejected(code, playerReason(code));
+    }
+
+    static Rejected rejected(TechniqueFailure code, String reason) {
+        // 绑定和支付能说清缺哪一样时，结构化码不变，玩家文本换成具体说明。
+        return new Rejected(code, reason);
     }
 
     static String playerReason(TechniqueFailure code) {
@@ -31,8 +36,9 @@ public final class TechniqueErrors {
             case COOLING_DOWN -> "气息尚未平复";
             case ALREADY_CASTING -> "正运功中，无暇他顾";
             case BODY_UNAVAILABLE -> "你已无法运功";
-            case REALM_TOO_LOW -> "修为尚浅，尚不能运功";
-            case MISSING_MODULE, MODULE_UNAVAILABLE -> "身体尚未准备好";
+            case REALM_TOO_LOW -> "境界不够，尚不能运功";
+            case MISSING_MODULE -> "这具身体没有这一式要用的部位";
+            case MODULE_UNAVAILABLE -> "身体尚未准备好";
             case MERIDIAN_NOT_OPENED -> "经脉未通";
             case INSUFFICIENT_CAPABILITY -> "你过于疲惫";
             case INSUFFICIENT_QI -> "真元不济";
@@ -74,11 +80,13 @@ public final class TechniqueErrors {
 
     static final class Rejected extends RuntimeException {
         final TechniqueFailure code;
+        final String reason;
 
-        Rejected(TechniqueFailure code) {
-            // 校验拒绝不产生任何候选状态的持久写入。
+        Rejected(TechniqueFailure code, String reason) {
+            // 校验拒绝不产生任何候选状态的持久写入；说明随拒绝一起交给回执。
             super(code.name());
             this.code = code;
+            this.reason = reason;
         }
     }
 

@@ -106,6 +106,11 @@ public final class TechniqueFabric implements ModInitializer {
         return service;
     }
 
+    static boolean running() {
+        // 掉落条件在服务未起时直接判不会，不抛出到原版掉落流程。
+        return service != null;
+    }
+
     @Override
     public void onInitialize() {
         // 两端在注册表冻结前固定卷轴身份；身体服务仍只由服务端生命周期创建。
@@ -113,6 +118,7 @@ public final class TechniqueFabric implements ModInitializer {
         catalogs = TechniqueCatalogDiscovery.prepare(resources::registry);
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
+        TechniqueScrollDrops.register();
         TechniqueLeapNetworking.initialize();
         // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
         TechniqueStaggers.CHANNEL.registerClientbound();

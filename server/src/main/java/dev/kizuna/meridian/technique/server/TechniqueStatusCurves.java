@@ -51,7 +51,7 @@ public final class TechniqueStatusCurves {
         return List.copyOf(points);
     }
 
-    private static double valueAt(List<CurvePoint> points, double millis) {
+    static double valueAt(List<CurvePoint> points, double millis) {
         // 仅在相邻拐点间作线性插值，不复制肌肉能力公式。
         for (int index = 1; index < points.size(); index++) {
             CurvePoint right = points.get(index);

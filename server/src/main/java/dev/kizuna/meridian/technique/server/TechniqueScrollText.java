@@ -7,18 +7,11 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefi
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 
 /** 阅读文字只投影目录，不执行绑定或推测玩家当前支付能力。 */
 public final class TechniqueScrollText {
     private static final long MILLIS_PER_SECOND = 1000;
-    private static final Map<String, String> ELEMENT_NAMES = Map.of(
-            "meridian:metal", "金",
-            "meridian:wood", "木",
-            "meridian:water", "水",
-            "meridian:fire", "火",
-            "meridian:earth", "土");
 
     private TechniqueScrollText() {
         // 纯展示计算供界面与两端测试复用。
@@ -63,6 +56,26 @@ public final class TechniqueScrollText {
                 "持物：" + heldText + "　移动：" + movementText + " 倍　冲刺：" + dashText);
     }
 
+    public static String summary(TechniqueDefinition definition) {
+        // 卷轴提示每式一行：最低境界和真元费用，例如「游炁，金行真元 0.3」；未声明境界时只写费用。
+        var parts = new ArrayList<String>();
+        String realm = TechniqueNames.realm(definition.getMinimumRealmValue());
+        if (!realm.isEmpty()) {
+            parts.add(realm);
+        }
+        var costs = new ArrayList<String>();
+        for (var cost : definition.getCost().getQiList()) {
+            String kind = "真元";
+            if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
+                kind = TechniqueNames.elementQi(cost.getAttribute());
+            }
+            String perMeridian = cost.getDistribution() == QiDistribution.EACH ? "/脉" : "";
+            costs.add(kind + " " + decimal(cost.getAmount().getValue()) + perMeridian);
+        }
+        parts.add(costs.isEmpty() ? "不耗真元" : String.join(" + ", costs));
+        return String.join("，", parts);
+    }
+
     private static String qiCost(TechniqueDefinition definition) {
         // EACH 的实际总额取决于绑定数量，阅读页明确标记每脉费用而不伪造总量。
         var costs = new ArrayList<String>();
@@ -74,7 +87,7 @@ public final class TechniqueScrollText {
             String attribute = "";
             if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
                 // 指定属性的费用标出行名；内置五行之外的属性没有可读名称，只写「指定属性」。
-                attribute = "（" + ELEMENT_NAMES.getOrDefault(cost.getAttribute(), "指定属性") + "）";
+                attribute = "（" + TechniqueNames.element(cost.getAttribute()) + "）";
             }
             costs.add(decimal(cost.getAmount().getValue()) + suffix + attribute);
         }
@@ -88,6 +101,11 @@ public final class TechniqueScrollText {
         // 十进制换算不受系统地区的小数分隔符影响。
         return BigDecimal.valueOf(millis).divide(BigDecimal.valueOf(MILLIS_PER_SECOND))
                 .stripTrailingZeros().toPlainString();
+    }
+
+    public static String decimalText(double value) {
+        // 供其他说明复用同一种数字写法。
+        return decimal(value);
     }
 
     private static String decimal(double value) {

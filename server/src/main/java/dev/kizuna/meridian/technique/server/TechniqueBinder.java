@@ -43,7 +43,8 @@ public final class TechniqueBinder {
         }
         int realmNumber = BodyMessages.Realm.valueOf(body.realm().name()).getNumber();
         if (realmNumber < definition.getMinimumRealmValue()) {
-            return failure(REALM_TOO_LOW);
+            return failure(REALM_TOO_LOW, "境界不够：这一式要" + TechniqueNames.realm(definition.getMinimumRealmValue())
+                    + "，你现在是" + TechniqueNames.realm(realmNumber));
         }
         return bindSlots(body, definition, selectedHand, mainHandSide, Purpose.CAST);
     }
@@ -85,12 +86,12 @@ public final class TechniqueBinder {
                     .sorted(Comparator.comparing(Candidate::id))
                     .toList();
             List<String> selected = matching.stream()
-                    .filter(candidate -> candidate.failure() == TECHNIQUE_FAILURE_UNSPECIFIED)
+                    .filter(candidate -> candidate.problem() == Problem.NONE)
                     .limit(slot.getMaximumCount())
                     .map(Candidate::id)
                     .toList();
             if (selected.size() < slot.getMinimumCount()) {
-                return missingSlot(matching);
+                return missingSlot(slot, matching, selected.size());
             }
             BoundSlot bound = BoundSlot.newBuilder()
                     .setSlotId(slot.getId())
@@ -123,14 +124,15 @@ public final class TechniqueBinder {
         var candidates = new ArrayList<Candidate>();
         for (BodyMessages.MeridianDefinition definition : body.getStructure().getMeridiansList()) {
             BodyMessages.MeridianState state = states.get(definition.getId());
-            TechniqueFailure failure = TECHNIQUE_FAILURE_UNSPECIFIED;
+            Problem problem = Problem.NONE;
             if (state.getCondition() == BodyMessages.MeridianCondition.SEVERED) {
-                failure = MODULE_UNAVAILABLE;
+                problem = Problem.SEVERED;
             } else if (slot.getRequireOpened()
                     && state.getOpening().getStage() != BodyMessages.MeridianOpeningStage.OPENED) {
-                failure = MERIDIAN_NOT_OPENED;
+                problem = Problem.NOT_OPENED;
             }
-            candidates.add(new Candidate(definition.getId(), "", definition.getTagsList(), failure));
+            candidates.add(new Candidate(definition.getId(), definition.getDisplayName(), "",
+                    definition.getTagsList(), problem));
         }
         return candidates;
     }
@@ -143,18 +145,20 @@ public final class TechniqueBinder {
         var candidates = new ArrayList<Candidate>();
         for (BodyMessages.TissueDefinition definition : message.getStructure().getTissuesList()) {
             BodyMessages.TissueState state = states.get(definition.getId());
-            TechniqueFailure failure = TECHNIQUE_FAILURE_UNSPECIFIED;
-            if (state.getHp() == 0 || partHp.get(definition.getPartId()) == 0
-                    || (purpose == Purpose.CAST && state.getFatigue() >= definition.getFatigueCapacity())) {
-                failure = MODULE_UNAVAILABLE;
+            Problem problem = Problem.NONE;
+            if (state.getHp() == 0 || partHp.get(definition.getPartId()) == 0) {
+                problem = Problem.INJURED;
+            } else if (purpose == Purpose.CAST && state.getFatigue() >= definition.getFatigueCapacity()) {
+                problem = Problem.EXHAUSTED;
             } else if (purpose == Purpose.CAST && slot.hasMinimumStrength()) {
                 Anatomy.TissueCapacity available = TissueCapabilities.available(body,
                         new Anatomy.TissueId(definition.getId()));
                 if (available.strengthNewtons() < slot.getMinimumStrength().getValue()) {
-                    failure = INSUFFICIENT_CAPABILITY;
+                    problem = Problem.WEAK;
                 }
             }
-            candidates.add(new Candidate(definition.getId(), definition.getKind(), definition.getTagsList(), failure));
+            candidates.add(new Candidate(definition.getId(), definition.getDisplayName(), definition.getKind(),
+                    definition.getTagsList(), problem));
         }
         return candidates;
     }
@@ -166,33 +170,75 @@ public final class TechniqueBinder {
         var candidates = new ArrayList<Candidate>();
         for (BodyMessages.OrganDefinition definition : body.getStructure().getOrgansList()) {
             BodyMessages.OrganState state = states.get(definition.getId());
-            TechniqueFailure failure = TECHNIQUE_FAILURE_UNSPECIFIED;
+            Problem problem = Problem.NONE;
             if (state.getHp() == 0 || partHp.get(definition.getPartId()) == 0) {
-                failure = MODULE_UNAVAILABLE;
+                problem = Problem.INJURED;
             }
-            candidates.add(new Candidate(definition.getId(), definition.getKind(), definition.getTagsList(), failure));
+            candidates.add(new Candidate(definition.getId(), definition.getDisplayName(), definition.getKind(),
+                    definition.getTagsList(), problem));
         }
         return candidates;
     }
 
-    private static BindingOutcome missingSlot(List<Candidate> matching) {
-        // 匹配了标签但不可用时返回首个确定原因；没有匹配则明确指出缺少模块。
-        for (Candidate candidate : matching) {
-            TechniqueFailure candidateFailure = candidate.failure();
-            if (candidateFailure != TECHNIQUE_FAILURE_UNSPECIFIED) {
-                return failure(candidateFailure);
-            }
+    private static BindingOutcome missingSlot(TechniqueSlot slot, List<Candidate> matching, int usable) {
+        // 匹配了标签但不可用时，按首个不可用候选的问题列出同样问题的全部部位；没有匹配则说明缺哪类部位。
+        Problem problem = matching.stream().map(Candidate::problem)
+                .filter(value -> value != Problem.NONE).findFirst().orElse(null);
+        if (problem == null) {
+            return failure(MISSING_MODULE, "这具身体没有这一式要用的" + moduleWord(slot.getModule()));
         }
-        return failure(MISSING_MODULE);
+        List<String> names = matching.stream().filter(candidate -> candidate.problem() == problem)
+                .map(candidate -> TechniqueScrollText.safeName(candidate.name(), "某处")).toList();
+        String listed = TechniqueNames.list(names);
+        String reason = switch (problem) {
+            case NOT_OPENED -> "经脉未通：" + listed + "，还要开通 " + (slot.getMinimumCount() - usable) + " 条";
+            case SEVERED -> listed + "已断，这一式用不了";
+            case INJURED -> listed + (names.size() > 1 ? "都伤了" : "伤了") + "，这一式用不了";
+            case EXHAUSTED -> listed + "力竭";
+            case WEAK -> listed + "力量不够";
+            case NONE -> throw new IllegalStateException("可用候选不构成拒绝");
+        };
+        return failure(problem.code, reason);
+    }
+
+    private static String moduleWord(ModuleKind module) {
+        // 缺部位的说明按槽位种类给出玩家能懂的统称。
+        return switch (module) {
+            case MERIDIAN -> "经脉";
+            case ORGAN -> "器官";
+            default -> "筋肉";
+        };
     }
 
     private static BindingOutcome failure(TechniqueFailure code) {
-        // 绑定失败保留原因码，说明使用玩家能理解的身体感受。
+        // 没有具体部位事实的失败使用通用身体感受。
+        return failure(code, TechniqueErrors.playerReason(code));
+    }
+
+    private static BindingOutcome failure(TechniqueFailure code, String reason) {
+        // 绑定失败保留原因码，说明写清缺的是哪一样。
         return BindingOutcome.newBuilder()
                 .setFailure(code)
-                .setReason(TechniqueErrors.playerReason(code))
+                .setReason(reason)
                 .build();
     }
 
-    private record Candidate(String id, String kind, List<String> tags, TechniqueFailure failure) { }
+    /** 候选不可用的身体事实；每种对应一个对外失败码。 */
+    private enum Problem {
+        NONE(TECHNIQUE_FAILURE_UNSPECIFIED),
+        NOT_OPENED(MERIDIAN_NOT_OPENED),
+        SEVERED(MODULE_UNAVAILABLE),
+        INJURED(MODULE_UNAVAILABLE),
+        EXHAUSTED(MODULE_UNAVAILABLE),
+        WEAK(INSUFFICIENT_CAPABILITY);
+
+        private final TechniqueFailure code;
+
+        Problem(TechniqueFailure code) {
+            // 失败码与旧版本保持一致，只有玩家文本变具体。
+            this.code = code;
+        }
+    }
+
+    private record Candidate(String id, String name, String kind, List<String> tags, Problem problem) { }
 }

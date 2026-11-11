@@ -7,6 +7,8 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCost;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCostMatching;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -26,8 +28,7 @@ final class TechniqueQiPayment {
         Qi.QiPhase phase = Qi.QiPhase.valueOf(cost.getPhase().name());
         return switch (cost.getMatching()) {
             case EXACT_VARIANT -> exact(inventory, cost, phase, amount);
-            case ANY_ATTRIBUTE_AT_LEAST_PHASE, ATTRIBUTE_AT_LEAST_PHASE -> take(payable(inventory, cost), amount,
-                    shortage(cost));
+            case ANY_ATTRIBUTE_AT_LEAST_PHASE, ATTRIBUTE_AT_LEAST_PHASE -> take(payable(inventory, cost), amount, cost);
             default -> throw TechniqueErrors.rejected(INVALID_STATE);
         };
     }
@@ -49,6 +50,20 @@ final class TechniqueQiPayment {
         return INSUFFICIENT_QI;
     }
 
+    static String shortageReason(QiCost cost, double needed, double available) {
+        // 合计付不起时写明缺哪种真元、要多少、现在能付多少；可付额向下取两位，不把差一点写成够了。
+        String kind = "真元";
+        if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
+            kind = TechniqueNames.elementQi(cost.getAttribute());
+        }
+        return kind + "不够：要 " + amount(needed, RoundingMode.UP) + "，可付 " + amount(available, RoundingMode.DOWN);
+    }
+
+    private static String amount(double value, RoundingMode rounding) {
+        // 两位小数足够区分费用档位，整数不带小数点。
+        return BigDecimal.valueOf(value).setScale(2, rounding).stripTrailingZeros().toPlainString();
+    }
+
     private static boolean matches(Qi qi, QiCost cost, Qi.QiPhase phase) {
         // 三种匹配共用同一过滤，按余额分摊与实际扣款看到相同的可付库存。
         boolean attributeMatches = qi.attribute().id().value().equals(cost.getAttribute());
@@ -65,9 +80,9 @@ final class TechniqueQiPayment {
         Qi entry = inventory.entries().stream()
                 .filter(qi -> qi.phase() == phase && qi.attribute().id().value().equals(cost.getAttribute()))
                 .findFirst()
-                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI));
+                .orElseThrow(() -> TechniqueErrors.rejected(INSUFFICIENT_QI, shortageReason(cost, amount, 0)));
         if (entry.amount() < amount) {
-            throw TechniqueErrors.rejected(INSUFFICIENT_QI);
+            throw TechniqueErrors.rejected(INSUFFICIENT_QI, shortageReason(cost, amount, entry.amount()));
         }
         Qi selected = entry.withAmount(amount);
         QiInventory debit = new QiInventory(List.of(selected));
@@ -75,8 +90,8 @@ final class TechniqueQiPayment {
         return debit;
     }
 
-    private static QiInventory take(List<Qi> candidates, double amount, TechniqueFailure shortage) {
-        // 剩余费用归零表示已支付；不对重新累加的浮点总额要求逐位相等。
+    private static QiInventory take(List<Qi> candidates, double amount, QiCost cost) {
+        // 剩余费用归零表示已支付；不对重新累加的浮点总额要求逐位相等。付不起时写明要多少、这一处能付多少。
         var selected = new ArrayList<Qi>();
         double remaining = amount;
         for (Qi entry : candidates) {
@@ -91,7 +106,7 @@ final class TechniqueQiPayment {
             }
         }
         if (remaining != 0) {
-            throw TechniqueErrors.rejected(shortage);
+            throw TechniqueErrors.rejected(shortage(cost), shortageReason(cost, amount, amount - remaining));
         }
         return new QiInventory(selected);
     }

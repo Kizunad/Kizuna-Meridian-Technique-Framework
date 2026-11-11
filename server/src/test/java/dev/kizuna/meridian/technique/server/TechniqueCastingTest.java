@@ -200,7 +200,7 @@ public class TechniqueCastingTest {
 
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "even_poor"));
 
-        assertFailure(outcome, INSUFFICIENT_QI, "真元不济");
+        assertFailure(outcome, INSUFFICIENT_QI, "真元不够：要 15，可付 10");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
     }
@@ -220,7 +220,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.PAIRED);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "poor"));
-        assertFailure(outcome, INSUFFICIENT_QI, "真元不济");
+        assertFailure(outcome, INSUFFICIENT_QI, "真元不够：要 70，可付 30");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
         assertEquals(0, host.store.environmentQi().totalQi(), 0);
@@ -237,7 +237,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.PAIRED);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "tired"));
-        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "过于疲惫");
+        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "测试器官没有余力：要 " + (int) EXCESS_POWER + " W × 0.5 s");
         assertEquals(before, host.current());
         assertEquals(0, host.store.receipts().size());
     }
@@ -494,7 +494,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.TENDRIL);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "force"));
-        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "过于疲惫");
+        assertFailure(outcome, INSUFFICIENT_CAPABILITY, "测试组织出不了这份力：要 " + (int) (STRENGTH + 1) + " N、");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
     }

@@ -23,6 +23,7 @@ import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Techni
 /** 起手只生成一份活动，所有资源变化最终由宿主原子提交。 */
 final class TechniqueActivities {
     private static final int MAX_EFFORTS = 32;
+    private static final String WORK_PRECHECK_CAST_ID = "work_precheck";
 
     private TechniqueActivities() {
         // 活动依据调用方快照生成，权威状态仍由宿主提交。
@@ -282,6 +283,30 @@ final class TechniqueActivities {
             accounts(body, definition.getCost().getQiList(), slots);
             return true;
         } catch (TechniqueErrors.Rejected rejected) {
+            return false;
+        }
+    }
+
+    static boolean workable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding) {
+        // 按不承接、从头起手的边界，与起手同序预检起手做功和全部时间线做功；
+        // 承接会跳过的预备段也算上，所以只会比真实起手更严。候选身体不提交，也不改变权威版本。
+        CastRequest request = CastRequest.newBuilder()
+                .setBodyId(body.id().value())
+                .setTechnique(TechniqueRegistry.reference(definition))
+                .setCastId(WORK_PRECHECK_CAST_ID)
+                .build();
+        var selection = new CastBinding(binding, Hand.HAND_UNSPECIFIED);
+        var start = new Start(body, definition, request, TechniqueProgress.getDefaultInstance(), selection);
+        Map<String, BoundSlot> slots = binding.getSlotsList().stream()
+                .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
+        try {
+            List<BodyMessages.CapabilityModifier> modifiers =
+                    TechniqueScheduler.modifierPlan(definition, activeCast(start)).all();
+            efforts(start, slots, modifiers);
+            TechniqueScheduledWork.validateStart(start, slots, modifiers);
+            return true;
+        } catch (TechniqueErrors.Rejected | MeridianErrors.CapabilityRejected
+                 | MeridianErrors.IntakeRejected | MeridianErrors.TransportRejected rejected) {
             return false;
         }
     }

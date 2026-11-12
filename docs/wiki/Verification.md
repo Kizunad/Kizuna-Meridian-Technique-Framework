@@ -117,6 +117,7 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 | 冲量只在声明时刻生成意图并保留请求方向，收势提交返回回执 | `TechniqueStage34Test.impulseIsReturnedAtItsDeclaredBodyTime`, `TechniqueStage34Test.advanceReturnsDueEffectsAndRecoveryCommit` |
 | 起手打断不撤销已提交修正 | `TechniqueStage34Test.interruptedCastKeepsSubmittedModifierUntilCurveEnd` |
 | AI 同种子稳定选择、过滤不可用和零权重功法 | `TechniqueStage34Test.selectorUsesStableSeedAndIgnoresZeroWeight`, `TechniqueStage34Test.selectorRejectsUnaffordableAndDistantCandidates` |
+| AI 做功预检与起手同判：将来段超力、组织累了都判做不了，真元预检照过 | `TechniqueScheduledWorkTest.workPrecheckSeesFutureWorkThatQiPrecheckMisses`, `TechniqueScheduledWorkTest.tiredTissueFailsWorkPrecheckAndCastAlike` |
 | 提前结束停止已启动的持续表现，不停止尚未启动的表现；一次性表现见 6a 验收 | `TechniqueStage34Test.earlyTerminationStopsStartedContinuousPresentation`, `TechniqueStage34Test.earlyTerminationDoesNotStopPresentationBeforeItsStart` |
 | 熟练度为零仍可选，高熟练度权重更大 | `TechniqueStage34Test.selectorAllowsZeroProficiencyAndFavorsHigherProficiency` |
 | 玩家文本不含数值或时间单位 | `TechniqueCastingTest.playerFacingReasonsContainNoTimingOrNumericDetails` |

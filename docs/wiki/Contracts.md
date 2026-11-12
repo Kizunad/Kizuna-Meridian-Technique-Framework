@@ -345,6 +345,13 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 熟练度只影响这一权重，不改变费用、曲线和施放时长。
 选择器的外部可用性数据应把 `cooldowns` 与 `curve_ends` 的最大值作为同式可再次施放时刻，
 并在 `affordable` 中反映持物等宿主预检；施放入口仍会再次校验。
+宿主读候选时可用 `TechniqueAvailability` 的两项只读预检，都要先完成身体绑定，再读同一快照，不提交任何候选：
+- `affordable(body, definition, binding)`：用起手同一扣账计算检查全部真元费用；
+- `workable(body, definition, binding)`：按不承接、从头起手的边界，以起手同一顺序检查起手做功和全部时间线做功，
+  包括力量、功率、耐力、器官余力，以及本式起手登记的修正曲线。
+  在同一快照上不承接起手时，做功预检不过的式一定起不了手，走到做功这一步会以 `INSUFFICIENT_CAPABILITY` 拒绝；
+  承接会跳过前段做功，预检只会比它更严。
+  预检通过不代表一定能起手，冷却、持物、动作占用和部位伤势仍由施放入口判定。
 `CombatContext` 提供可信 `TechniqueProgress` 及 `TARGET_SHIELDING/SURROUNDED/UNDER_ATTACK/PURSUED/TARGET_BEHIND/TARGET_AIRBORNE/SELF_FLEEING` 事实，
 `AiHints.combat` 的对应可选权重为 `RATIO` [0, 100]，缺省乘 1、零权重排除，多事实相乘。
 `minimum_leg_force` 可设两腿有效力量下限；`maximum_warmup_under_attack_millis` 可设挨打时的起手上限；`long_warmup_millis` 必须和

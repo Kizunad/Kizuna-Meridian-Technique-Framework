@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.ActivityEffort;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
@@ -24,6 +25,7 @@ public final class TechniqueScheduledWorkTest {
     private static final double EPSILON = 0.000001;
     private static final double EXHAUSTING_POWER = 100;
     private static final double EXHAUSTING_SECONDS = 9;
+    private static final double TIRING_SECONDS = 8;
     private static final int TWO_SEGMENTS = 2;
     private static final double FOLLOW_UP_RATIO = 0.5;
     private static final long FOLLOW_UP_WINDOW = 500;
@@ -150,6 +152,43 @@ public final class TechniqueScheduledWorkTest {
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "too_much"));
         assertEquals(TechniqueFailure.INSUFFICIENT_CAPABILITY, outcome.getFailure());
         assertEquals(before, host.current());
+    }
+
+    @Test
+    public void workPrecheckSeesFutureWorkThatQiPrecheckMisses() {
+        // 真元付得起，但将来那一段要的力超过组织上限：公开做功预检和起手一样判做不了。
+        TechniqueDefinition definition = segmented();
+        BodySnapshot fresh = host(definition).current();
+        assertTrue(workable(fresh, definition));
+        Quantity force = quantity(STRENGTH + 1, Unit.NEWTON);
+        WorkCost impossible = segment().toBuilder().setForce(force).build();
+        TechniqueEffect future = workEffect(SECOND, impossible);
+        TechniqueDefinition tooStrong = definition.toBuilder().setEffects(1, future).build();
+        BodySnapshot body = host(tooStrong).current();
+        assertTrue(TechniqueAvailability.affordable(body, tooStrong, binding(body, tooStrong)));
+        assertFalse(workable(body, tooStrong));
+    }
+
+    @Test
+    public void tiredTissueFailsWorkPrecheckAndCastAlike() {
+        // 别的负载把组织累到出不了这一段的力，绑定和真元都还过得去；预检判做不了，真实起手也判能力不足且不改身体。
+        TechniqueDefinition definition = segmented();
+        MemoryHost host = host(definition);
+        ActivityEffort effort = ActivityEffort.newBuilder()
+                .setTissueId("tendril")
+                .setWatts(EXHAUSTING_POWER)
+                .setSeconds(TIRING_SECONDS)
+                .build();
+        BodyActivity tiring = BodyActivity.newBuilder().addEfforts(effort).build();
+        host.submit(new TechniqueHost.Submission("tiring_load", host.current().revision(), tiring));
+        BodySnapshot tired = host.current();
+        TechniqueBinding binding = binding(tired, definition);
+        assertTrue(TechniqueAvailability.affordable(tired, definition, binding));
+        assertFalse(TechniqueAvailability.workable(tired, definition, binding));
+        CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(tired, "tired"));
+        assertEquals(TechniqueFailure.INSUFFICIENT_CAPABILITY, outcome.getFailure());
+        assertTrue(outcome.getReason(), outcome.getReason().contains("出不了这份力"));
+        assertEquals(tired, host.current());
     }
 
     @Test
@@ -432,6 +471,18 @@ public final class TechniqueScheduledWorkTest {
                 return host.submitEffect(submission);
             }
         };
+    }
+
+    private static boolean workable(BodySnapshot body, TechniqueDefinition definition) {
+        // 和 AI 一样先绑定，再用同一快照预检做功。
+        return TechniqueAvailability.workable(body, definition, binding(body, definition));
+    }
+
+    private static TechniqueBinding binding(BodySnapshot body, TechniqueDefinition definition) {
+        // 预检的前提是绑定已通过；绑定失败说明夹具没造出「绑得上但做不了功」的身体。
+        BindingOutcome outcome = TechniqueBinder.bind(body, definition);
+        assertTrue(outcome.getReason(), outcome.hasBinding());
+        return outcome.getBinding();
     }
 
     private static double fatigue(MemoryHost host) {

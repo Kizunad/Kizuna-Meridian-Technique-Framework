@@ -15,30 +15,44 @@ import java.util.UUID;
 
 /** 通过 entrypoint 发现实体身体宿主，并把三类操作路由到唯一认领者。 */
 public final class TechniqueHostDirectory {
+    /**
+     * 路由确认一次管这么多 tick（10 秒）；过了就把其余宿主也问一遍，期间才给轻量读数。
+     * 认领宿主 inspect 失败时不等到期，当场确认；这个周期只管 inspect 一直成功时多久复查一次归属。
+     */
+    static final int CONFIRM_TICKS = 200;
+
     private final List<TechniqueHostEntrypoint> entrypoints;
     /**
      * 实体到认领宿主的路由。只记「归谁」，不记身体：每次解析仍向这个宿主 inspect 一次。
      * 失效条件：该宿主回 UNBOUND（实体卸载、换了归属）时作废并重新探测全部宿主；
      * 实体卸载或玩家下线时由服务调用 forget 作废。没有认领者的结果不记。
+     * 路由每隔 CONFIRM_TICKS 个 tick、或认领宿主 inspect 失败时，把其余宿主也问一遍；
+     * 另有宿主认领同一实体时路由作废，下一次解析重新探测并报多重认领，不会被路由盖住。
      */
-    private final Map<UUID, TechniqueHostEntrypoint> routes = new HashMap<>();
+    private final Map<UUID, Route> routes = new HashMap<>();
+    private long tick;
 
     public TechniqueHostDirectory(List<? extends TechniqueHostEntrypoint> entrypoints) {
         // 入口列表来自 Fabric 加载器；复制后一次解析不会受外部集合变化影响。
         this.entrypoints = List.copyOf(entrypoints);
     }
 
+    /** 服务端每 tick 调一次，路由确认的有效期按它计。 */
+    public void tick() {
+        // 只推进计数，不主动查询任何宿主。
+        tick++;
+    }
+
     public Optional<TechniqueHost> resolve(UUID entityUuid) {
-        // 已知归属时只问认领它的宿主；它不再认领就作废路由，回到逐个探测。
+        // 已知归属时只问认领它的宿主；路由在这次查询里作废了（它不再认领，或另有宿主也认领）就回到逐个探测。
         Objects.requireNonNull(entityUuid);
         String entityId = entityUuid.toString();
-        TechniqueHostEntrypoint routed = routes.get(entityUuid);
-        if (routed != null) {
-            TechniqueProtocol.HostReply reply = exchange(routed, inspectRequest(entityId));
-            if (reply.response().getResultCase() != TechniqueHostResponse.ResultCase.UNBOUND) {
-                return Optional.of(new RoutedHost(entityUuid, new Claim(routed, reply)));
+        Route route = routes.get(entityUuid);
+        if (route != null) {
+            TechniqueProtocol.HostReply reply = ask(entityUuid, entityId, route);
+            if (routes.get(entityUuid) == route) {
+                return Optional.of(new RoutedHost(entityUuid, new Claim(route.entrypoint, reply)));
             }
-            routes.remove(entityUuid);
         }
         return probe(entityUuid, entityId);
     }
@@ -59,8 +73,50 @@ public final class TechniqueHostDirectory {
         if (claims.size() > 1) {
             throw new MultipleHostsException(entityId);
         }
-        routes.put(entityUuid, claims.get(0).entrypoint());
-        return Optional.of(new RoutedHost(entityUuid, claims.get(0)));
+        Claim claim = claims.get(0);
+        var route = new Route(claim.entrypoint(), tick);
+        route.inspectFailed = !answeredBody(claim.reply());
+        routes.put(entityUuid, route);
+        return Optional.of(new RoutedHost(entityUuid, claim));
+    }
+
+    private TechniqueProtocol.HostReply ask(UUID entityUuid, String entityId, Route route) {
+        // 向认领宿主 inspect 一次并记下成败；它回 UNBOUND 时作废路由，由调用方决定要不要重新探测。
+        // 确认过期或这次 inspect 失败时，顺带把其余宿主问一遍：还有别人认领就作废路由。
+        // 这里不抛多重认领：施放中的查询和清理不该被接线错误打断，下一次解析重新探测时照常报错。
+        TechniqueProtocol.HostReply reply = exchange(route.entrypoint, inspectRequest(entityId));
+        if (reply.response().getResultCase() == TechniqueHostResponse.ResultCase.UNBOUND) {
+            routes.remove(entityUuid, route);
+            return reply;
+        }
+        route.inspectFailed = !answeredBody(reply);
+        if (route.inspectFailed || tick - route.confirmedTick >= CONFIRM_TICKS) {
+            if (claimedByAnother(entityId, route)) {
+                routes.remove(entityUuid, route);
+            } else {
+                route.confirmedTick = tick;
+            }
+        }
+        return reply;
+    }
+
+    private boolean claimedByAnother(String entityId, Route route) {
+        // 其余宿主都应回 UNBOUND；有一个不是，就是第二个认领者。
+        for (TechniqueHostEntrypoint entrypoint : entrypoints) {
+            if (entrypoint == route.entrypoint) {
+                continue;
+            }
+            TechniqueProtocol.HostReply other = exchange(entrypoint, inspectRequest(entityId));
+            if (other.response().getResultCase() != TechniqueHostResponse.ResultCase.UNBOUND) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean answeredBody(TechniqueProtocol.HostReply reply) {
+        // inspect 成功就是回了身体；FAILURE 和别的结果都算失败。
+        return reply.response().getResultCase() == TechniqueHostResponse.ResultCase.BODY;
     }
 
     /** 实体离开世界时作废它的路由；下次解析重新探测全部宿主。 */
@@ -69,14 +125,18 @@ public final class TechniqueHostDirectory {
         routes.remove(Objects.requireNonNull(entityUuid));
     }
 
-    /** 已知归属的实体的轻量读数；没有路由或宿主答不出时为空，调用方退回 inspect。 */
+    /**
+     * 已知归属的实体的轻量读数；为空时调用方退回 inspect。
+     * 只在 inspect 也会成功时给：路由上最近一次 inspect 失败、或确认已经过期时为空，
+     * 调用方随后的 inspect 会重新确认路由。
+     */
     public Optional<TechniqueBodyStamp> bodyStamp(UUID entityUuid) {
         // 只走已经确认过的路由，不为了读两个数去探测归属。
-        TechniqueHostEntrypoint routed = routes.get(Objects.requireNonNull(entityUuid));
-        if (routed == null) {
+        Route route = routes.get(Objects.requireNonNull(entityUuid));
+        if (route == null || route.inspectFailed || tick - route.confirmedTick >= CONFIRM_TICKS) {
             return Optional.empty();
         }
-        return routed.bodyStamp(entityUuid);
+        return route.entrypoint.bodyStamp(entityUuid);
     }
 
     private static TechniqueProtocol.HostReply exchange(TechniqueHostEntrypoint entrypoint,
@@ -101,7 +161,21 @@ public final class TechniqueHostDirectory {
 
     private record Claim(TechniqueHostEntrypoint entrypoint, TechniqueProtocol.HostReply reply) { }
 
+    /** 一条路由：认领宿主、最近一次把所有宿主都问过的 tick、最近一次向认领宿主 inspect 是否失败。 */
+    private static final class Route {
+        private final TechniqueHostEntrypoint entrypoint;
+        private long confirmedTick;
+        private boolean inspectFailed;
+
+        private Route(TechniqueHostEntrypoint entrypoint, long confirmedTick) {
+            // 首次探测时所有宿主都问过，从这一 tick 起算。
+            this.entrypoint = entrypoint;
+            this.confirmedTick = confirmedTick;
+        }
+    }
+
     private final class RoutedHost implements TechniqueHost {
+        private final UUID entity;
         private final String entityUuid;
         private final TechniqueHostEntrypoint entrypoint;
         private final Map<String, Commit> receipts = new HashMap<>();
@@ -110,6 +184,7 @@ public final class TechniqueHostDirectory {
 
         private RoutedHost(UUID entity, Claim claim) {
             // 保留探测回执只用于第一次读取，之后每次操作都重新向宿主确认当前身体。
+            this.entity = entity;
             this.entityUuid = entity.toString();
             this.entrypoint = claim.entrypoint();
             this.initialReply = claim.reply();
@@ -121,9 +196,18 @@ public final class TechniqueHostDirectory {
             TechniqueProtocol.HostReply reply = initialReply;
             initialReply = null;
             if (reply == null) {
-                reply = exchange(entrypoint, inspectRequest(entityUuid));
+                reply = reinspect();
             }
             return inspection(reply);
+        }
+
+        private TechniqueProtocol.HostReply reinspect() {
+            // 路由还指着这个宿主时经目录查询，成败和定期确认都记在路由上；路由已经换人或作废时只问自己。
+            Route route = routes.get(entity);
+            if (route == null || route.entrypoint != entrypoint) {
+                return exchange(entrypoint, inspectRequest(entityUuid));
+            }
+            return ask(entity, entityUuid, route);
         }
 
         @Override

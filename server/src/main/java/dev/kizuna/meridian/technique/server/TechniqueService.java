@@ -288,6 +288,7 @@ public final class TechniqueService {
 
     public void tick() {
         // 每 tick 只推进已成功施放的实体，不按毫秒轮询世界；僵直按各自身体时钟到期。
+        hosts.tick();
         for (UUID entityUuid : List.copyOf(sessions.keySet())) {
             Session session = sessions.get(entityUuid);
             if (session != null) {
@@ -317,9 +318,10 @@ public final class TechniqueService {
         if (host == null) {
             return false;
         }
+        // 解析时已经向宿主 inspect 过一次，这里读的就是那份回执：inspect 失败时不落僵直。
         long nowMillis;
         try {
-            nowMillis = bodyClock(entityUuid, host);
+            nowMillis = host.inspect().body().settledAt().elapsedMillis();
         } catch (TechniqueErrors.HostRejected exception) {
             return false;
         }
@@ -378,15 +380,6 @@ public final class TechniqueService {
         } catch (TechniqueErrors.HostRejected exception) {
             return 0;
         }
-    }
-
-    private long bodyClock(UUID entityUuid, TechniqueHost host) {
-        // 僵直起点同样只需要时钟；宿主答不出时退回查询整具身体，读到的是同一个数。
-        Optional<TechniqueBodyStamp> stamp = hosts.bodyStamp(entityUuid);
-        if (stamp.isPresent()) {
-            return stamp.get().clockMillis();
-        }
-        return host.inspect().body().settledAt().elapsedMillis();
     }
 
     private long staggeredUntil(UUID entityUuid) {

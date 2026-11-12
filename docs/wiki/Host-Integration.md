@@ -138,12 +138,14 @@ Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动
 `inspect` 要结清时间并交出整具身体，是这条链上最贵的一步。服务按下面的规则少调它：
 
 - **路由**：实体第一次解析时逐个探测全部宿主；确认唯一认领者以后只问它。它回 `UNBOUND` 时路由作废并重新探测，实体卸载、玩家下线时服务主动作废。「没有认领者」不缓存。
-- **`bodyStamp(entityUuid)`**：`TechniqueHostEntrypoint` 的可选方法，不结清、不构造身体，只回两个数：已提交的身体 revision，以及此刻 `inspect` 结清后 `settled_at` 会是多少毫秒。僵直的起点和到期只读其中的时钟。
+- **路由确认**：路由每隔 200 tick（10 秒，`TechniqueHostDirectory.CONFIRM_TICKS`）重新确认一次，认领宿主 `inspect` 失败时当场确认：把其余宿主也问一遍，另有宿主认领同一实体就作废路由。施放中的查询和清理不抛；下一次解析重新探测全部宿主，照常抛多重认领。
+- **`bodyStamp(entityUuid)`**：`TechniqueHostEntrypoint` 的可选方法，不结清、不构造身体，只回两个数：已提交的身体 revision，以及此刻 `inspect` 结清后 `settled_at` 会是多少毫秒。僵直到期只读其中的时钟；落僵直时用的是解析那一次 `inspect` 的回执，`inspect` 失败就不落。
+- **读数只在 `inspect` 也会成功时用**：路由上最近一次 `inspect` 失败、或路由确认已过期时，服务不读 `bodyStamp`，退回 `inspect`；`inspect` 成功并重新确认以后才恢复。所以宿主的 `inspect` 开始失败、读数却还答得出时，安静施放最晚 200 tick 后服务才会看到；其间任何一次 `inspect`（起式、落僵直、到期边界）都会当场发现。
 - **每 tick 推进**：施放中的身体一个 tick 只 `inspect` 一次，查到的快照逐个边界往下传；某个边界向宿主提交过活动或交付过效果，下一个边界就重新 `inspect`。
 - **安静 tick**：宿主报的 revision 仍是本会话上次查询到的那一版，并且按宿主报的时钟用那份身体试算（`TechniqueCasting.quietAt`），没有到期的曲线、做功、效果和收势时，这个 tick 不查询身体。revision 对不上、宿主不提供读数、有未交付的批次或正在清理时，照常查询。
 
 宿主实现 `bodyStamp` 的要求：revision 必须是已提交身体的版本；时钟必须与随后一次 `inspect` 回执的 `settled_at` 相同；
-身体已死、尚未绑定或拿不准时返回空，服务退回 `inspect`。不实现这个方法的宿主行为不变。
+身体已死、尚未绑定、寿元会在这个时钟之前到期（结清会停在死亡点）或拿不准时返回空，服务退回 `inspect`。不实现这个方法的宿主行为不变。
 安静 tick 期间身体不被结清，流逝的时间在下一次 `inspect` 时一并补算。
 
 所有调用必须与该身体的其他事件串行。拒绝抛 `TechniqueErrors.HostRejected`，包含原始 Framework 失败码；

@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.protocol.BodyProtobuf;
+import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.RequestFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
@@ -33,6 +34,7 @@ import static dev.kizuna.meridian.technique.server.Fixtures.request;
 import static dev.kizuna.meridian.technique.server.Fixtures.withProgress;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /** 实体到宿主的路由缓存、轻量时钟，以及一个 tick 内对同一身体的查询次数。 */
@@ -155,6 +157,175 @@ public class TechniqueHostRoutingTest {
     }
 
     @Test
+    public void staggerIsNotRecordedWhenInspectFails() {
+        // 宿主还报得出读数、但 inspect 已经失败：僵直不能落下，和没有轻量读数时一样。
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueService service = new TechniqueService(registry(definition()),
+                new TechniqueHostDirectory(List.of(owner)));
+        assertFalse(service.known(ENTITY).isEmpty());
+        List<TechniqueService.StaggerChanged> events = new ArrayList<>();
+        service.addStaggerListener(events::add);
+
+        owner.inspectFailure = FailureCode.BODY_DEAD;
+        assertTrue(service.stagger(ENTITY, HIT_STAGGER).isEmpty());
+        assertTrue(events.isEmpty());
+        assertEquals(0, service.staggerRemainingMillis(ENTITY));
+    }
+
+    @Test
+    public void stampIsWithheldWhileInspectFails() {
+        // 路由上最近一次 inspect 失败后不再给轻量读数，已有的僵直按宿主失效处理；inspect 恢复后读数也恢复。
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(owner));
+        TechniqueService service = new TechniqueService(registry(definition()), directory);
+        service.stagger(ENTITY, HIT_STAGGER);
+        assertEquals(HIT_STAGGER.durationMillis(), service.staggerRemainingMillis(ENTITY));
+
+        owner.inspectFailure = FailureCode.BODY_DEAD;
+        assertTrue(directory.resolve(ENTITY).isPresent());
+        assertTrue(directory.bodyStamp(ENTITY).isEmpty());
+        assertEquals(0, service.staggerRemainingMillis(ENTITY));
+
+        owner.inspectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+        directory.resolve(ENTITY).orElseThrow().inspect();
+        assertTrue(directory.bodyStamp(ENTITY).isPresent());
+    }
+
+    @Test
+    public void stampExpiresUntilRouteIsConfirmedAgain() {
+        // 路由确认只管 CONFIRM_TICKS 个 tick：过期后不给读数，下一次 inspect 把其余宿主也问一遍，读数恢复。
+        Endpoint bystander = new Endpoint(learnedHost());
+        bystander.claims = false;
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(bystander, owner));
+        TechniqueHost host = directory.resolve(ENTITY).orElseThrow();
+        host.inspect();
+        pass(directory, TechniqueHostDirectory.CONFIRM_TICKS - 1);
+        assertTrue(directory.bodyStamp(ENTITY).isPresent());
+        host.inspect();
+        assertEquals(1, bystander.exchanges);
+
+        pass(directory, 1);
+        assertTrue(directory.bodyStamp(ENTITY).isEmpty());
+        host.inspect();
+        assertEquals(2, bystander.exchanges);
+        assertTrue(directory.bodyStamp(ENTITY).isPresent());
+    }
+
+    @Test
+    public void secondClaimIsNoticedWhenRouteIsConfirmedAgain() {
+        // 路由建好以后另一个宿主也认领同一实体：确认过期后的下一次解析报多重认领，之后不给读数，再解析仍报错。
+        Endpoint late = new Endpoint(learnedHost());
+        late.claims = false;
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(late, owner));
+        directory.resolve(ENTITY).orElseThrow();
+        assertTrue(directory.bodyStamp(ENTITY).isPresent());
+        late.claims = true;
+        pass(directory, TechniqueHostDirectory.CONFIRM_TICKS);
+        assertThrows(TechniqueHostDirectory.MultipleHostsException.class, () -> directory.resolve(ENTITY));
+        assertTrue(directory.bodyStamp(ENTITY).isEmpty());
+        assertThrows(TechniqueHostDirectory.MultipleHostsException.class, () -> directory.resolve(ENTITY));
+    }
+
+    @Test
+    public void secondClaimSeenByRunningSessionDropsRouteWithoutThrowing() {
+        // 已有会话的查询撞上确认、另一个宿主也认领：不抛，照常回身体，只作废路由；
+        // 之后这个会话只问自己的宿主，下一次解析才报多重认领。
+        Endpoint late = new Endpoint(learnedHost());
+        late.claims = false;
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(late, owner));
+        TechniqueHost host = directory.resolve(ENTITY).orElseThrow();
+        host.inspect();
+        late.claims = true;
+        pass(directory, TechniqueHostDirectory.CONFIRM_TICKS);
+
+        assertEquals(owner.host.current().id(), host.inspect().body().id());
+        assertTrue(directory.bodyStamp(ENTITY).isEmpty());
+        int asked = late.exchanges;
+        host.inspect();
+        assertEquals(asked, late.exchanges);
+        assertThrows(TechniqueHostDirectory.MultipleHostsException.class, () -> directory.resolve(ENTITY));
+    }
+
+    @Test
+    public void castKeepsTickingWhenAnotherHostStartsClaiming() {
+        // 施放中另一个宿主也认领同一实体：服务的 tick 不抛，施放不因此结束。
+        Endpoint late = new Endpoint(learnedHost());
+        late.claims = false;
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueService service = new TechniqueService(registry(definition()),
+                new TechniqueHostDirectory(List.of(late, owner)));
+        List<TechniqueCastEnded> ended = new ArrayList<>();
+        service.addCastEndListener(ended::add);
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(owner.host.current(), "claimed")).getPhase());
+        late.claims = true;
+        int asked = late.exchanges;
+        for (int tick = 0; tick <= TechniqueHostDirectory.CONFIRM_TICKS; tick++) {
+            service.tick();
+        }
+        assertTrue(late.exchanges > asked);
+        assertTrue(ended.isEmpty());
+    }
+
+    @Test
+    public void secondClaimIsNoticedAtOnceWhenInspectFails() {
+        // 认领宿主 inspect 失败时不等到期，当场把其余宿主问一遍。
+        Endpoint late = new Endpoint(learnedHost());
+        late.claims = false;
+        Endpoint owner = new Endpoint(learnedHost());
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(late, owner));
+        directory.resolve(ENTITY).orElseThrow();
+        late.claims = true;
+        owner.inspectFailure = FailureCode.INTERNAL_ERROR;
+        assertThrows(TechniqueHostDirectory.MultipleHostsException.class, () -> directory.resolve(ENTITY));
+    }
+
+    @Test
+    public void quietCastNoticesFailingHostWithinConfirmPeriod() {
+        // 施放中宿主的 inspect 开始失败、版本和时钟都没动：最晚 CONFIRM_TICKS 个 tick 后重新查询，施放按失败结束，
+        // 不会一直跳过到下一个边界。
+        Endpoint owner = new Endpoint(learnedHost());
+        owner.offersStamp = true;
+        TechniqueService service = new TechniqueService(registry(definition()),
+                new TechniqueHostDirectory(List.of(owner)));
+        List<TechniqueCastEnded> ended = new ArrayList<>();
+        service.addCastEndListener(ended::add);
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(owner.host.current(), "failing")).getPhase());
+        owner.host.nowMillis = MID_WARMUP;
+        service.tick();
+
+        // 路由在起式那一 tick 确认过，上面已经走了 1 个 tick：再走 CONFIRM_TICKS - 2 个都还是安静 tick，不查询宿主。
+        owner.inspectFailure = FailureCode.ACCESS_DENIED;
+        int inspects = owner.inspects;
+        for (int tick = 0; tick < TechniqueHostDirectory.CONFIRM_TICKS - 2; tick++) {
+            service.tick();
+        }
+        assertEquals(inspects, owner.inspects);
+        service.tick();
+        assertTrue(owner.inspects > inspects);
+        assertTrue(ended.isEmpty());
+        owner.inspectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+        service.tick();
+        assertEquals(1, ended.size());
+        assertEquals(TechniqueCastEndReason.FAILED, ended.get(0).reason());
+    }
+
+    private static void pass(TechniqueHostDirectory directory, int ticks) {
+        // 让目录的 tick 计数往前走这么多。
+        for (int tick = 0; tick < ticks; tick++) {
+            directory.tick();
+        }
+    }
+
+    @Test
     public void quietTickInspectsCastingBodyOnce() {
         // 施放中、这一 tick 没有到期的边界：整具身体只查询一次。
         Endpoint owner = new Endpoint(learnedHost());
@@ -268,11 +439,12 @@ public class TechniqueHostRoutingTest {
         return new MemoryHost(withProgress(body(Shape.TENDRIL), progress(definition())));
     }
 
-    /** 记录交换次数的测试入口：可以切换是否认领，可以选择是否提供轻量读数。 */
+    /** 记录交换次数的测试入口：可以切换是否认领，可以选择是否提供轻量读数，可以让 inspect 回指定的失败码。 */
     private static final class Endpoint implements TechniqueHostEntrypoint {
         private final MemoryHost host;
         private boolean claims = true;
         private boolean offersStamp;
+        private FailureCode inspectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
         private int exchanges;
         private int inspects;
 
@@ -315,6 +487,9 @@ public class TechniqueHostRoutingTest {
             switch (request.getOperationCase()) {
                 case INSPECT -> {
                     inspects++;
+                    if (inspectFailure != FailureCode.FAILURE_CODE_UNSPECIFIED) {
+                        throw new TechniqueErrors.HostRejected(inspectFailure);
+                    }
                     TechniqueHost.Inspection inspection = host.inspect();
                     response.setBody(BodyProtobuf.toMessage(inspection.body()));
                     response.setHeldItems(inspection.heldItems());

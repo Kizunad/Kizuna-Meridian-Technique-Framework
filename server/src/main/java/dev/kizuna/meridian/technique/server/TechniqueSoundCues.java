@@ -167,9 +167,12 @@ public final class TechniqueSoundCues {
     }
 
     private static List<SoundCue> cues(TechniqueEffect effect) {
-        // 目录里的声音只在两处声明：声音效果本身，以及跃步状态的起跳声。
+        // 目录里的声音在三处声明：声音效果本身、跃步状态的起跳声、附行的命中声。
         if (effect.hasSound()) {
             return List.of(effect.getSound());
+        }
+        if (effect.hasElementalInfusion() && effect.getElementalInfusion().hasHitSound()) {
+            return List.of(effect.getElementalInfusion().getHitSound());
         }
         if (!effect.hasStatusBenefit() || !effect.getStatusBenefit().hasLeap()) {
             return List.of();

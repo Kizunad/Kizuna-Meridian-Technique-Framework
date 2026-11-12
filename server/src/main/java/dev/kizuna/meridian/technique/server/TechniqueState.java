@@ -82,6 +82,9 @@ public final class TechniqueState {
         if (progress.hasLastCast()) {
             validateLastCast(progress.getLastCast());
         }
+        if (progress.hasActiveInfusion()) {
+            TechniqueInfusions.validateActive(progress.getActiveInfusion());
+        }
     }
 
     private static void validateLastCast(LastCast last) {

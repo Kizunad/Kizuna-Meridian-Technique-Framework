@@ -253,6 +253,7 @@ final class TechniqueDefinitions {
                                         Map<String, TechniqueSlot> slots, TechniqueDefinition definition) {
         // 所有效果保留声明顺序，同一时刻不重新排序；这里只检查数据，不生成意图。
         TechniqueSoundCues.validateCounts(definition);
+        TechniqueInfusions.validateCount(definition);
         long previousMillis = 0;
         long durationMillis = durationMillis(definition.getPhases());
         for (TechniqueEffect effect : definition.getEffectsList()) {
@@ -272,6 +273,7 @@ final class TechniqueDefinitions {
                 }
                 case USE_BREW -> TechniqueBrewEffects.validateUseBrew(effect.getUseBrew());
                 case ORGAN_REFINE -> validateOrganRefine(slots, effect, durationMillis);
+                case ELEMENTAL_INFUSION -> TechniqueInfusions.validate(effect.getElementalInfusion());
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());

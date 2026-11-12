@@ -85,6 +85,17 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 | 打断后不再交付后续批次，结束通知一次 | `TechniqueOrganRefineTest.staggerStopsLaterBatchesAndPublishesCastEndOnce` |
 | 非法炼化声明与意图拒绝 | `TechniqueOrganRefineTest.invalidDeclarationsAndIntentsAreRejected` |
 | 本行费用卷轴文字标出行名 | `TechniqueScrollTextTest.elementCostNamesItsElementAndBalanceKeepsTotal` |
+| 附行曲线、比率、点燃冻结、击退、克制条目与条数、命中声锚点与伤害类型越界拒绝；一式两条附行拒绝 | `TechniqueInfusionTest.catalogRejectsMalformedInfusions` |
+| 存档里的附行往返；缺施放、缺功法、负开始时刻、坏曲线拒绝 | `TechniqueInfusionTest.savedInfusionMustBeExplainable` |
+| 附行从声明时刻算起，tick 迟到也不后移；剩余时长查询，未知实体为 0 | `TechniqueInfusionTest.infusionStartsAtEffectTimeEvenWhenTickIsLate` |
+| 起手被打断保留上一条附行，下一式到时替换 | `TechniqueInfusionTest.interruptedWarmupKeepsOldInfusionAndNextCastReplacesIt` |
+| 附行比收势活得久，到曲线末点失效 | `TechniqueInfusionTest.infusionOutlivesRecoveryAndLapsesAtCurveEnd` |
+| 死体恢复清附行，有无残留施放都清，重复恢复不再写 | `TechniqueInfusionTest.deathRecoveryClearsInfusionWithOrWithoutActiveCast` |
+| 存活卸载恢复保留附行 | `TechniqueInfusionTest.livingUnloadRecoveryKeepsInfusion` |
+| 附伤 = 剂量 × 比率 × 曲线 × 克制倍率；剂量为零、开始前、死体无附伤 | `TechniqueInfusionTest.strikeScalesDoseByRatioCurveAndCounter` |
+| 克制调整命中声音量与音调，并夹在可播放范围 | `TechniqueInfusionTest.counterAdjustsHitSoundWithinPlayableRange` |
+| 主属性按全身各经脉合计，须唯一领先且占比不低于阈值；枯败可为主属性但不克制 | `TechniqueInfusionTest.primaryAttributeNeedsSingleLeaderAboveShare` |
+| 安静检查在附行时刻让出，写入后恢复安静 | `TechniqueInfusionTest.quietCheckYieldsAtInfusionMoment` |
 | 真元不足整笔拒绝 | `TechniqueCastingTest.insufficientQiRejectsWholeActivity` |
 | 后续做功预算不足不留下先前资源变化 | `TechniqueCastingTest.insufficientWorkBudgetRollsBackQiActionsAndProgress` |
 | 只能从已开拓经脉扣费 | `TechniqueCastingTest.onlyOpenedMeridiansCanFundCasting` |
@@ -663,3 +674,32 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 显式断言目录加载结果）；第 5 条（`TechniqueSelector.contextWeight`、`TechniqueRelativeArms.moduleIds` 具名中间值）；
 第 6 条（`TargetContext` 观察开关改枚举）；第 7 条（射击测试参数常量）；第 9 条（`TechniqueDefinitions`、
 `TechniqueProtocol`、`TechniqueBinder` 拆出完整业务阶段，测试与世界效果行长）；第 10 条（移除开发过程注释）。
+
+## 五行附行（2026-11-13）
+
+`TechniqueInfusionTest` 的 11 条用例走真实 Framework 处理器和 `MemoryHost`，覆盖：
+
+- 目录与存档校验：曲线、比率、点燃冻结刻数、击退、相克条目与条数、命中声锚点、伤害类型；一式最多一个附行。
+- 写入时刻：起手结束那一刻写进进度，迟到 tick 不后移起点；起手被打断不写，旧附行保留；下一式整份覆盖。
+- 到期：收势不清，曲线末点那一刻起剩余为 0、没有附伤；节流试算在附行时刻让出。
+- 死亡：死体恢复清附行，有无残留施放都清，重复恢复不再写；存活卸载保留。
+- 数值：剂量 × 比率 × 曲线 × 相克倍率；命中声的音量、音调按相克调整并夹在可播放范围；主属性的并列、门槛与枯败。
+
+最终执行 `bash "gradlew" --no-daemon test build :fabric:runGametest`，使用
+`-PgametestRunDir=build/gametest-c6b-s1-final-1113-0140`。
+结果：306 项 JUnit（server 289、fabric 17）及 24 项必需 GameTest 全部通过；`check_docs.py`、`git diff --check` 退出码 0。
+
+负对照各改一处生产代码、只跑本类，跑完逐字节还原：
+
+| 改动 | 失败的用例 |
+|---|---|
+| 推进不停在附行时刻、起点取本次 tick | `infusionStartsAtEffectTimeEvenWhenTickIsLate` 等 4 条 |
+| 死体无施放时不清附行 | `deathRecoveryClearsInfusionWithOrWithoutActiveCast` |
+| 主属性门槛改成严格大于 | `primaryAttributeNeedsSingleLeaderAboveShare` |
+
+下游指向本次改动各跑一次 `build` 和 GameTest：Human 110 项、Threatening 136 项、五脏诀 32 项必需 GameTest 全部通过。
+Human 的运行目录参数是 `-PhumanGametestRunDir`。
+
+代码形状自查：第 1、2 条（附行测试样本与 `TechniqueService.progressCommand` 每行一个 setter，内层消息先存局部变量）；
+第 4 条（`TechniqueScheduledInfusions` 的排定时刻只取一次）；第 7 条（附行上限、主属性门槛、测试数值都是具名常量）；
+第 8 条（取值检查都放在 `validate*` 方法里）；第 9 条（新方法都在 40 行内，行宽不超过 120）。

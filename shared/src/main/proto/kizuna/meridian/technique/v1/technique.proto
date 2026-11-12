@@ -257,7 +257,9 @@ message TissueBenefitLeases { repeated TissueBenefitLease leases = 1; }
 enum SoundAnchor {
   SOUND_ANCHOR_UNSPECIFIED = 0;
   CASTER = 1;
-  TARGET = 2; // 只能跟在同刻 weapon_strike 之后（中间可隔同刻声音），调度时并入该击的 hit_sounds
+  // 声音效果里只能跟在同刻 weapon_strike 之后（中间可隔同刻声音），调度时并入该击的 hit_sounds；
+  // 附行的 hit_sound 也用它，由伤害附属在附伤目标处播放。
+  TARGET = 2;
 }
 // 原版声音事件的一次播放；类别固定为 PLAYERS，客户端不预测，施放者本人也只听服务端下发的一次。
 message SoundCue {
@@ -489,6 +491,7 @@ message TechniqueEffect {
     BlockWork block_work = 21;
     UseBrew use_brew = 22;
     OrganRefine organ_refine = 23;
+    ElementalInfusion elemental_infusion = 24; // 到时由本库写进身体，不产生世界效果意图
   }
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
@@ -499,6 +502,27 @@ message OrganRefine {
   string recipe_family = 3; // namespace:path，宿主按 器官种类 × 相态 解析
   int64 batch_millis = 4; // 每批间隔，> 0
   int64 duration_millis = 5; // 起批窗口，> 0；批次在 [at, at + duration) 内起
+}
+// 附行：效果时刻起，主人每次可附伤的命中另打一记本行伤害。一身只有一个附行，新的覆盖旧的。
+// 哪些命中可附伤、落在哪里、原版附带怎么做都由伤害附属决定；本库只保存状态并算出附伤数值。
+message ElementalInfusion {
+  string attribute = 1; // 本行属性 ID，例如 meridian:fire
+  string damage_type_id = 2; // 附伤使用的原版伤害类型 ID
+  Quantity ratio = 3; // RATIO，(0, 10]，附伤占主击剂量的比例
+  // 偏移单位 ms，相对效果时刻，值为 [0, 1]；2–16 点，首点偏移 0，首尾值 0，末点是到期，不超过 300000。
+  repeated kizuna.meridian.v1.CurvePoint curve = 4;
+  int32 ignite_ticks = 5; // [0, 1200]，目标着火刻数；0 不点火
+  int32 freeze_ticks = 6; // [0, 1200]，目标冻结刻数增量；0 不冻结
+  Quantity extra_knockback = 7; // RATIO，[0, 10]，原版击退强度；省略为 0
+  repeated InfusionCounter counters = 8; // 按目标主属性取倍率，目标属性不重复；未列出的为 ×1
+  SoundCue hit_sound = 9; // 锚点必须是 TARGET；省略不播
+}
+// 目标主属性是 target_attribute 时，附伤与命中声的调整。
+message InfusionCounter {
+  string target_attribute = 1;
+  Quantity damage_multiplier = 2; // RATIO，(0, 10]
+  Quantity sound_volume_multiplier = 3; // RATIO，(0, 4]；省略为 1，乘后音量不超过 4
+  Quantity sound_pitch_offset = 4; // RATIO，[-1.5, 1.5]；省略为 0，加后音调夹回原版可播放区间
 }
 message BlockWork {
   string processor_id = 1;
@@ -824,6 +848,13 @@ message LastCast {
   int64 recovery_end_millis = 4; // 保留正常边界，提前承接不提前开始前式冷却
   CastPhase ending = 5; // 只有 FINISHED 可用于收势后的承接
 }
+// 身体上的附行，一身至多一个；按身体时钟在查询时判断到期，不主动清除。
+message ActiveInfusion {
+  string cast_id = 1;
+  string technique_id = 2;
+  int64 started_millis = 3; // 效果时刻对应的身体毫秒，曲线从这里起算
+  ElementalInfusion infusion = 4; // 定义快照：目录改了或卸载了，已生效的附行不变
+}
 message TechniqueProgress {
   int32 schema_version = 1; // 1；Any 的完整大小不得超过 Framework 的 64 KiB 上限
   repeated KnownTechnique known = 2;
@@ -831,4 +862,5 @@ message TechniqueProgress {
   ActiveCast active_cast = 4; // 至多一个；结束后清除，知识与冷却保留
   map<string, int64> curve_ends = 5; // 功法 ID → 已提交修正的最晚到期；提前终止也不撤销
   LastCast last_cast = 6;
+  ActiveInfusion active_infusion = 7; // 收势不清除；身体死亡时由可信恢复入口清除
 }

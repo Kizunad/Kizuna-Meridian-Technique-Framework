@@ -148,9 +148,10 @@ public final class TechniqueScheduler {
                 continue;
             }
             TechniqueEffect effect = projected.get();
-            // 修正和做功走身体活动；目标锚点的声音并入同刻打击，不单独成为世界意图。
+            // 修正、做功和附行走身体活动；目标锚点的声音并入同刻打击，不单独成为世界意图。
             if (effect.getOperationCase() == TechniqueEffect.OperationCase.TISSUE_MODIFIER
                     || effect.hasWork()
+                    || effect.hasElementalInfusion()
                     || TechniqueSoundCues.targetAnchored(effect)) {
                 continue;
             }

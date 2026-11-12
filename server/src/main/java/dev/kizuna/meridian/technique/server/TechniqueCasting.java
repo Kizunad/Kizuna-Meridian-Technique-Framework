@@ -359,7 +359,7 @@ public final class TechniqueCasting {
 
     private AdvanceResult advanceActive(TechniqueHost host, BodySnapshot body, ActiveCast active,
                                         Interval interval) {
-        // 分段费用先于同刻世界效果支付；每次只跨一个事件边界，迟到时由服务继续推进。
+        // 分段费用先于同刻附行和世界效果支付；每次只跨一个事件边界，迟到时由服务继续推进。
         long previousMillis = interval.previousMillis();
         long nowMillis = interval.nowMillis();
         Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
@@ -370,9 +370,13 @@ public final class TechniqueCasting {
             long workBoundary = TechniqueScheduledWork.boundary(
                     currentDefinition, active, previousMillis, nowMillis);
             long modifierBoundary = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
-            boundaryMillis = Math.min(workBoundary, modifierBoundary);
+            long infusionBoundary = TechniqueScheduledInfusions.boundary(
+                    currentDefinition, active, previousMillis, nowMillis);
+            boundaryMillis = Math.min(Math.min(workBoundary, modifierBoundary), infusionBoundary);
             BodySnapshot modifiedBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
-            paidBody = TechniqueScheduledWork.payDue(host, currentDefinition, modifiedBody, boundaryMillis);
+            BodySnapshot workedBody = TechniqueScheduledWork.payDue(
+                    host, currentDefinition, modifiedBody, boundaryMillis);
+            paidBody = TechniqueScheduledInfusions.applyDue(host, currentDefinition, workedBody, boundaryMillis);
         } else {
             boundaryMillis = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
             paidBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);

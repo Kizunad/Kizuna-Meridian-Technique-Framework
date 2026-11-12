@@ -345,6 +345,19 @@ public final class TechniqueService {
         return remainingMillis(entityUuid, staggerEnds.getOrDefault(key, NOT_STAGGERED_MILLIS));
     }
 
+    public long infusionRemainingMillis(UUID entityUuid) {
+        // 附行还剩多久，供 AI 与显示使用；宿主不认领或拒绝查询都按没有附行。
+        TechniqueHost host = hosts.resolve(Objects.requireNonNull(entityUuid)).orElse(null);
+        if (host == null) {
+            return 0;
+        }
+        try {
+            return TechniqueInfusions.remainingMillis(host.inspect().body());
+        } catch (TechniqueErrors.HostRejected exception) {
+            return 0;
+        }
+    }
+
     private long remainingMillis(UUID entityUuid, long untilMillis) {
         // 宿主失效或身体时钟已越过到期时刻都视为没有僵直。
         if (untilMillis == NOT_STAGGERED_MILLIS) {
@@ -514,10 +527,13 @@ public final class TechniqueService {
 
     public void recoverOnLoad(UUID entityUuid, TechniqueRecoveryHost host) {
         // 恢复只停止表现并解锁；死体动作已由 Framework 清空。
-        // 再通过可信进度入口清除残留施放。
+        // 再通过可信进度入口清除残留施放；死体没有施放时也要清掉附行。
         Objects.requireNonNull(entityUuid);
         BodySnapshot body = host.snapshot();
         TechniqueProgress progress = TechniqueState.read(body);
+        if (!progress.hasActiveCast() && body.vitality().dead() && progress.hasActiveInfusion()) {
+            clearDeadInfusion(host, body, progress);
+        }
         if (progress.hasActiveCast()) {
             ActiveCast active = progress.getActiveCast();
             clearRecoveredEffects(host, active, body.settledAt().elapsedMillis());
@@ -555,22 +571,41 @@ public final class TechniqueService {
     }
 
     private static BodyCommand recoveryCommand(BodySnapshot body, TechniqueProgress progress) {
-        // 存活身体原子解除动作；死体保留费用、冷却、知识和其他附属进度。
-        var command = BodyCommand.newBuilder()
-                .setBodyId(body.id().value())
-                .setExpectedRevision(body.revision());
+        // 存活身体原子解除动作；死体保留费用、冷却、知识和其他附属进度，只清掉施放和附行。
         if (body.vitality().dead()) {
             TechniqueProgress stopped = TechniqueActivities.endedProgress(progress,
                     body.settledAt().elapsedMillis());
-            SetAddonProgress update = SetAddonProgress.newBuilder()
-                    .setId(TechniqueState.KEY)
-                    .setProgress(TechniqueState.pack(stopped))
-                    .build();
-            command.setSetAddonProgress(update);
-        } else {
-            command.setExecuteActivity(TechniqueActivities.stopAt(progress, body.settledAt().elapsedMillis()));
+            return progressCommand(body, stopped.toBuilder().clearActiveInfusion().build());
         }
-        return command.build();
+        return BodyCommand.newBuilder()
+                .setBodyId(body.id().value())
+                .setExpectedRevision(body.revision())
+                .setExecuteActivity(TechniqueActivities.stopAt(progress, body.settledAt().elapsedMillis()))
+                .build();
+    }
+
+    private static void clearDeadInfusion(TechniqueRecoveryHost host, BodySnapshot body,
+                                          TechniqueProgress progress) {
+        // 死体时钟停住，附行不会自己到期；复活后不能带着死前的附行。
+        TechniqueProgress cleared = progress.toBuilder().clearActiveInfusion().build();
+        String requestId = "technique_recover_infusion_" + progress.getActiveInfusion().getCastId();
+        long revision = host.submitRecovery(requestId, progressCommand(body, cleared));
+        if (revision != body.revision() + 1) {
+            throw new IllegalStateException("宿主返回的附行清除版本不一致");
+        }
+    }
+
+    private static BodyCommand progressCommand(BodySnapshot body, TechniqueProgress progress) {
+        // 死体不能执行活动，只能经可信入口整份改写本库进度。
+        SetAddonProgress update = SetAddonProgress.newBuilder()
+                .setId(TechniqueState.KEY)
+                .setProgress(TechniqueState.pack(progress))
+                .build();
+        return BodyCommand.newBuilder()
+                .setBodyId(body.id().value())
+                .setExpectedRevision(body.revision())
+                .setSetAddonProgress(update)
+                .build();
     }
 
     public void shutdown() {

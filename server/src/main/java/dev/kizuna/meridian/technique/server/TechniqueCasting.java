@@ -10,6 +10,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
 
@@ -253,9 +254,24 @@ public final class TechniqueCasting {
 
     public AdvanceResult advance(TechniqueHost host, long previousMillis) {
         // 先读取已结算身体时钟，再由纯调度器生成意图，最后按需提交收势活动。
+        return advance(host, () -> host.inspect().body(), previousMillis);
+    }
+
+    /**
+     * 用调用方手里的身体推进，省掉一次重复查询。
+     * body 必须是刚从同一宿主查询到的，而且查询之后没有向宿主提交过活动或效果；写过就要重新查询。
+     */
+    public AdvanceResult advance(TechniqueHost host, BodySnapshot body, long previousMillis) {
+        // 与查询入口共用同一套推进和失败映射。
+        Objects.requireNonNull(body);
+        return advance(host, () -> body, previousMillis);
+    }
+
+    private AdvanceResult advance(TechniqueHost host, Supplier<BodySnapshot> current, long previousMillis) {
+        // 身体的来源只有两种：现查，或调用方刚查到的同一份；失败映射不区分来源。
         String castId = "";
         try {
-            BodySnapshot body = host.inspect().body();
+            BodySnapshot body = current.get();
             TechniqueProgress progress = TechniqueState.read(body);
             long nowMillis = body.settledAt().elapsedMillis();
             if (!progress.hasActiveCast()) {
@@ -286,10 +302,66 @@ public final class TechniqueCasting {
         }
     }
 
+    /**
+     * 身体时钟走到 nowMillis 时，推进会不会什么都不做：没有到期的曲线、做功和效果，也不到收势。
+     * 用调用方上次查询到的身体试算，走的是同一段推进逻辑，只是不碰宿主；
+     * 凡是需要向宿主提交、或者拿不准的情况都返回 false，交给正常推进处理。
+     * 调用方必须先确认宿主里已提交的还是 body 这一版。
+     */
+    public boolean quietAt(BodySnapshot body, long previousMillis, long nowMillis) {
+        // 试算结果要同时满足：直接推到了当前时刻、没有效果、没有收势、身体版本没动。
+        try {
+            TechniqueProgress progress = TechniqueState.read(body);
+            if (body.vitality().dead() || !progress.hasActiveCast()) {
+                return false;
+            }
+            AdvanceResult result = advanceActive(READ_ONLY, body, progress.getActiveCast(),
+                    new Interval(previousMillis, nowMillis));
+            return result.advancedMillis() == nowMillis && result.effects().isEmpty()
+                    && result.recoveryCommit().isEmpty() && result.outcome().getRevision() == body.revision();
+        } catch (RuntimeException needsHost) {
+            // 试算途中要读写宿主，或进度本身有问题：都不算安静。
+            return false;
+        }
+    }
+
+    /** 一次推进覆盖的身体时钟区间：上次交付到哪一毫秒，这次推到哪一毫秒。 */
+    private record Interval(long previousMillis, long nowMillis) { }
+
+    /** 试算用的宿主：任何读写都拒绝，保证试算不产生副作用。 */
+    private static final TechniqueHost READ_ONLY = new TechniqueHost() {
+        @Override
+        public Inspection inspect() {
+            throw new UnsupportedOperationException("试算不查询宿主");
+        }
+
+        @Override
+        public Optional<Commit> findActivity(String requestId) {
+            throw new UnsupportedOperationException("试算不查询宿主");
+        }
+
+        @Override
+        public Commit submit(Submission submission) {
+            throw new UnsupportedOperationException("试算不提交活动");
+        }
+
+        @Override
+        public EffectCommit submitEffect(EffectSubmission submission) {
+            throw new UnsupportedOperationException("试算不提交效果");
+        }
+    };
+
     private AdvanceResult advanceActive(TechniqueHost host, BodySnapshot body, ActiveCast active,
                                         long previousMillis) {
+        // 正常推进以身体已结清的时钟为当前时刻。
+        return advanceActive(host, body, active, new Interval(previousMillis, body.settledAt().elapsedMillis()));
+    }
+
+    private AdvanceResult advanceActive(TechniqueHost host, BodySnapshot body, ActiveCast active,
+                                        Interval interval) {
         // 分段费用先于同刻世界效果支付；每次只跨一个事件边界，迟到时由服务继续推进。
-        long nowMillis = body.settledAt().elapsedMillis();
+        long previousMillis = interval.previousMillis();
+        long nowMillis = interval.nowMillis();
         Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
         long boundaryMillis;
         BodySnapshot paidBody;

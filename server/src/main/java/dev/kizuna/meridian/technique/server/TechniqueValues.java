@@ -95,23 +95,42 @@ final class TechniqueValues {
 
     static void knownFields(Message message) {
         // 未知 oneof 分支也会落入 unknown fields，递归拒绝可防止静默忽略新算子。
-        knownFields(message, message.getDescriptorForType().getName());
+        knownFields(message, new Location(null, message.getDescriptorForType().getName(), Location.FIELD));
     }
 
-    private static void knownFields(Message message, String location) {
+    /**
+     * 字段位置。整具身体每次查询都要过一遍这里，绝大多数时候校验通过，
+     * 所以位置只记父节点，到报错时才拼成「消息.字段[下标]」的文本。
+     */
+    private record Location(Location parent, String name, int index) {
+        private static final int FIELD = -1;
+
+        private String text() {
+            // 列表元素接在所属字段后面写下标，其余用点号连接。
+            if (parent == null) {
+                return name;
+            }
+            if (index != FIELD) {
+                return parent.text() + "[" + index + "]";
+            }
+            return parent.text() + "." + name;
+        }
+    }
+
+    private static void knownFields(Message message, Location location) {
         // 嵌套消息保留完整字段路径和列表下标，清单错误能定位到具体条目。
         if (message.getSerializedSize() > TechniqueProtocol.MAX_PAYLOAD_BYTES) {
-            throw TechniqueErrors.invalid(location, "消息大小超限");
+            throw TechniqueErrors.invalid(location.text(), "消息大小超限");
         }
         if (!message.getUnknownFields().asMap().isEmpty()) {
-            throw TechniqueErrors.invalid(location, "包含未知字段或算子");
+            throw TechniqueErrors.invalid(location.text(), "包含未知字段或算子");
         }
         for (var field : message.getAllFields().entrySet()) {
-            String path = location + "." + field.getKey().getName();
+            var path = new Location(location, field.getKey().getName(), Location.FIELD);
             Object value = field.getValue();
             if (value instanceof List<?> values) {
                 for (int index = 0; index < values.size(); index++) {
-                    knownValue(values.get(index), path + "[" + index + "]");
+                    knownValue(values.get(index), new Location(path, "", index));
                 }
             } else {
                 knownValue(value, path);
@@ -119,7 +138,7 @@ final class TechniqueValues {
         }
     }
 
-    private static void knownValue(Object value, String location) {
+    private static void knownValue(Object value, Location location) {
         // 文本诊断与递归消息使用相同的位置约定。
         if (value instanceof Message nested) {
             knownFields(nested, location);
@@ -127,15 +146,32 @@ final class TechniqueValues {
             try {
                 validateText(text);
             } catch (IllegalArgumentException exception) {
-                throw TechniqueErrors.at(location, exception);
+                throw TechniqueErrors.at(location.text(), exception);
             }
         }
     }
 
     private static void validateText(String text) {
         // 本地 Java 构造也拒绝孤立代理项，不能让编码替换字符改变幂等身份。
-        if (text.length() > MAX_DESCRIPTION || !StandardCharsets.UTF_8.newEncoder().canEncode(text)) {
+        if (text.length() > MAX_DESCRIPTION || hasLoneSurrogate(text)) {
             throw TechniqueErrors.invalid("text", "文本过长或包含非法 Unicode");
         }
+    }
+
+    private static boolean hasLoneSurrogate(String text) {
+        // UTF-8 编不出来的只有落单的代理项；直接扫一遍，不为每段文本新建编码器。
+        for (int index = 0; index < text.length(); index++) {
+            char current = text.charAt(index);
+            if (Character.isLowSurrogate(current)) {
+                return true;
+            }
+            if (Character.isHighSurrogate(current)) {
+                index++;
+                if (index == text.length() || !Character.isLowSurrogate(text.charAt(index))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

@@ -319,7 +319,7 @@ public final class TechniqueService {
         }
         long nowMillis;
         try {
-            nowMillis = host.inspect().body().settledAt().elapsedMillis();
+            nowMillis = bodyClock(entityUuid, host);
         } catch (TechniqueErrors.HostRejected exception) {
             return false;
         }
@@ -350,6 +350,11 @@ public final class TechniqueService {
         if (untilMillis == NOT_STAGGERED_MILLIS) {
             return 0;
         }
+        // 认领宿主能直接报身体时钟时只比较时钟，不为了一个到期时刻查询整具身体。
+        Optional<TechniqueBodyStamp> stamp = hosts.bodyStamp(entityUuid);
+        if (stamp.isPresent()) {
+            return Math.max(0, untilMillis - stamp.get().clockMillis());
+        }
         TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
         if (host == null) {
             return 0;
@@ -360,6 +365,15 @@ public final class TechniqueService {
         } catch (TechniqueErrors.HostRejected exception) {
             return 0;
         }
+    }
+
+    private long bodyClock(UUID entityUuid, TechniqueHost host) {
+        // 僵直起点同样只需要时钟；宿主答不出时退回查询整具身体，读到的是同一个数。
+        Optional<TechniqueBodyStamp> stamp = hosts.bodyStamp(entityUuid);
+        if (stamp.isPresent()) {
+            return stamp.get().clockMillis();
+        }
+        return host.inspect().body().settledAt().elapsedMillis();
     }
 
     private long staggeredUntil(UUID entityUuid) {
@@ -479,13 +493,17 @@ public final class TechniqueService {
     public Optional<CastOutcome> cancelOnUnload(UUID entityUuid) {
         // 实体卸载前清除动作和当前施放，费用与冷却由已保存进度保留；僵直随实体离场结束。
         endStagger(Objects.requireNonNull(entityUuid));
-        return transition(entityUuid, Transition.UNLOAD);
+        Optional<CastOutcome> outcome = transition(entityUuid, Transition.UNLOAD);
+        hosts.forget(entityUuid);
+        return outcome;
     }
 
     public Optional<CastOutcome> cancelOnDisconnect(UUID entityUuid) {
         // 玩家下线沿用卸载语义；调用方应在撤销宿主访问前调用此入口。
         endStagger(Objects.requireNonNull(entityUuid));
-        return transition(entityUuid, Transition.DISCONNECT);
+        Optional<CastOutcome> outcome = transition(entityUuid, Transition.DISCONNECT);
+        hosts.forget(entityUuid);
+        return outcome;
     }
 
     public Optional<CastOutcome> cancelOnDeath(UUID entityUuid) {
@@ -612,8 +630,14 @@ public final class TechniqueService {
 
     private void advanceOnce(UUID entityUuid, Session session) {
         // 正常推进与收势共用实际身体时刻；已生成的效果保留到全部收到回执。
+        // 一个 tick 里这具身体只查询一次，查到的快照逐段往下传；
+        // 某一段向宿主写过东西（做功、修正、收势、任何效果）后这份快照作废，下一段重新查询。
+        if (quietTick(entityUuid, session)) {
+            return;
+        }
         try {
             BodySnapshot body = session.host.inspect().body();
+            session.inspected = body;
             if (body.vitality().dead()) {
                 // Framework 已清空死亡身体的动作，附属进度由恢复入口清理。
                 session.bodyStopped = true;
@@ -627,9 +651,11 @@ public final class TechniqueService {
             }
             // 迟到 tick 逐边界完成做功和效果；异常回执保留当前批次，下次仍从同一边界重试。
             for (int boundary = 0; boundary <= TechniqueValues.MAX_TIMELINE_EVENTS + 1; boundary++) {
-                if (!advanceBoundary(entityUuid, session)) {
+                Optional<BodySnapshot> next = advanceBoundary(entityUuid, session, body);
+                if (next.isEmpty()) {
                     return;
                 }
+                body = next.get();
             }
         } catch (TechniqueErrors.HostRejected exception) {
             CastOutcome outcome = hostFailureOutcome(session.castId, exception.failure());
@@ -641,21 +667,56 @@ public final class TechniqueService {
         }
     }
 
-    private boolean advanceBoundary(UUID entityUuid, Session session) {
-        // 每段做功使用身体进度去重，世界效果继续使用原有稳定效果身份。
-        if (session.pendingAdvance == null) {
-            TechniqueCasting.AdvanceResult result = casting.advance(session.host, session.previousMillis);
-            if (!success(result.outcome())) {
-                handleFailure(entityUuid, session, result.outcome());
-                return false;
-            }
-            session.pendingAdvance = result;
-        }
-        if (!deliverPending(entityUuid, session)) {
+    private boolean quietTick(UUID entityUuid, Session session) {
+        // 这一 tick 可以整个跳过、连身体都不查询，要同时满足两条：
+        // 一、宿主报的已提交版本还是本会话上次查询到的那一版，即身体从那以后没被任何人改过；
+        // 二、按宿主报的时钟用那份身体试算，没有任何到期的曲线、做功、效果或收势。
+        // 版本对不上、宿主报不出读数、有没交付完的批次或正在清理时，一律照常查询。
+        if (session.inspected == null || session.terminating || session.pendingAdvance != null) {
             return false;
         }
-        return sessions.get(entityUuid) == session && !session.terminating && session.deferred == null
-                && session.previousMillis < session.host.inspect().body().settledAt().elapsedMillis();
+        Optional<TechniqueBodyStamp> stamp = hosts.bodyStamp(entityUuid);
+        if (stamp.isEmpty() || stamp.get().revision() != session.inspected.revision()) {
+            return false;
+        }
+        return casting.quietAt(session.inspected, session.previousMillis, stamp.get().clockMillis());
+    }
+
+    /** 推进一个边界。后面还有到期的边界时返回下一段要用的身体，否则为空。 */
+    private Optional<BodySnapshot> advanceBoundary(UUID entityUuid, Session session, BodySnapshot body) {
+        // 每段做功使用身体进度去重，世界效果继续使用原有稳定效果身份。
+        // 上一 tick 留下的批次是按当时的身体算的，交付后一律重新查询。
+        boolean wrote = true;
+        if (session.pendingAdvance == null) {
+            TechniqueCasting.AdvanceResult result = casting.advance(session.host, body, session.previousMillis);
+            if (!success(result.outcome())) {
+                handleFailure(entityUuid, session, result.outcome());
+                return Optional.empty();
+            }
+            session.pendingAdvance = result;
+            wrote = wroteToHost(result, body);
+        }
+        if (!deliverPending(entityUuid, session)) {
+            return Optional.empty();
+        }
+        if (sessions.get(entityUuid) != session || session.terminating || session.deferred != null) {
+            return Optional.empty();
+        }
+        BodySnapshot current = body;
+        if (wrote) {
+            current = session.host.inspect().body();
+            session.inspected = current;
+        }
+        if (session.previousMillis < current.settledAt().elapsedMillis()) {
+            return Optional.of(current);
+        }
+        return Optional.empty();
+    }
+
+    private static boolean wroteToHost(TechniqueCasting.AdvanceResult result, BodySnapshot body) {
+        // 这一段只要提交过活动（版本变了、收势）或要交付任何效果，手里的快照就可能已经过期。
+        return result.recoveryCommit().isPresent() || !result.effects().isEmpty()
+                || result.outcome().getRevision() != body.revision();
     }
 
     private boolean deliverPending(UUID entityUuid, Session session) {
@@ -1200,6 +1261,8 @@ public final class TechniqueService {
     private static final class Session {
         private final TechniqueHost host;
         private final String castId;
+        /** 本会话最近一次从宿主查询到的身体；只有宿主报的已提交版本仍等于它的版本时才拿来试算。 */
+        private BodySnapshot inspected;
         private long previousMillis;
         private TechniqueCasting.AdvanceResult pendingAdvance;
         private final Map<String, EffectIntent> cleanup = new LinkedHashMap<>();

@@ -135,6 +135,17 @@ Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动
 公开的两参数 `Inspection(body, heldItems)` 保留旧宿主兼容。它不认定宿主已着地，腿法返回
 `NOT_GROUNDED` 且不扣费；普通功法仍可施放。接入腿法须使用三参数构造器提供同次采集的移动事实。
 
+`inspect` 要结清时间并交出整具身体，是这条链上最贵的一步。服务按下面的规则少调它：
+
+- **路由**：实体第一次解析时逐个探测全部宿主；确认唯一认领者以后只问它。它回 `UNBOUND` 时路由作废并重新探测，实体卸载、玩家下线时服务主动作废。「没有认领者」不缓存。
+- **`bodyStamp(entityUuid)`**：`TechniqueHostEntrypoint` 的可选方法，不结清、不构造身体，只回两个数：已提交的身体 revision，以及此刻 `inspect` 结清后 `settled_at` 会是多少毫秒。僵直的起点和到期只读其中的时钟。
+- **每 tick 推进**：施放中的身体一个 tick 只 `inspect` 一次，查到的快照逐个边界往下传；某个边界向宿主提交过活动或交付过效果，下一个边界就重新 `inspect`。
+- **安静 tick**：宿主报的 revision 仍是本会话上次查询到的那一版，并且按宿主报的时钟用那份身体试算（`TechniqueCasting.quietAt`），没有到期的曲线、做功、效果和收势时，这个 tick 不查询身体。revision 对不上、宿主不提供读数、有未交付的批次或正在清理时，照常查询。
+
+宿主实现 `bodyStamp` 的要求：revision 必须是已提交身体的版本；时钟必须与随后一次 `inspect` 回执的 `settled_at` 相同；
+身体已死、尚未绑定或拿不准时返回空，服务退回 `inspect`。不实现这个方法的宿主行为不变。
+安静 tick 期间身体不被结清，流逝的时间在下一次 `inspect` 时一并补算。
+
 所有调用必须与该身体的其他事件串行。拒绝抛 `TechniqueErrors.HostRejected`，包含原始 Framework 失败码；
 不确定的存储结果由调用方用原 `cast_id` 重试，不允许换 ID 再扣一次。
 身份和身体归属必须由宿主认证，不能从客户端请求中的身体 ID 推导权限。

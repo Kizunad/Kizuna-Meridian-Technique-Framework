@@ -14,6 +14,8 @@ import dev.kizuna.meridian.server.BodyActivityExecution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.io.IOException;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 有界协议解析与宿主消息校验；不发现宿主、不执行世界效果。 */
@@ -87,9 +89,22 @@ public final class TechniqueProtocol {
 
     public static TechniqueHostResponse decodeHostResponse(byte[] payload) {
         // 回执先限制载荷，再校验唯一 result 分支和嵌套身体活动。
+        return decodeHostReply(payload).response();
+    }
+
+    /** 解码并校验过的宿主回执；身体回执带上校验时转好的快照，调用方不必把同一份身体再转一遍。 */
+    public record HostReply(TechniqueHostResponse response, Optional<BodySnapshot> body) {
+        public HostReply {
+            // 快照只来自这一份回执自己的身体字段，不跨回执保存。
+            Objects.requireNonNull(response);
+            Objects.requireNonNull(body);
+        }
+    }
+
+    public static HostReply decodeHostReply(byte[] payload) {
+        // parse 已经递归拒绝未知字段和超长文本，这里只做结构校验，不把整具身体再遍历一遍。
         TechniqueHostResponse response = parse(payload, TechniqueHostResponse.parser());
-        validateHostResponse(response);
-        return response;
+        return new HostReply(response, checkHostResponse(response));
     }
 
     public static void validateHost(TechniqueHostRequest request) {
@@ -132,8 +147,13 @@ public final class TechniqueProtocol {
     }
 
     public static void validateHostResponse(TechniqueHostResponse response) {
-        // 回执必须带原请求 ID；未认领、成功结果和失败不能同时出现。
+        // 本地构造的回执没有经过 parse，先拒绝未知字段，再做结构校验。
         TechniqueValues.knownFields(response);
+        checkHostResponse(response);
+    }
+
+    private static Optional<BodySnapshot> checkHostResponse(TechniqueHostResponse response) {
+        // 回执必须带原请求 ID；未认领、成功结果和失败不能同时出现。身体回执返回校验时转好的快照。
         if (response.getRequestId().isBlank() || response.getRequestId().length() > TechniqueValues.MAX_TEXT
                 || response.getSerializedSize() > MAX_PAYLOAD_BYTES) {
             throw TechniqueErrors.invalid("response.request_id", "回执请求标识缺失、过长或消息超限");
@@ -145,12 +165,13 @@ public final class TechniqueProtocol {
                 }
             }
             case BODY -> {
-                validateHostBody(response.getBody());
+                BodySnapshot body = validateHostBody(response.getBody());
                 TechniqueHeldItems.validate(response.getHeldItems());
                 if (!response.hasInspectFacts()) {
                     throw TechniqueErrors.invalid("response.inspect_facts", "身体回执缺少宿主状态事实");
                 }
                 TechniqueInspection.validate(response.getInspectFacts());
+                return Optional.of(body);
             }
             case ACTIVITY -> validateActivityCommit(response.getActivity());
             case EFFECT_ACCEPTED -> {
@@ -161,6 +182,7 @@ public final class TechniqueProtocol {
             case FAILURE -> validateFailure(response.getFailure());
             default -> throw TechniqueErrors.invalid("response.result", "缺少或未知宿主回执");
         }
+        return Optional.empty();
     }
 
     private static void validateActivity(TechniqueHostRequest request) {
@@ -190,12 +212,13 @@ public final class TechniqueProtocol {
         BodyActivityExecution.validate(commit.getActivity());
     }
 
-    private static void validateHostBody(BodyMessages.BodySnapshot message) {
+    private static BodySnapshot validateHostBody(BodyMessages.BodySnapshot message) {
         // 使用 Framework 的快照构造器完成结构校验，失败时不把损坏身体交给状态机。
         BodySnapshot snapshot = BodyProtobuf.fromMessage(message);
         if (snapshot.id().value().isBlank()) {
             throw TechniqueErrors.invalid("response.body", "身体身份缺失");
         }
+        return snapshot;
     }
 
     private static void validateFailure(RequestFailure failure) {

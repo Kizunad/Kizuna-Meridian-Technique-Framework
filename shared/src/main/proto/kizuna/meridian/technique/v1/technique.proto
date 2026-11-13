@@ -39,6 +39,7 @@ message TechniqueBook {
   string display_name = 2;
   HeldItemRules held_item_rules = 3; // 缺省表示不要求持物
   LegRules leg_rules = 10; // 腿法书级条件与靴子参数
+  ArmRules arm_rules = 11; // 拳掌书级条件；手里的东西不参与伤害、不扣耐久
 }
 message TechniqueVolume {
   string id = 1;
@@ -47,6 +48,7 @@ message TechniqueVolume {
   repeated TechniqueReference techniques = 4; // 精确版本；一个式版本只属于一卷
   repeated string prerequisite_volume_ids = 5; // 同书前置卷，无环；学会其中全部式才满足
   repeated ScrollDrop scroll_drops = 6; // 生存来源：哪些生物掉本卷卷轴；至多 16 项，实体不重复
+  optional bool scroll_item = 7; // 缺省生成 <卷>_scroll 物品；false 时没有卷轴，也不能声明掉落
 }
 // 生物被玩家杀死、且死者会本卷全部式时，按概率掉一份本卷卷轴；只加进该实体自带的掉落表。
 message ScrollDrop {
@@ -257,7 +259,8 @@ message TissueBenefitLeases { repeated TissueBenefitLease leases = 1; }
 enum SoundAnchor {
   SOUND_ANCHOR_UNSPECIFIED = 0;
   CASTER = 1;
-  // 声音效果里只能跟在同刻 weapon_strike 之后（中间可隔同刻声音），调度时并入该击的 hit_sounds；
+  // 声音效果里只能跟在同刻 weapon_strike、leg_strike 或 limb_strike 之后（中间可隔同刻声音），
+  // 调度时并入该击的 hit_sounds；
   // 附行的 hit_sound 也用它，由伤害附属在附伤目标处播放。
   TARGET = 2;
 }
@@ -337,6 +340,13 @@ enum LegSelection {
   REAR_LEG = 2;
   BOTH_LEGS = 3;
 }
+enum ArmSelection {
+  ARM_SELECTION_UNSPECIFIED = 0;
+  FRONT_ARM = 1;
+  REAR_ARM = 2;
+  BOTH_ARMS = 3;
+}
+// 腿击与肢击共用；LIFT 只能用于 limb_strike，竖直速度写在 LimbStrike.lift_speed。
 enum LegKnockbackKind {
   LEG_KNOCKBACK_UNSPECIFIED = 0;
   NONE = 1;
@@ -344,6 +354,7 @@ enum LegKnockbackKind {
   SIDEWAYS = 3;
   TRIP = 4;
   DOWN = 5;
+  LIFT = 6;
 }
 message LegRules {
   optional bool ignore_held_items = 1;
@@ -351,6 +362,11 @@ message LegRules {
   Quantity base_damage = 3; // DAMAGE_POINT，光脚基础伤害
   Quantity armor_damage = 4; // DAMAGE_POINT，每点靴子护甲增加的伤害
   optional int32 durability_cost = 5; // 每式最后一击扣除的靴子耐久
+}
+message ArmRules {
+  optional bool ignore_held_items = 1; // 必须为 true
+  optional bool require_grounded = 2; // 必须为 true，失败码沿用 NOT_GROUNDED
+  Quantity base_damage = 3; // DAMAGE_POINT，(0, 1e9]，空手基础伤害
 }
 message TechniqueHostFacts {
   optional bool grounded = 1;
@@ -376,6 +392,27 @@ message LegStrike {
   optional bool knockback_when_blocked = 12;
   optional bool last_strike = 13;
   string dedup_group = 14; // 必填局部标识，同次施放内同组每目标只命中一次
+}
+// 拳掌与腿的打击。1–14 号字段与 LegStrike 同号、同名、同类型，腿击可按线格式直接重读成肢击。
+message LimbStrike {
+  StrikeShape shape = 1;
+  StrikeFacing facing = 2;
+  Quantity distance = 3; // METER，(0, 1024]
+  Quantity angle = 4; // DEGREE，扇形 (0, 360]；单体固定 60 度后备锥
+  Quantity multiplier = 5; // RATIO，(0, 10]
+  optional int32 maximum_targets = 6;
+  optional int32 cast_target_limit = 7;
+  oneof limb {
+    LegSelection leg = 8; // 所属书须声明 leg_rules
+    ArmSelection arm = 15; // 所属书须声明 arm_rules
+  }
+  string damage_type_id = 9;
+  LegKnockbackKind knockback_kind = 10;
+  Quantity knockback = 11; // RATIO，[0, 10]；LIFT 时为水平分量，可为 0
+  optional bool knockback_when_blocked = 12;
+  optional bool last_strike = 13;
+  string dedup_group = 14;
+  Quantity lift_speed = 16; // METERS_PER_SECOND，(0, 100]；只有 LIFT 填写
 }
 message WeaponStrike {
   StrikeShape shape = 1;
@@ -413,6 +450,13 @@ message LegStrikeIntent {
   LegStrike strike = 1;
   LegRules leg_rules = 2; // 起手保存的书级鞋规则
   repeated SoundCue hit_sounds = 3; // 并入的 TARGET 声音，在每个真正受伤的目标处各播一次
+}
+// 1–3 号字段与 LegStrikeIntent 同号；腿击意图可按线格式直接重读。
+message LimbStrikeIntent {
+  LimbStrike strike = 1;
+  LegRules leg_rules = 2; // 出腿时填写
+  repeated SoundCue hit_sounds = 3;
+  ArmRules arm_rules = 4; // 出拳掌时填写
 }
 message BreakBlocksIntent {
   BreakBlocks blocks = 1;
@@ -492,6 +536,7 @@ message TechniqueEffect {
     UseBrew use_brew = 22;
     OrganRefine organ_refine = 23;
     ElementalInfusion elemental_infusion = 24; // 到时由本库写进身体，不产生世界效果意图
+    LimbStrike limb_strike = 25; // 同一式不能和 leg_strike 混用
   }
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
@@ -611,6 +656,9 @@ message CombatAiHints {
   Quantity self_approached_weight = 15;
   Quantity ammunition_weight = 16;
   Quantity reserve_weapon_weight = 17;
+  Quantity target_casting_weight = 18; // 对方正在起手
+  Quantity target_downed_weight = 19; // 对方倒地
+  Quantity target_armored_weight = 20; // 对方被打部位护甲高，由宿主判定
 }
 enum TargetDistanceBand {
   TARGET_DISTANCE_BAND_UNSPECIFIED = 0;
@@ -752,6 +800,7 @@ message EffectIntent {
     BlockWork block_work = 21;
     UseBrew use_brew = 22;
     OrganRefineIntent organ_refine = 23;
+    LimbStrikeIntent limb_strike = 24;
   }
 }
 message OrganRefineIntent {
@@ -833,6 +882,7 @@ message ActiveCast {
   optional double movement_speed_multiplier = 16; // 固定本次限速，缺省为 1
   bool allow_use_while_casting = 17; // 固定本次是否放行右键，旧存档缺省为拦截
   LegRules leg_rules = 30; // 固定本次书级腿法规则
+  ArmRules arm_rules = 31; // 固定本次书级拳掌规则
   optional bool lock_target = 18;
   Quantity target_lock_distance = 19;
   repeated int32 paid_work_sequences = 20; // 已付分段做功在原目录 effects 中的序号，随身体保存。

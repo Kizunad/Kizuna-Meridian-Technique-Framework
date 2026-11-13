@@ -1,6 +1,10 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ScrollDrop;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCatalog;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import org.junit.Test;
 
 import java.util.List;
@@ -73,5 +77,47 @@ public final class TechniqueScrollCatalogTest {
         assertTrue(message, message.contains("first:catalog.txtpb"));
         assertTrue(message, message.contains("second:catalog.txtpb"));
         assertTrue(message, message.contains("volumes[0]"));
+    }
+
+    @Test
+    public void volumeWithoutScrollItemGetsNoScrollAndCannotDrop() {
+        // scroll_item 写 false 的卷不生成卷轴物品；这样的卷再声明掉落，目录加载就失败。
+        TechniqueCatalog catalog = TechniqueCatalogManifest.parseText("fixture", """
+                schema_version: 1
+                namespace: "sample"
+                books { id: "sample:book" }
+                volumes { id: "sample:outer" book_id: "sample:book" }
+                volumes { id: "sample:inner" book_id: "sample:book" scroll_item: false }
+                volumes { id: "sample:harmony" book_id: "sample:book" scroll_item: true }
+                """);
+        var source = new TechniqueCatalogSource("sample:catalog.txtpb", addons(), catalog);
+        var scrolls = new TechniqueScrollCatalog(List.of(source));
+        assertEquals(List.of("sample:outer_scroll", "sample:harmony_scroll"),
+                scrolls.registrationOrder().stream().map(TechniqueScrollCatalog.Scroll::itemId).toList());
+
+        TechniqueDefinition definition = Fixtures.definition();
+        ScrollDrop drop = ScrollDrop.newBuilder()
+                .setEntityType("minecraft:villager")
+                .setChance(1)
+                .build();
+        TechniqueVolume dropping = TechniqueVolume.newBuilder()
+                .setId("sample:inner")
+                .setBookId("sample:book")
+                .addTechniques(TechniqueRegistry.reference(definition))
+                .setScrollItem(false /* scrollItem */)
+                .addScrollDrops(drop)
+                .build();
+        TechniqueBook book = TechniqueBook.newBuilder()
+                .setId("sample:book")
+                .build();
+        TechniqueCatalog invalid = Fixtures.catalog(definition).toBuilder()
+                .addBooks(book)
+                .addVolumes(dropping)
+                .build();
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> TechniqueRegistry.load(addons(), List.of(invalid)));
+        assertTrue(failure.getMessage(), failure.getMessage().contains("不生成卷轴物品的卷不能声明掉落"));
+        TechniqueVolume quiet = dropping.toBuilder().clearScrollDrops().build();
+        TechniqueRegistry.load(addons(), List.of(invalid.toBuilder().setVolumes(0, quiet).build()));
     }
 }

@@ -195,6 +195,25 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 `TechniqueHostFacts` 与身体、双手在同一次 `inspect` 回执中提供 `grounded/in_water/climbing/riding/gliding`，
 并可成对提供 `boot_armor/boot_durability`。腿法起手在水中、攀爬、骑乘、滑翔或未着地时返回
 `NOT_GROUNDED` /「要站在地上才能出腿」。`EffectIntent.leg_strike=20` 携带起手保存的 `LegRules`，不携带手位规则。
+腿击不能用 `LIFT` 击退，掀起须改用 `limb_strike`。
+
+`TechniqueEffect.limb_strike=25`（`LimbStrike`）是拳掌与腿共用的打击。1–14 号字段与 `LegStrike` 同号、同名、同类型，
+其中 `leg=8` 与新的 `arm=15`（`ArmSelection` 的 `FRONT_ARM/REAR_ARM/BOTH_ARMS`）同在 `oneof limb` 里，必须二选一。
+`LegKnockbackKind.LIFT=6` 只给肢击用，须另填 `lift_speed=16`（`METERS_PER_SECOND`，正值），水平击退大小可为 0；
+其他击退方式不能填 `lift_speed`。其余约束与腿击相同：单体/扇形、显式朝向、盾规则、`dedup_group`、
+同组每个目标只命中一次、全部肢击共享 `cast_target_limit`、只有最后一段写 `last_strike=true`。
+同一式不能同时有 `leg_strike` 和 `limb_strike`。
+
+出拳掌的肢击要求所属书声明 `TechniqueBook.arm_rules=11`（`ArmRules`）：必须显式写 `ignore_held_items=true`、
+`require_grounded=true` 和正的 `base_damage`（`DAMAGE_POINT`）。出腿的肢击仍要求书级 `leg_rules`。
+拳掌书和腿法书都不能声明 `held_item_rules`。拳掌起手的着地条件和腿法相同，拒绝码也是 `NOT_GROUNDED`，
+只出拳掌的式玩家文本为「要站在地上才能出拳」；同时出腿的式用腿法文本。拒绝不扣费。
+`ActiveCast.arm_rules=31` 在起手时保存书级拳掌规则，`EffectIntent.limb_strike=24`（`LimbStrikeIntent`）
+携带打击、`hit_sounds=3`，以及出力肢对应的一份书级规则（`leg_rules=2` 或 `arm_rules=4`，不能两份都带），不带手位。
+
+腿击意图可以直接换算成肢击意图：`TechniqueLimbStrikes.fromLeg(LegStrike)` 与 `fromLeg(LegStrikeIntent)`
+按线格式重读，可选字段有没有填写原样保留，宿主可以用同一个执行器处理两种意图。
+`leg_strike` 本身照旧发出 `EffectIntent.leg_strike=20`。
 
 `TechniqueEffect.sound=8`（`SoundCue`）在 `at_millis` 时刻播放一个声音事件；五脏诀设计稿 plans/18 §9.2、§11
 里叫 `sound` 的效果就是它。
@@ -207,7 +226,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 | `pitch_jitter` | 可省略，`RATIO`，[0, 0.5]；每次播放在 `pitch ± pitch_jitter` 内均匀取值，两端仍须落在 [0.5, 2] |
 | `anchor` | 必填，`CASTER`（施放者位置）或 `TARGET`（本次打击真正造成伤害的每个目标位置） |
 
-`TARGET` 必须跟在一条同一 `at_millis` 的 `weapon_strike` 或 `leg_strike` 之后，中间只能隔其他同刻声音。
+`TARGET` 必须跟在一条同一 `at_millis` 的 `weapon_strike`、`leg_strike` 或 `limb_strike` 之后，中间只能隔其他同刻声音。
 调度时它并入该击意图的 `WeaponStrikeIntent.hit_sounds=3`，不单独成为意图；挥空、被盾挡下或目标免疫时不响。
 挥空也要有声音时，在目录里另写一条同刻的 `CASTER` 声音；代码里没有「挥空换声」的特殊分支。
 `LeapProfile.takeoff_sound=18` 是跃步起跳声，锚点只能是 `CASTER`，每次实际起跳播放一次。
@@ -308,9 +327,9 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(EffectIntent)`。
 `inspect=false`、缺操作、错误 UUID、非法嵌套活动或效果均拒绝。
 `EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13`、`break_blocks=14`、`launch_projectile=17`、
-`target_lock=18` 或 `leg_strike=20`，交给宿主执行；不包含身体修正。
+`target_lock=18`、`leg_strike=20` 或 `limb_strike=24`，交给宿主执行；不包含身体修正。
 每条意图带起手固定的 `selected_hand`，无持物规则为未指定；`effect_id` 在施放内独立且稳定。
-打击和劈门意图必须有选定手和书级规则。`scheduled_millis` 为非负的权威身体时刻，迟到 tick 不修改原生效时刻。
+持物打击和劈门意图必须有选定手和书级规则；腿击和肢击不带手位，只带出力肢对应的书级规则。`scheduled_millis` 为非负的权威身体时刻，迟到 tick 不修改原生效时刻。
 表现 STOP 与移动 UNLOCK 始终保留原定收势边界作为 `scheduled_millis`，使提前终止、承接和恢复重试的载荷一致；
 它们是收到即执行的清理，宿主不得等待该计划时刻。
 目录世界效果用原效果索引 `effect_<index>`；表现停止用表现子列表索引 `presentation_stop_<index>`；
@@ -446,6 +465,8 @@ OTHER_ARM 取持武器的另一条解剖臂，左右主手和主副手组合都�
 `TechniqueSelector.CombatContext` 可携带 `Optional<TargetContext>`，包含距离档、Visibility、
 目标速度 m/s [0, 100]、Approach、Ammunition 与不可变备用武器类别集合。
 缺少远程观察时远程式不入候选；各项观察只乘一次权重，不重复放入离散 CombatFact。
+`CombatAiHints` 字段 18–20 是目标正在施放、已倒地、披甲的权重（RATIO [0, 100]），对应离散事实
+`TARGET_CASTING/TARGET_DOWNED/TARGET_ARMORED`，由宿主观察后放进 `CombatContext`，各乘一次权重。
 `Situation.effectiveLegForceNewtons` 不变。
 
 持物打击可声明 `WeaponStrike.main_hand_damage_type_id=18` 与 `off_hand_damage_type_id=19`。
@@ -497,6 +518,10 @@ Framework 活动提交，成功后才交付同刻世界效果。单笔组织/器
 `TechniqueVolume.scroll_drops=6` 声明生存来源，每项 `ScrollDrop{entity_type=1, chance=2}`：
 实体 ID 须是 `namespace:path`，同卷不重复，概率在 (0, 1]，每卷至多 16 项；不合格时目录加载报出卷和 `scroll_drops[i]`。
 服务器启动时实体未注册直接中止启动，不静默失效。
+
+`TechniqueVolume.scroll_item=7` 省略或为 true 时照常生成 `<卷路径>_scroll` 物品。写 false 时这一卷没有卷轴物品，
+也不能声明 `scroll_drops`（目录加载报错），只能经 `TechniqueService.learn` 等服务端入口学会，例如由内容附属在
+剧情或交互里调用。
 
 Fabric 端用 `LootTableEvents.MODIFY` 只往该实体自带的掉落表（`EntityType.getDefaultLootTable()`）加池，
 数据包替换过的表不动。每项一个池，掉一份本卷卷轴，三个条件都满足才掉：

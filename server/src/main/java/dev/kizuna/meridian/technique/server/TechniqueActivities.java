@@ -40,13 +40,14 @@ final class TechniqueActivities {
     record CastBinding(TechniqueBinding binding, Hand hand, Entry entry) {
         CastBinding(TechniqueBinding binding, Hand hand) {
             // 无持物和承接的既有调用保持零偏移语义。
-            this(binding, hand, new Entry(0, HeldItemRules.getDefaultInstance(), LegRules.getDefaultInstance()));
+            this(binding, hand, new Entry(0, HeldItemRules.getDefaultInstance()));
         }
     }
 
-    record Entry(long clipStart, HeldItemRules heldRules, LegRules legRules) {
+    record Entry(long clipStart, HeldItemRules heldRules, LegRules legRules, ArmRules armRules) {
         Entry(long clipStart, HeldItemRules heldRules) {
-            this(clipStart, heldRules, LegRules.getDefaultInstance());
+            // 不含肢体打击的起手不带腿法和拳掌规则。
+            this(clipStart, heldRules, LegRules.getDefaultInstance(), ArmRules.getDefaultInstance());
         }
     }
 
@@ -207,8 +208,12 @@ final class TechniqueActivities {
     private static void addOptionalCastRules(ActiveCast.Builder active, Start start) {
         // 只有目录明确声明的附加规则才写入活动，缺省状态保持协议兼容。
         TechniqueDefinition definition = start.definition();
-        if (TechniqueCombatEffects.hasLegStrike(definition)) {
-            active.setLegRules(start.selection().entry().legRules());
+        Entry entry = start.selection().entry();
+        if (TechniqueLimbStrikes.usesLegs(definition)) {
+            active.setLegRules(entry.legRules());
+        }
+        if (TechniqueLimbStrikes.usesArms(definition)) {
+            active.setArmRules(entry.armRules());
         }
         if (definition.hasLockTarget()) {
             active.setLockTarget(definition.getLockTarget());

@@ -44,8 +44,8 @@ final class TechniqueInspection {
         }
     }
 
-    static boolean canCastLeg(TechniqueHostFacts facts) {
-        // 腿法起手要求站地，水中、攀爬、骑乘和滑翔均视为未满足条件。
+    static boolean standsOnGround(TechniqueHostFacts facts) {
+        // 腿法和拳掌起手要求站地，水中、攀爬、骑乘和滑翔均视为未满足条件。
         return facts.getGrounded() && !facts.getInWater() && !facts.getClimbing()
                 && !facts.getRiding() && !facts.getGliding();
     }

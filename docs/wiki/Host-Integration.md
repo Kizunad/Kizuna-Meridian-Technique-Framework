@@ -93,8 +93,8 @@ Human 已导出的 `human.pb` 可直接使用，功法库不依赖 Human Java �
 服务器尚未启动、已停止或没有目录时抛出 `IllegalStateException`，不返回 `null`。
 服务只在服务端主线程使用，网络请求须先切回该线程，客户端不能直接调用。
 
-僵直有两个写入方：原版伤害附属在非致死命中提交后写 `HIT`，Brewing 按脑力判定写 `CHARM`。
-其他宿主只消费期限与事件，不自行判定受击或魅惑：
+僵直有三个写入方：原版伤害附属在非致死命中提交后写 `HIT`，Brewing 按脑力判定写 `CHARM`，
+袖手拳写擒拿的 `HOLD` 和摔倒的 `DOWN`。其他宿主只消费期限与事件，不自行判定受击、魅惑或擒摔：
 
 ```java
 TechniqueService service = TechniqueFabric.service();
@@ -104,17 +104,19 @@ service.stagger(entity.getUUID(),
 
 玩家、类人和以后的宿主都经过这一入口。每个实体按种类独立保存身体时钟到期毫秒；
 同种多次取较晚到期、不累加，不同种互不缩短或延长。时长 0 不记录也不打断。
-`HIT` 移动倍率在 (0, 1]，Damage 默认给 0.5；`CHARM` 必须为 0。
+`HIT` 和 `DOWN` 的移动倍率在 (0, 1]，Damage 默认给 0.5；`CHARM` 和 `HOLD` 必须为 0。
 旧两参数 `Stagger` 构造器保留 `HIT` 语义，魅惑调用方必须显式传枚举。
 僵直期间新起式回执 `STAGGERED`（「僵直中」），已在出手或收势的施放照常完成；
 起手中且声明 `interruptible_by_damage` 的施放立即打断。到期由 `tick()` 按身体时钟结束。
-`staggerRemainingMillis(entity)` 读取两种期限的最大剩余值，带 `kind` 的重载只读指定种类。
+`releaseStagger(entity, kind)` 提前结束指定种类（如挣脱擒拿），其他种类照旧；没有该种记录时什么也不发。
+`staggerRemainingMillis(entity)` 读取各种期限的最大剩余值，带 `kind` 的重载只读指定种类。
 `addStaggerListener` 在开始、延长和结束时通知
 `StaggerChanged(entity, remainingMillis, movementMultiplier, kind)`，该种类结束通知为 `0 / 1.0`。
-Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动/跳跃属性归零和动作门禁。
-任一种结束都不会撤掉另一种属性。`meridian_technique:stagger` 始终同步两种的最大剩余时间
+Fabric 层给 `HIT` 和 `DOWN` 添加临时移动减速，分别用 `meridian_technique:stagger` 和
+`meridian_technique:stagger_down` 两个属性修饰符；`CHARM`、`HOLD` 的定身和动作门禁由宿主执行（Human 对 `CHARM` 把移动/跳跃属性归零）。
+任一种结束都不会撤掉另一种属性。`meridian_technique:stagger` 网络载荷始终同步各种的最大剩余时间
 （`StaggerStatus` protobuf）发给追踪者和本人，客户端 `TechniqueStaggerClient.remainingMillis` 只供界面读取。
-卸载、下线和死亡清除两种僵直记录。
+卸载、下线和死亡清除全部僵直记录。
 
 施放与查询同样调用 `service.cast(entity.getUUID(), request)`、`service.known(entity.getUUID())`；
 目录使用 `service.registry()`，与命令、状态机共享启动时的同一份不可变目录。
@@ -132,8 +134,8 @@ Fabric 层只给 `HIT` 添加临时移动减速；Human 对 `CHARM` 执行移动
 | `submit(Submission)` | 检查 `expectedRevision`，走 `handleActivity`，原子保存身体、回执及释放账户；返回实际活动和 revision |
 | `submitEffect(EffectSubmission)` | 校验 `EffectIntent`，幂等执行冲量、表现、移动限速、持物打击、劈门或状态增益；本库不直接改世界 |
 
-公开的两参数 `Inspection(body, heldItems)` 保留旧宿主兼容。它不认定宿主已着地，腿法返回
-`NOT_GROUNDED` 且不扣费；普通功法仍可施放。接入腿法须使用三参数构造器提供同次采集的移动事实。
+公开的两参数 `Inspection(body, heldItems)` 保留旧宿主兼容。它不认定宿主已着地，腿法和拳掌返回
+`NOT_GROUNDED` 且不扣费；普通功法仍可施放。接入腿法或拳掌须使用三参数构造器提供同次采集的移动事实。
 
 `inspect` 要结清时间并交出整具身体，是这条链上最贵的一步。服务按下面的规则少调它：
 
@@ -341,6 +343,19 @@ GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何�
 | 击退与盾 | 执行推开、横推、绊、踩落及大小；`knockback_when_blocked` 为真时即使盾挡住也执行击退；击退抗性由原版处理 |
 | 去重与鞋 | 复用 `TechniqueStrikeTargets.select` 的同组去重和整式目标预算；仅 `last_strike=true` 结算一次鞋耐久，挥空也算，创造或无靴由宿主按事实处理 |
 | 做功与冲量 | 每次腿击的 Damage 做功由宿主按腿与部位提交；施放费用中的训练做功已经记录，冲量位移不另记走路做功 |
+
+肢击效果（`EffectIntent.limb_strike`）按腿击同一张表执行，另有几处不同：
+
+- 出力肢由 `LimbStrike.leg` 或 `arm` 给出；出拳掌时剂量用意图里 `ArmRules.base_damage`，不读手持物品，也不加护甲项。
+- `LIFT` 击退给目标一个 `lift_speed` 的竖直速度，水平分量按 `knockback` 执行，可为 0。
+- 拳掌没有鞋耐久结算；出腿的肢击照腿击结算。
+- 目标筛选用 `TechniqueStrikeTargets.select(LimbStrike, …)`，去重和整式预算与腿击相同。
+- 腿击意图可经 `TechniqueLimbStrikes.fromLeg` 换成肢击意图，交给同一个执行器。
+
+宿主每次肢击结算完一个目标，可以调用 `service.reportStrike(new StrikeReport(castId, technique, caster, target,
+outcome))` 报告结果：`HIT` 造成了伤害，`BLOCKED` 被盾挡下，`CAUGHT` 被对方的接招接住；挥空不报告。
+引用未登记功法时抛 `IllegalArgumentException`。`addStrikeListener`/`removeStrikeListener` 订阅这些报告，
+监听器在服务端主线程同步调用，抛出的运行时异常被吞掉，不影响打击本身。
 
 Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作的共享实现，
 由 Human、Threatening 等宿主主动调用；功法服务仍只交付意图，不自行操作世界。

@@ -122,7 +122,7 @@ public final class TechniqueSoundCues {
     }
 
     static void validateTargets(TechniqueDefinition definition) {
-        // 目标声音必须跟在同刻的武器或腿法打击之后，中间只能隔同刻的其他声音。
+        // 目标声音必须跟在同刻的武器、腿法或肢击打击之后，中间只能隔同刻的其他声音。
         List<TechniqueEffect> effects = definition.getEffectsList();
         for (int index = 0; index < effects.size(); index++) {
             if (targetAnchored(effects.get(index)) && !followsStrike(effects, index)) {
@@ -156,7 +156,7 @@ public final class TechniqueSoundCues {
             if (effect.getAtMillis() != atMillis) {
                 return false;
             }
-            if (effect.hasWeaponStrike() || effect.hasLegStrike()) {
+            if (effect.hasWeaponStrike() || effect.hasLegStrike() || effect.hasLimbStrike()) {
                 return true;
             }
             if (!effect.hasSound()) {

@@ -49,6 +49,7 @@ final class TechniqueDefinitions {
         TechniqueProjectiles.validateConvergence(definition);
         TechniqueCombatEffects.validateSequence(definition);
         TechniqueCombatEffects.validateLegSequence(definition);
+        TechniqueLimbStrikes.validateSequence(definition);
         TechniqueSoundCues.validateTargets(definition);
         if (definition.hasAiHints()) {
             validateAiHints(definition.getCategory(), definition.getAiHints());
@@ -278,6 +279,7 @@ final class TechniqueDefinitions {
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
                 case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
+                case LIMB_STRIKE -> TechniqueLimbStrikes.validate(effect.getLimbStrike());
                 case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
                 case LAUNCH_PROJECTILE -> TechniqueProjectiles.validate(effect.getLaunchProjectile());
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
@@ -526,6 +528,7 @@ final class TechniqueDefinitions {
         if (hints.hasSelfFleeingWeight()) {
             quantity(hints.getSelfFleeingWeight(), Unit.RATIO, 0, MAX_WEIGHT, "self_fleeing_weight");
         }
+        validateTargetStateHints(hints);
         if (hints.hasMinimumLegForce()) {
             quantity(hints.getMinimumLegForce(), Unit.NEWTON, 0, MAX_QUANTITY, "minimum_leg_force");
         }
@@ -541,6 +544,19 @@ final class TechniqueDefinitions {
                     "maximum_long_warmup_distance");
         }
         validateRangedHints(hints);
+    }
+
+    private static void validateTargetStateHints(CombatAiHints hints) {
+        // 对方起手、倒地和局部护甲高三种情境由宿主判定，这里只限定权重范围。
+        if (hints.hasTargetCastingWeight()) {
+            validateOptionalWeight(hints.getTargetCastingWeight(), "target_casting_weight");
+        }
+        if (hints.hasTargetDownedWeight()) {
+            validateOptionalWeight(hints.getTargetDownedWeight(), "target_downed_weight");
+        }
+        if (hints.hasTargetArmoredWeight()) {
+            validateOptionalWeight(hints.getTargetArmoredWeight(), "target_armored_weight");
+        }
     }
 
     private static void validateRangedHints(CombatAiHints hints) {

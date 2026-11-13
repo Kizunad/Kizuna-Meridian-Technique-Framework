@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LimbStrike;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -29,6 +30,15 @@ public final class TechniqueStrikeTargets {
                                       List<String> candidates) {
         // 腿法沿用同一去重和整式目标预算，朝向与几何参数由宿主读取腿击声明。
         TechniqueCombatEffects.validateLegStrike(strike);
+        Targeting targeting = new Targeting(strike.getMaximumTargets(), strike.getCastTargetLimit(),
+                strike.getDedupGroup());
+        return select(targeting, hitIdsByGroup, candidates);
+    }
+
+    public static List<String> select(LimbStrike strike, Map<String, Set<String>> hitIdsByGroup,
+                                      List<String> candidates) {
+        // 肢击沿用同一去重和整式目标预算，出力肢、朝向与几何参数由宿主读取肢击声明。
+        TechniqueLimbStrikes.validate(strike);
         Targeting targeting = new Targeting(strike.getMaximumTargets(), strike.getCastTargetLimit(),
                 strike.getDedupGroup());
         return select(targeting, hitIdsByGroup, candidates);

@@ -107,10 +107,13 @@ final class TechniqueCombatEffects {
     }
 
     private static void validateLegKnockback(LegStrike strike) {
-        // 无击退必须填零，其余四种击退必须有正大小，避免宿主猜测单位含义。
+        // 无击退必须填零，其余四种击退必须有正大小，避免宿主猜测单位含义；掀起只属于肢击。
         LegKnockbackKind kind = strike.getKnockbackKind();
         if (kind.getNumber() <= 0 || kind == LegKnockbackKind.UNRECOGNIZED) {
             throw TechniqueErrors.invalid("leg_strike.knockback_kind", "未知腿法击退方式");
+        }
+        if (kind == LegKnockbackKind.LIFT) {
+            throw TechniqueErrors.invalid("leg_strike.knockback_kind", "腿击没有竖直速度，掀起须改用 limb_strike");
         }
         double amount = strike.getKnockback().getValue();
         if ((kind == LegKnockbackKind.NONE && amount != 0)

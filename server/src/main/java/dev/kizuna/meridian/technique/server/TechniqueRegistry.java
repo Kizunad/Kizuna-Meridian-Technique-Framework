@@ -136,20 +136,30 @@ public final class TechniqueRegistry {
                     TechniqueBook book = bookOf(reference).orElseThrow();
                     TechniqueHeldItems.validateDefinition(book.getHeldItemRules(), definition);
                 }
-                if (TechniqueCombatEffects.hasLegStrike(definition)) {
-                    TechniqueBook book = bookOf(reference).orElseThrow(
-                            () -> TechniqueErrors.invalid(definition.getId(), "腿击效果没有所属书"));
-                    if (!book.hasLegRules()) {
-                        throw TechniqueErrors.invalid(
-                                definition.getId(), "腿击效果必须归属于声明腿法规则的书");
-                    }
-                    if (book.hasHeldItemRules()) {
-                        throw TechniqueErrors.invalid(definition.getId(), "腿法书不能声明持物规则");
-                    }
-                }
+                validateLimbBook(definition, reference);
             } catch (IllegalArgumentException exception) {
                 throw TechniqueErrors.at(locations.get(reference), exception);
             }
+        }
+    }
+
+    private void validateLimbBook(TechniqueDefinition definition, TechniqueReference reference) {
+        // 腿击、肢击要所属书声明对应的肢体规则；肢体书忽略手持物品，所以不能再声明持物规则。
+        boolean legs = TechniqueLimbStrikes.usesLegs(definition);
+        boolean arms = TechniqueLimbStrikes.usesArms(definition);
+        if (!legs && !arms) {
+            return;
+        }
+        TechniqueBook book = bookOf(reference).orElseThrow(
+                () -> TechniqueErrors.invalid(definition.getId(), "腿击或拳掌打击没有所属书"));
+        if (legs && !book.hasLegRules()) {
+            throw TechniqueErrors.invalid(definition.getId(), "腿击效果必须归属于声明腿法规则的书");
+        }
+        if (arms && !book.hasArmRules()) {
+            throw TechniqueErrors.invalid(definition.getId(), "拳掌打击必须归属于声明拳掌规则的书");
+        }
+        if (book.hasHeldItemRules()) {
+            throw TechniqueErrors.invalid(definition.getId(), "腿法书和拳掌书不能声明持物规则");
         }
     }
 

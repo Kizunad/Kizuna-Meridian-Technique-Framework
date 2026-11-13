@@ -20,12 +20,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/** 服务端僵直判定的世界表现：临时移动减速，以及给本人和观察者的剩余时长副本。 */
+/** 服务端僵直判定的世界表现：受击和倒地的临时移动减速，以及给本人和观察者的剩余时长副本。 */
 public final class TechniqueStaggers {
     private static final int MAX_PACKET_BYTES = 64;
     public static final ProtobufChannel CHANNEL =
             new ProtobufChannel(Identifier.fromNamespaceAndPath("meridian_technique", "stagger"), MAX_PACKET_BYTES);
     private static final Identifier MODIFIER_ID = Identifier.fromNamespaceAndPath("meridian_technique", "stagger");
+    private static final Identifier DOWN_MODIFIER_ID =
+            Identifier.fromNamespaceAndPath("meridian_technique", "stagger_down");
 
     private TechniqueStaggers() {
         // 判定只在 TechniqueService；这里只做表现与同步。
@@ -42,8 +44,12 @@ public final class TechniqueStaggers {
         if (entity == null) {
             return;
         }
-        if (event.kind() == TechniqueService.StaggerKind.HIT) {
-            slow(entity, event);
+        switch (event.kind()) {
+            case HIT -> slow(entity, event, MODIFIER_ID);
+            case DOWN -> slow(entity, event, DOWN_MODIFIER_ID);
+            case CHARM, HOLD -> {
+                // 定身由各宿主锁输入和大脑，这里不加移动修饰。
+            }
         }
         var message = StaggerStatus.newBuilder()
                 .setEntityId(entity.getId())
@@ -68,16 +74,16 @@ public final class TechniqueStaggers {
         return null;
     }
 
-    private static void slow(LivingEntity entity, TechniqueService.StaggerChanged event) {
-        // 固定身份的乘法修饰：新僵直替换旧修饰，结束时移除；与施放限速各自独立。
+    private static void slow(LivingEntity entity, TechniqueService.StaggerChanged event, Identifier modifierId) {
+        // 每种减速僵直一个固定身份的乘法修饰：同种新僵直替换旧修饰，结束时只移除自己那一个。
         AttributeInstance speed = entity.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speed == null) {
             return;
         }
-        speed.removeModifier(MODIFIER_ID);
+        speed.removeModifier(modifierId);
         if (event.remainingMillis() > 0) {
-            // 26.2 的修饰按 ID 识别，不再有 UUID 和名字；ID 沿用原来的名字。
-            var modifier = new AttributeModifier(MODIFIER_ID,
+            // 26.2 的修饰按 ID 识别，不再有 UUID 和名字；受击的 ID 沿用原来的名字。
+            var modifier = new AttributeModifier(modifierId,
                     event.movementMultiplier() - 1, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
             speed.addTransientModifier(modifier);
         }

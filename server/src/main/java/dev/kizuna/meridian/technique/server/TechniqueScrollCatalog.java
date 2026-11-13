@@ -77,6 +77,9 @@ public final class TechniqueScrollCatalog {
             TechniqueCatalog catalog = source.catalog();
             for (int index = 0; index < catalog.getVolumesCount(); index++) {
                 TechniqueVolume volume = catalog.getVolumes(index);
+                if (!hasScrollItem(volume)) {
+                    continue;
+                }
                 String location = source.location("volumes[" + index + "]");
                 String volumeId = volume.getId();
                 TechniqueValues.id(volumeId, location + ".id");
@@ -89,6 +92,11 @@ public final class TechniqueScrollCatalog {
             }
         }
         return List.copyOf(scrolls);
+    }
+
+    public static boolean hasScrollItem(TechniqueVolume volume) {
+        // 缺省生成卷轴物品；目录写 false 的卷只能经命令或附属学会。
+        return !volume.hasScrollItem() || volume.getScrollItem();
     }
 
     private static Scroll scroll(String itemId, TechniqueVolume volume, DisplayIndex display) {

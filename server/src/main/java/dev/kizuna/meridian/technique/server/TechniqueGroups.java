@@ -57,6 +57,9 @@ final class TechniqueGroups {
                 if (book.hasLegRules()) {
                     TechniqueLegRules.validate(book.getLegRules());
                 }
+                if (book.hasArmRules()) {
+                    TechniqueArmRules.validate(book.getArmRules());
+                }
                 validateName(book.getDisplayName());
                 index.put(id, book);
                 validateCount(index.size());
@@ -174,6 +177,9 @@ final class TechniqueGroups {
         List<ScrollDrop> drops = volume.getScrollDropsList();
         if (drops.size() > MAX_SCROLL_DROPS) {
             throw TechniqueErrors.invalid("scroll_drops", "至多 " + MAX_SCROLL_DROPS + " 项");
+        }
+        if (!TechniqueScrollCatalog.hasScrollItem(volume) && !drops.isEmpty()) {
+            throw TechniqueErrors.invalid("scroll_drops", "不生成卷轴物品的卷不能声明掉落");
         }
         var entities = new HashSet<String>();
         for (int index = 0; index < drops.size(); index++) {

@@ -5,6 +5,9 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFail
 
 /** 目录诊断保留可定位说明，运行拒绝提供结构化码和玩家感受。 */
 public final class TechniqueErrors {
+    /** 只出拳掌的式没站在地上时的玩家文本；腿法沿用 NOT_GROUNDED 的通用文本。 */
+    static final String ARMS_NOT_GROUNDED = "要站在地上才能出拳";
+
     private TechniqueErrors() {
         // 错误只描述拒绝事实，不持有身体或执行补偿。
     }

@@ -313,6 +313,8 @@ public final class TechniqueScheduler {
                 List<SoundCue> hitSounds = TechniqueSoundCues.hitSounds(definition, index);
                 intent.setLegStrike(legStrike(active, effect.getLegStrike(), hitSounds));
             }
+            case LIMB_STRIKE -> intent.setLimbStrike(
+                    limbStrike(active, effect.getLimbStrike(), TechniqueSoundCues.hitSounds(definition, index)));
             case BREAK_BLOCKS -> intent.setBreakBlocks(breakBlocks(active, effect.getBreakBlocks()));
             case LAUNCH_PROJECTILE -> intent.setLaunchProjectile(
                     launchProjectile(active, effect.getLaunchProjectile()));
@@ -368,6 +370,20 @@ public final class TechniqueScheduler {
                 .setLegRules(active.getLegRules())
                 .addAllHitSounds(hitSounds)
                 .build();
+    }
+
+    private static LimbStrikeIntent limbStrike(ActiveCast active, LimbStrike strike,
+                                               List<SoundCue> hitSounds) {
+        // 肢击按出力肢带上起手保存的书级规则：出拳掌带拳掌规则，出腿带鞋规则。
+        LimbStrikeIntent.Builder intent = LimbStrikeIntent.newBuilder()
+                .setStrike(strike)
+                .addAllHitSounds(hitSounds);
+        if (strike.getLimbCase() == LimbStrike.LimbCase.ARM) {
+            intent.setArmRules(active.getArmRules());
+        } else {
+            intent.setLegRules(active.getLegRules());
+        }
+        return intent.build();
     }
 
     private static BreakBlocksIntent breakBlocks(ActiveCast active, BreakBlocks blocks) {

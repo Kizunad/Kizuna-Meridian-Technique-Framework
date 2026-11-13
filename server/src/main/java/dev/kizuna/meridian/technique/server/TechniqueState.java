@@ -203,6 +203,9 @@ public final class TechniqueState {
         if (active.hasLegRules()) {
             TechniqueLegRules.validate(active.getLegRules());
         }
+        if (active.hasArmRules()) {
+            TechniqueArmRules.validate(active.getArmRules());
+        }
         if (active.getLockTarget() != active.hasTargetLockDistance()) {
             throw TechniqueErrors.invalid("active_cast.target_lock_distance", "锁定与搜索距离必须同时保存");
         }

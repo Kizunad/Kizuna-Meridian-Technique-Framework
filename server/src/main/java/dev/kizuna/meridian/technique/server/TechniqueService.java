@@ -57,6 +57,7 @@ public final class TechniqueService {
     private final List<Consumer<CastObserved>> castListeners = new ArrayList<>();
     private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
+    private final List<Consumer<StrikeReport>> strikeListeners = new ArrayList<>();
     private TechniqueEffectHandler effectHandler;
     private final List<BiPredicate<UUID, CastRequest>> castGuards = new ArrayList<>();
     private final List<BiFunction<UUID, CastRequest, Optional<String>>> castChecks = new ArrayList<>();
@@ -303,7 +304,7 @@ public final class TechniqueService {
     }
 
     public Optional<CastOutcome> stagger(UUID entityUuid, Stagger stagger) {
-        // Damage 写受击僵直，Brewing 写魅惑定身；两者都拒绝新式并打断可打断的起手。
+        // Damage 写受击僵直，Brewing 写魅惑定身，袖手拳写被擒和倒地；都拒绝新式并打断可打断的起手。
         Objects.requireNonNull(entityUuid);
         Objects.requireNonNull(stagger);
         if (stagger.durationMillis() == 0 || !recordStagger(entityUuid, stagger)) {
@@ -334,6 +335,11 @@ public final class TechniqueService {
                     stagger.movementMultiplier(), stagger.kind()));
         }
         return true;
+    }
+
+    public void releaseStagger(UUID entityUuid, StaggerKind kind) {
+        // 放手等提前解除只撤这一种期限并发布剩余 0，其余种类照旧按身体时钟到期。
+        endStagger(new StaggerKey(Objects.requireNonNull(entityUuid), Objects.requireNonNull(kind)));
     }
 
     public long staggerRemainingMillis(UUID entityUuid) {
@@ -394,7 +400,7 @@ public final class TechniqueService {
     }
 
     private void endStagger(UUID entityUuid) {
-        // 死亡、卸载与断线同时释放两种期限，逐种通知其输入和属性宿主。
+        // 死亡、卸载与断线同时释放全部种类的期限，逐种通知其输入和属性宿主。
         for (StaggerKind kind : StaggerKind.values()) {
             endStagger(new StaggerKey(entityUuid, kind));
         }
@@ -445,6 +451,31 @@ public final class TechniqueService {
     public void removeSoundListener(Consumer<SoundDue> listener) {
         // 服务器停止时移除表现层监听器，避免保留旧服务器对象。
         soundListeners.remove(listener);
+    }
+
+    public void addStrikeListener(Consumer<StrikeReport> listener) {
+        // 附属按施放统计实战打中与接住；监听器只在服务线程调用。
+        strikeListeners.add(Objects.requireNonNull(listener));
+    }
+
+    public void removeStrikeListener(Consumer<StrikeReport> listener) {
+        // 服务器停止时移除附属监听器，避免保留旧世界对象。
+        strikeListeners.remove(listener);
+    }
+
+    public void reportStrike(StrikeReport report) {
+        // 打击执行器和接招提供方结算后各报一次；引用未登记功法的报告不发布。
+        Objects.requireNonNull(report);
+        if (registry.find(report.technique()).isEmpty()) {
+            throw new IllegalArgumentException("打中报告引用了未登记的功法");
+        }
+        for (Consumer<StrikeReport> listener : List.copyOf(strikeListeners)) {
+            try {
+                listener.accept(report);
+            } catch (RuntimeException ignored) {
+                // 统计失败只影响附属的计数，打击已经由宿主结算。
+            }
+        }
     }
 
     public void setEffectHandler(TechniqueEffectHandler handler) {
@@ -1174,7 +1205,8 @@ public final class TechniqueService {
                 .build();
     }
 
-    public enum StaggerKind { HIT, CHARM }
+    /** HIT 受击减速，CHARM 魅惑定身，HOLD 被擒定身，DOWN 倒地减速；各种类期限互不覆盖。 */
+    public enum StaggerKind { HIT, CHARM, HOLD, DOWN }
 
     private record StaggerKey(UUID entityUuid, StaggerKind kind) { }
 
@@ -1185,15 +1217,18 @@ public final class TechniqueService {
         }
 
         public Stagger {
-            // 受击只减速，魅惑必须定身；两种期限都使用身体时钟毫秒。
+            // 受击和倒地只减速，魅惑和被擒必须定身；各种期限都使用身体时钟毫秒。
             Objects.requireNonNull(kind);
             if (durationMillis < 0 || durationMillis > MAX_STAGGER_MILLIS) {
                 throw new IllegalArgumentException("僵直时长必须在 [0, 60000] 毫秒内");
             }
-            if (!Double.isFinite(movementMultiplier) || movementMultiplier < 0 || movementMultiplier > 1
-                    || kind == StaggerKind.HIT && movementMultiplier == 0
-                    || kind == StaggerKind.CHARM && movementMultiplier != 0) {
-                throw new IllegalArgumentException("受击移动倍率必须在 (0, 1] 内，魅惑倍率必须为 0");
+            if (!Double.isFinite(movementMultiplier) || movementMultiplier < 0 || movementMultiplier > 1) {
+                throw new IllegalArgumentException("僵直移动倍率必须在 [0, 1] 内");
+            }
+            boolean immobilizing = kind == StaggerKind.CHARM || kind == StaggerKind.HOLD;
+            boolean standsStill = movementMultiplier == 0;
+            if (immobilizing != standsStill) {
+                throw new IllegalArgumentException("受击、倒地的移动倍率必须在 (0, 1] 内，魅惑、被擒必须为 0");
             }
         }
     }
@@ -1207,6 +1242,22 @@ public final class TechniqueService {
             Objects.requireNonNull(kind);
         }
     }
+
+    /** 一次打击的结算：打中、被盾挡下，或被对方的接招接住；空挥不报告。 */
+    public record StrikeReport(String castId, TechniqueReference technique, UUID casterUuid,
+                               UUID targetUuid, StrikeOutcome outcome) {
+        public StrikeReport {
+            // 报告只转述宿主的结算结果，施放身份、功法、双方和结果都必须完整。
+            TechniqueValues.castId(castId);
+            Objects.requireNonNull(technique);
+            Objects.requireNonNull(casterUuid);
+            Objects.requireNonNull(targetUuid);
+            Objects.requireNonNull(outcome);
+        }
+    }
+
+    /** HIT 造成了伤害，BLOCKED 被盾挡下，CAUGHT 被对方的接招接住。 */
+    public enum StrikeOutcome { HIT, BLOCKED, CAUGHT }
 
     /** 一次施放请求的回执；调试用途，不进正式玩法。 */
     public record CastObserved(UUID entityUuid, CastOutcome outcome) {

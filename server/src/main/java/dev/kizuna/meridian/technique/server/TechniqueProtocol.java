@@ -236,6 +236,7 @@ public final class TechniqueProtocol {
         switch (intent.getOperationCase()) {
             case WEAPON_STRIKE -> validateWeaponStrikeIntent(intent);
             case LEG_STRIKE -> validateLegStrikeIntent(intent);
+            case LIMB_STRIKE -> validateLimbStrikeIntent(intent);
             case BREAK_BLOCKS -> {
                 validateHeldEffect(intent);
                 TechniqueCombatEffects.validateBlocks(intent.getBreakBlocks().getBlocks());
@@ -303,6 +304,14 @@ public final class TechniqueProtocol {
         for (SoundCue cue : intent.getLegStrike().getHitSoundsList()) {
             TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "leg_strike.hit_sounds");
         }
+    }
+
+    private static void validateLimbStrikeIntent(EffectIntent intent) {
+        // 肢击和腿击一样没有持物手位，打击、书级规则和命中声音由肢击校验器统一检查。
+        if (intent.getSelectedHand() != Hand.HAND_UNSPECIFIED) {
+            throw TechniqueErrors.invalid("selected_hand", "肢击效果不能携带出手手位");
+        }
+        TechniqueLimbStrikes.validateIntent(intent.getLimbStrike());
     }
 
     private static void validateTargetLockIntent(EffectIntent intent) {

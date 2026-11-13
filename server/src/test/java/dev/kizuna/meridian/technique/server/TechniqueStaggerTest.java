@@ -37,6 +37,7 @@ public class TechniqueStaggerTest {
     private static final long FINISHED_MILLIS = WARMUP + ACTIVE + RECOVERY;
     private static final long OVER_LIMIT_MILLIS = 60_001;
     private static final double SPEEDUP = 1.5;
+    private static final double DOWN_MOVEMENT = 0.2;
 
     @Test
     public void castGuardRejectsBeforeBodyMutationAndAllowsOnlyDelegatedRequest() {
@@ -182,5 +183,55 @@ public class TechniqueStaggerTest {
         host.nowMillis = SECOND_HIT_MILLIS + LATER_STAGGER;
         service.tick();
         assertEquals(0, service.staggerRemainingMillis(ENTITY));
+    }
+
+    @Test
+    public void holdMustStandStillAndDownMustOnlySlow() {
+        // 被擒和魅惑一样必须定身，倒地和受击一样只能减速。
+        new TechniqueService.Stagger(LONG_STAGGER, 0, TechniqueService.StaggerKind.HOLD);
+        new TechniqueService.Stagger(LONG_STAGGER, DOWN_MOVEMENT, TechniqueService.StaggerKind.DOWN);
+        new TechniqueService.Stagger(LONG_STAGGER, 1, TechniqueService.StaggerKind.DOWN);
+        assertThrows(IllegalArgumentException.class,
+                () -> new TechniqueService.Stagger(LONG_STAGGER, DOWN_MOVEMENT, TechniqueService.StaggerKind.HOLD));
+        assertThrows(IllegalArgumentException.class,
+                () -> new TechniqueService.Stagger(LONG_STAGGER, 0, TechniqueService.StaggerKind.DOWN));
+    }
+
+    @Test
+    public void heldTargetCannotCastAndReleaseEndsOnlyHold() {
+        // 被擒拒绝起式；放手只撤被擒并发出剩余 0，同时生效的倒地照旧拒绝起式到期满。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        List<TechniqueService.StaggerChanged> events = new ArrayList<>();
+        service.addStaggerListener(events::add);
+        service.stagger(ENTITY, new TechniqueService.Stagger(LONG_STAGGER, 0, TechniqueService.StaggerKind.HOLD));
+        service.stagger(ENTITY, new TechniqueService.Stagger(SHORT_STAGGER, DOWN_MOVEMENT,
+                TechniqueService.StaggerKind.DOWN));
+        assertEquals(TechniqueFailure.STAGGERED,
+                service.cast(ENTITY, request(host.current(), "held")).getFailure());
+        events.clear();
+        service.releaseStagger(ENTITY, TechniqueService.StaggerKind.HOLD);
+        assertEquals(1, events.size());
+        assertEquals(TechniqueService.StaggerKind.HOLD, events.get(0).kind());
+        assertEquals(0, events.get(0).remainingMillis());
+        assertEquals(0, service.staggerRemainingMillis(ENTITY, TechniqueService.StaggerKind.HOLD));
+        assertEquals(SHORT_STAGGER, service.staggerRemainingMillis(ENTITY, TechniqueService.StaggerKind.DOWN));
+        assertEquals(TechniqueFailure.STAGGERED,
+                service.cast(ENTITY, request(host.current(), "downed")).getFailure());
+        service.releaseStagger(ENTITY, TechniqueService.StaggerKind.HOLD);
+        assertEquals(1, events.size());
+        host.nowMillis = SHORT_STAGGER;
+        service.tick();
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), "risen")).getPhase());
+    }
+
+    @Test
+    public void holdInterruptsInterruptibleWarmup() {
+        // 起手中被擒和受击一样打断可打断的起手。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), "grabbed")).getPhase());
+        var hold = new TechniqueService.Stagger(LONG_STAGGER, 0, TechniqueService.StaggerKind.HOLD);
+        assertEquals(CastPhase.INTERRUPTED, service.stagger(ENTITY, hold).orElseThrow().getPhase());
     }
 }

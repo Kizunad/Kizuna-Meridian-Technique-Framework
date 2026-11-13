@@ -97,7 +97,10 @@ public final class TechniqueSelector {
         PURSUED,
         TARGET_BEHIND,
         TARGET_AIRBORNE,
-        SELF_FLEEING
+        SELF_FLEEING,
+        TARGET_CASTING,
+        TARGET_DOWNED,
+        TARGET_ARMORED
     }
 
     public record CombatContext(Set<CombatFact> facts, TechniqueProgress progress,
@@ -266,6 +269,9 @@ public final class TechniqueSelector {
                 case TARGET_BEHIND -> hints.getTargetBehindWeight();
                 case TARGET_AIRBORNE -> hints.getTargetAirborneWeight();
                 case SELF_FLEEING -> hints.getSelfFleeingWeight();
+                case TARGET_CASTING -> hints.getTargetCastingWeight();
+                case TARGET_DOWNED -> hints.getTargetDownedWeight();
+                case TARGET_ARMORED -> hints.getTargetArmoredWeight();
             };
             if (multiplier.hasValue()) {
                 result *= multiplier.getValue();

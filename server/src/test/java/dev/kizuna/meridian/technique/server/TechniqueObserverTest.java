@@ -25,6 +25,7 @@ import static dev.kizuna.meridian.technique.server.HeldTechniqueFixtures.service
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /** 调试观察入口：施放回执监听与跃步做功明细。 */
@@ -94,5 +95,28 @@ public class TechniqueObserverTest {
     private static MemoryHost learnedHost() {
         // 每项测试独立一具已学会测试功法的身体。
         return new MemoryHost(withProgress(body(Shape.TENDRIL), progress(definition())));
+    }
+
+    @Test
+    public void strikeReportReachesListenersAndRejectsUnknownTechnique() {
+        // 宿主报告的打中照原样转给监听器；引用未登记功法的报告直接拒绝，不发布。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        List<TechniqueService.StrikeReport> reports = new ArrayList<>();
+        service.addStrikeListener(event -> {
+            throw new IllegalStateException("计数失败");
+        });
+        service.addStrikeListener(reports::add);
+        var report = new TechniqueService.StrikeReport("strike_cast", TechniqueRegistry.reference(definition()),
+                ENTITY, STRANGER, TechniqueService.StrikeOutcome.HIT);
+        service.reportStrike(report);
+        assertEquals(List.of(report), reports);
+        var unknown = new TechniqueService.StrikeReport("strike_cast",
+                TechniqueRegistry.reference(definition()).toBuilder().setId("sample:missing").build(),
+                ENTITY, STRANGER, TechniqueService.StrikeOutcome.CAUGHT);
+        assertThrows(IllegalArgumentException.class, () -> service.reportStrike(unknown));
+        assertEquals(1, reports.size());
+        assertThrows(IllegalArgumentException.class, () -> new TechniqueService.StrikeReport("bad id",
+                TechniqueRegistry.reference(definition()), ENTITY, STRANGER, TechniqueService.StrikeOutcome.HIT));
     }
 }

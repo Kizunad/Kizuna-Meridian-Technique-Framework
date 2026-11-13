@@ -1,0 +1,296 @@
+# 千里腿目录（Peddler 6ffacaf）里的全部腿击和书级鞋规则，逐字照抄，供肢击换算金样测试。
+schema_version: 1
+namespace: "meridian_peddler"
+books {
+  id: "meridian_peddler:legwork"
+  leg_rules {
+    ignore_held_items: true
+    require_grounded: true
+    base_damage { value: 2 unit: DAMAGE_POINT }
+    armor_damage { value: 0.5 unit: DAMAGE_POINT }
+    durability_cost: 1
+  }
+}
+definitions {
+  id: "meridian_peddler:snap_kick"
+  version: 1
+  effects {
+    at_millis: 1050
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 2.5 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_legs"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "snap_kick"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:push_kick"
+  version: 1
+  effects {
+    at_millis: 1950
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3.5 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.5 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_torso"
+      knockback_kind: PUSH
+      knockback { value: 2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "push_kick"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:ground_sweep"
+  version: 1
+  effects {
+    at_millis: 1850
+    leg_strike {
+      shape: SECTOR
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 180 unit: DEGREE }
+      multiplier { value: 1 unit: RATIO }
+      maximum_targets: 5
+      cast_target_limit: 5
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_legs"
+      knockback_kind: TRIP
+      knockback { value: 1 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: false
+      dedup_group: "ground_sweep"
+    }
+  }
+  effects {
+    at_millis: 2350
+    leg_strike {
+      shape: SECTOR
+      facing: STRIKE_BACKWARD
+      distance { value: 3 unit: METER }
+      angle { value: 180 unit: DEGREE }
+      multiplier { value: 1 unit: RATIO }
+      maximum_targets: 5
+      cast_target_limit: 5
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_legs"
+      knockback_kind: TRIP
+      knockback { value: 1 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "ground_sweep"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:roundhouse"
+  version: 1
+  effects {
+    at_millis: 2000
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: REAR_LEG
+      damage_type_id: "meridian_peddler:kick_rear_head"
+      knockback_kind: SIDEWAYS
+      knockback { value: 0.8 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "roundhouse"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:triple_kick"
+  version: 1
+  effects {
+    at_millis: 1550
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 0.8 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_legs"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: false
+      dedup_group: "triple_kick_1"
+    }
+  }
+  effects {
+    at_millis: 2150
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.0 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_torso"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: false
+      dedup_group: "triple_kick_2"
+    }
+  }
+  effects {
+    at_millis: 2850
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 1.6 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: FRONT_LEG
+      damage_type_id: "meridian_peddler:kick_lead_head"
+      knockback_kind: PUSH
+      knockback { value: 0.2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "triple_kick_3"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:mule_kick"
+  version: 1
+  effects {
+    at_millis: 1450
+    leg_strike {
+      shape: SECTOR
+      facing: STRIKE_BACKWARD
+      distance { value: 3 unit: METER }
+      angle { value: 90 unit: DEGREE }
+      multiplier { value: 1.5 unit: RATIO }
+      maximum_targets: 2
+      cast_target_limit: 2
+      leg: BOTH_LEGS
+      damage_type_id: "meridian_peddler:kick_double_torso"
+      knockback_kind: PUSH
+      knockback { value: 2.5 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "mule_kick"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:flying_kick"
+  version: 1
+  effects {
+    at_millis: 1750
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 2.2 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: REAR_LEG
+      damage_type_id: "meridian_peddler:kick_rear_torso"
+      knockback_kind: PUSH
+      knockback { value: 2 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "flying_kick"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:axe_kick"
+  version: 1
+  effects {
+    at_millis: 2450
+    leg_strike {
+      shape: SINGLE_TARGET
+      facing: STRIKE_FORWARD
+      distance { value: 3 unit: METER }
+      angle { value: 60 unit: DEGREE }
+      multiplier { value: 2.4 unit: RATIO }
+      maximum_targets: 1
+      cast_target_limit: 1
+      leg: REAR_LEG
+      damage_type_id: "meridian_peddler:axe_kick"
+      knockback_kind: DOWN
+      knockback { value: 0.3 unit: RATIO }
+      knockback_when_blocked: false
+      last_strike: true
+      dedup_group: "axe_kick"
+    }
+  }
+}
+definitions {
+  id: "meridian_peddler:whirlwind"
+  version: 1
+  effects {
+    at_millis: 3050
+    leg_strike {
+      shape: SECTOR
+      facing: STRIKE_FORWARD
+      distance { value: 3.5 unit: METER }
+      angle { value: 180 unit: DEGREE }
+      multiplier { value: 2.2 unit: RATIO }
+      maximum_targets: 6
+      cast_target_limit: 6
+      leg: REAR_LEG
+      damage_type_id: "meridian_peddler:kick_rear_head"
+      knockback_kind: PUSH
+      knockback { value: 1.5 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: false
+      dedup_group: "whirlwind"
+    }
+  }
+  effects {
+    at_millis: 3250
+    leg_strike {
+      shape: SECTOR
+      facing: STRIKE_BACKWARD
+      distance { value: 3.5 unit: METER }
+      angle { value: 180 unit: DEGREE }
+      multiplier { value: 2.2 unit: RATIO }
+      maximum_targets: 6
+      cast_target_limit: 6
+      leg: REAR_LEG
+      damage_type_id: "meridian_peddler:kick_rear_head"
+      knockback_kind: PUSH
+      knockback { value: 1.5 unit: RATIO }
+      knockback_when_blocked: true
+      last_strike: true
+      dedup_group: "whirlwind"
+    }
+  }
+}

@@ -99,7 +99,8 @@ public final class TechniqueCasting {
             throw TechniqueErrors.rejected(result.getFailure(), result.getReason());
         }
         LegRules legRules = book.map(TechniqueBook::getLegRules).orElse(LegRules.getDefaultInstance());
-        var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules);
+        ArmRules armRules = book.map(TechniqueBook::getArmRules).orElse(ArmRules.getDefaultInstance());
+        var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules, armRules);
         return new TechniqueActivities.CastBinding(result.getBinding(), hand, entry);
     }
 
@@ -135,20 +136,27 @@ public final class TechniqueCasting {
         if (nowMillis < cooldownEnd || nowMillis < curveEnd) {
             throw TechniqueErrors.rejected(COOLING_DOWN);
         }
-        validateLegConditions(definition, inspection);
+        validateGroundConditions(definition, inspection);
         return definition;
     }
 
-    private void validateLegConditions(TechniqueDefinition definition, TechniqueHost.Inspection inspection) {
-        // 腿法在绑定和扣费前读取同一次 inspect 的移动事实，失败只返回着地原因。
-        if (!TechniqueCombatEffects.hasLegStrike(definition)) {
+    private void validateGroundConditions(TechniqueDefinition definition, TechniqueHost.Inspection inspection) {
+        // 腿法和拳掌在绑定和扣费前读取同一次 inspect 的移动事实，失败只返回着地原因。
+        boolean legs = TechniqueLimbStrikes.usesLegs(definition);
+        boolean arms = TechniqueLimbStrikes.usesArms(definition);
+        if (!legs && !arms) {
             return;
         }
         TechniqueBook book = registry.bookOf(TechniqueRegistry.reference(definition))
                 .orElseThrow(() -> TechniqueErrors.rejected(INVALID_STATE));
-        if (book.hasLegRules() && book.getLegRules().getRequireGrounded()
-                && !TechniqueInspection.canCastLeg(inspection.facts())) {
+        if (TechniqueInspection.standsOnGround(inspection.facts())) {
+            return;
+        }
+        if (legs && book.getLegRules().getRequireGrounded()) {
             throw TechniqueErrors.rejected(NOT_GROUNDED);
+        }
+        if (arms && book.getArmRules().getRequireGrounded()) {
+            throw TechniqueErrors.rejected(NOT_GROUNDED, TechniqueErrors.ARMS_NOT_GROUNDED);
         }
     }
 

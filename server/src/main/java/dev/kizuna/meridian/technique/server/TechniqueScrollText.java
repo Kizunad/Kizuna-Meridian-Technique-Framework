@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BrewUseMethod;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCostMatching;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiDistribution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -45,15 +46,38 @@ public final class TechniqueScrollText {
         long total = phases.getWarmupMillis() + phases.getActiveMillis() + phases.getRecoveryMillis();
         String phasesText = "起手 " + seconds(phases.getWarmupMillis()) + " / 出招 "
                 + seconds(phases.getActiveMillis()) + " / 收势 " + seconds(phases.getRecoveryMillis());
-        boolean held = definition.getEffectsList().stream()
-                .anyMatch(effect -> effect.hasWeaponStrike() || effect.hasBreakBlocks());
         boolean dash = definition.getEffectsList().stream().anyMatch(effect -> effect.hasImpulse());
-        String heldText = held ? "需要" : "不需要";
+        String heldText = heldText(definition);
         String movementText = decimal(TechniqueMovement.multiplier(definition));
         String dashText = dash ? "是" : "否";
         return List.of("真元：" + qiCost(definition) + "　冷却：" + seconds(definition.getCooldownMillis()) + " 秒",
                 "施放：" + seconds(total) + " 秒（" + phasesText + " 秒）",
                 "持物：" + heldText + "　移动：" + movementText + " 倍　冲刺：" + dashText);
+    }
+
+    private static String heldText(TechniqueDefinition definition) {
+        // 用药的式写要哪种巫药，射击式写弓或弩，兵器打击和破门写需要；其余不看手里拿什么。
+        if (definition.hasBrewItem()) {
+            var uses = definition.getBrewItem().getPhysicalUsesList();
+            if (uses.size() == 1 && uses.get(0) == BrewUseMethod.DRINK) {
+                return "饮用巫药";
+            }
+            if (uses.size() == 1 && uses.get(0) == BrewUseMethod.SPLASH) {
+                return "喷溅巫药";
+            }
+            return "巫药";
+        }
+        if (definition.hasProjectileWeapon()) {
+            return switch (definition.getProjectileWeapon()) {
+                case BOW -> "弓";
+                case CROSSBOW -> "弩";
+                case HELD_SPLASH_BREW -> "喷溅巫药";
+                default -> "需要";
+            };
+        }
+        boolean held = definition.getEffectsList().stream()
+                .anyMatch(effect -> effect.hasWeaponStrike() || effect.hasBreakBlocks());
+        return held ? "需要" : "不需要";
     }
 
     public static String summary(TechniqueDefinition definition) {

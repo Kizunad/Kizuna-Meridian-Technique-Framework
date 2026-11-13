@@ -50,6 +50,32 @@ public final class TechniqueScrollTextTest {
     }
 
     @Test
+    public void heldRowNamesTheBowCrossbowOrBrewTheFormNeeds() {
+        // 射击式和用药的式不打兵器，原来都写成「不需要」；现在写明要拿什么。
+        var catalog = TechniqueCatalogManifest.parseText("scroll_held", """
+                schema_version: 1 namespace: "sample"
+                definitions { id: "sample:bow" version: 1 projectile_weapon: BOW
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                definitions { id: "sample:crossbow" version: 1 projectile_weapon: CROSSBOW
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                definitions { id: "sample:drink" version: 1 brew_item { physical_uses: DRINK }
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                definitions { id: "sample:splash" version: 1 projectile_weapon: HELD_SPLASH_BREW
+                  brew_item { physical_uses: SPLASH }
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                definitions { id: "sample:either" version: 1 brew_item { physical_uses: DRINK physical_uses: SPLASH }
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                definitions { id: "sample:bare" version: 1
+                  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 100 } }
+                """);
+        var expected = List.of("弓", "弩", "饮用巫药", "喷溅巫药", "巫药", "不需要");
+        for (int index = 0; index < expected.size(); index++) {
+            String row = TechniqueScrollText.details(catalog.getDefinitions(index)).get(2);
+            assertTrue(row, row.startsWith("持物：" + expected.get(index) + "　"));
+        }
+    }
+
+    @Test
     public void elementCostNamesItsElementAndBalanceKeepsTotal() {
         // 本行真元费用标出行名，按余额分摊写整式总额而非每脉费用。
         var catalog = TechniqueCatalogManifest.parseText("scroll_element", """

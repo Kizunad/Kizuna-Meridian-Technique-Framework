@@ -329,6 +329,8 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 `EffectIntent` 声明冲量、表现、移动限速、`weapon_strike=13`、`break_blocks=14`、`launch_projectile=17`、
 `target_lock=18`、`leg_strike=20` 或 `limb_strike=24`，交给宿主执行；不包含身体修正。
 每条意图带起手固定的 `selected_hand`，无持物规则为未指定；`effect_id` 在施放内独立且稳定。
+调度器给每条意图填 `technique=8`，即请求里的精确式引用；旧存档里的承接清理意图可能没有，
+宿主要容忍缺省。填了就要有 ID 且版本大于 0。
 持物打击和劈门意图必须有选定手和书级规则；腿击和肢击不带手位，只带出力肢对应的书级规则。`scheduled_millis` 为非负的权威身体时刻，迟到 tick 不修改原生效时刻。
 表现 STOP 与移动 UNLOCK 始终保留原定收势边界作为 `scheduled_millis`，使提前终止、承接和恢复重试的载荷一致；
 它们是收到即执行的清理，宿主不得等待该计划时刻。

@@ -353,7 +353,7 @@ GameTest 覆盖表现 START/STOP 和冲量下发，正式源码不提供任何�
 - 腿击意图可经 `TechniqueLimbStrikes.fromLeg` 换成肢击意图，交给同一个执行器。
 
 宿主每次肢击结算完一个目标，可以调用 `service.reportStrike(new StrikeReport(castId, technique, caster, target,
-outcome))` 报告结果：`HIT` 造成了伤害，`BLOCKED` 被盾挡下，`CAUGHT` 被对方的接招接住；挥空不报告。
+outcome))` 报告结果，`castId` 和 `technique` 取自意图的 `cast_id` 与 `technique`，意图没带式就不报：`HIT` 造成了伤害，`BLOCKED` 被盾挡下，`CAUGHT` 被对方的接招接住；挥空不报告。
 引用未登记功法时抛 `IllegalArgumentException`。`addStrikeListener`/`removeStrikeListener` 订阅这些报告，
 监听器在服务端主线程同步调用，抛出的运行时异常被吞掉，不影响打击本身。
 

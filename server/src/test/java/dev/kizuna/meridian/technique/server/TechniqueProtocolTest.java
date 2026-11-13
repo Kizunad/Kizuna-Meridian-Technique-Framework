@@ -77,6 +77,25 @@ public class TechniqueProtocolTest {
     }
 
     @Test
+    public void effectTechniqueIsOptionalButMustBeExact() {
+        // 旧存档里的清理意图可以不带所属式；带了就要有 ID 和正版本，并随宿主请求原样往返。
+        EffectIntent unnamed = impulseIntent();
+        TechniqueProtocol.validateEffect(unnamed);
+        TechniqueReference reference = TechniqueRegistry.reference(definition());
+        EffectIntent named = unnamed.toBuilder().setTechnique(reference).build();
+        TechniqueHostRequest request = hostRequest().setEffect(named).build();
+        assertEquals(request, TechniqueProtocol.decodeHost(TechniqueProtocol.encodeHost(request)));
+        EffectIntent unversioned = unnamed.toBuilder()
+                .setTechnique(reference.toBuilder().setVersion(0))
+                .build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.validateEffect(unversioned));
+        EffectIntent anonymous = unnamed.toBuilder()
+                .setTechnique(reference.toBuilder().clearId())
+                .build();
+        assertThrows(IllegalArgumentException.class, () -> TechniqueProtocol.validateEffect(anonymous));
+    }
+
+    @Test
     public void hostOperationsUseStableFieldNumbersAndRoundTrip() {
         // 宿主协议保留指定 oneof 编号，三种操作分别往返，当前不执行任何世界效果。
         assertEquals(INSPECT_FIELD, TechniqueHostRequest.getDescriptor().findFieldByName("inspect").getNumber());

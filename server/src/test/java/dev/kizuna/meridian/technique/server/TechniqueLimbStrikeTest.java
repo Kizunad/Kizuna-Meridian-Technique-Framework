@@ -138,7 +138,7 @@ public final class TechniqueLimbStrikeTest {
 
     @Test
     public void armStrikeSchedulesBookArmRulesAndHitSounds() {
-        // 出拳的意图带起手保存的拳掌规则和同刻命中声音，不带腿法规则和出手手位。
+        // 出拳的意图带所属式、起手保存的拳掌规则和同刻命中声音，不带腿法规则和出手手位。
         TechniqueDefinition definition = armDefinition();
         TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(armCatalog(definition, armBook())));
         BodySnapshot prepared = withProgress(body(Shape.TENDRIL), progress(definition));
@@ -152,6 +152,7 @@ public final class TechniqueLimbStrikeTest {
         assertEquals(1, effects.size());
         EffectIntent intent = effects.get(0);
         assertEquals(Hand.HAND_UNSPECIFIED, intent.getSelectedHand());
+        assertEquals(TechniqueRegistry.reference(definition), intent.getTechnique());
         assertEquals(armRules(), intent.getLimbStrike().getArmRules());
         assertFalse(intent.getLimbStrike().hasLegRules());
         assertEquals(List.of(hitSound()), intent.getLimbStrike().getHitSoundsList());

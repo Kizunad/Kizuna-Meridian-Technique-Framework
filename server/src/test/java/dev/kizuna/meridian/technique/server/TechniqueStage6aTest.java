@@ -20,6 +20,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PresentationE
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 import org.junit.Test;
 
@@ -235,6 +236,23 @@ public class TechniqueStage6aTest {
                     TechniqueState.read(host.current()).getCooldownsOrThrow(TECHNIQUE_ID));
             assertEquals(COST_QI, host.store.environmentQi().totalQi(), QI_TOLERANCE);
             assertTrue(host.current().actions().isEmpty());
+        }
+    }
+
+    @Test
+    public void everyIntentOfOneCastNamesItsExactTechnique() {
+        // 锁移动、起播、被打断后的停播和解锁都带本次施放的精确式。
+        TechniqueDefinition definition = movementDefinition();
+        MemoryHost host = prepared(definition);
+        TechniqueService service = service(host, registry(definition));
+        service.cast(ENTITY, request(host.current(), "named"));
+        host.nowMillis = INTERRUPT_TIME;
+        terminate(service, Termination.STAGGER);
+        assertEquals(List.of(MovementAction.LOCK, MovementAction.UNLOCK), movementActions(host));
+        assertEquals(List.of(PresentationAction.START, PresentationAction.STOP), presentationActions(host));
+        TechniqueReference reference = TechniqueRegistry.reference(definition);
+        for (EffectIntent effect : host.effects) {
+            assertEquals(effect.getEffectId(), reference, effect.getTechnique());
         }
     }
 

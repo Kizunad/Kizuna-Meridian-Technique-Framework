@@ -184,6 +184,8 @@ public final class TechniqueStage7Test {
         assertEquals(quantity(RANGE, Unit.METER), active.getTargetLockDistance());
         assertEquals(1, host.effects.size());
         assertTrue(host.effects.getFirst().hasTargetLock());
+        TechniqueReference reference = TechniqueRegistry.reference(definition);
+        assertEquals(reference, host.effects.getFirst().getTechnique());
         host.nowMillis = REFERENCE_SHOT + 1;
         service.tick();
         List<EffectIntent> shots = host.effects.stream().filter(EffectIntent::hasLaunchProjectile).toList();
@@ -191,6 +193,7 @@ public final class TechniqueStage7Test {
         assertEquals(WARMUP, shots.getFirst().getScheduledMillis());
         assertTrue(shots.getFirst().getLockTarget());
         assertEquals(Hand.OFF_HAND, shots.getFirst().getSelectedHand());
+        assertEquals(reference, shots.getFirst().getTechnique());
         int delivered = host.effects.size();
         service.tick();
         assertEquals(delivered, host.effects.size());

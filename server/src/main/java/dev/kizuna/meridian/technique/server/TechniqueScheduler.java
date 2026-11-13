@@ -294,6 +294,7 @@ public final class TechniqueScheduler {
         int index = context.index();
         EffectIntent.Builder intent = EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
+                .setTechnique(active.getRequest().getTechnique())
                 .setTargetId(active.getRequest().getTargetId())
                 .setEffectId(context.effectId())
                 .setScheduledMillis(addTime(active.getStartedMillis(), context.scheduledOffset()))
@@ -412,6 +413,7 @@ public final class TechniqueScheduler {
                 .build();
         return EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
+                .setTechnique(active.getRequest().getTechnique())
                 .setTargetId(active.getRequest().getTargetId())
                 .setEffectId("target_lock")
                 .setScheduledMillis(active.getStartedMillis())
@@ -449,6 +451,7 @@ public final class TechniqueScheduler {
                 .build();
         return EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
+                .setTechnique(active.getRequest().getTechnique())
                 .setTargetId(active.getRequest().getTargetId())
                 .setDirection(active.getRequest().getDirection())
                 .setEffectId("presentation_stop_" + index)
@@ -473,6 +476,7 @@ public final class TechniqueScheduler {
         }
         return EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
+                .setTechnique(active.getRequest().getTechnique())
                 .setEffectId(effectId)
                 .setScheduledMillis(movementTime(active, action))
                 .setSelectedHand(active.getSelectedHand())

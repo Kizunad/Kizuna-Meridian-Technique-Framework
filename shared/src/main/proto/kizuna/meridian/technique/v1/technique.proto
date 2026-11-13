@@ -786,6 +786,7 @@ message EffectIntent {
   Hand selected_hand = 5; // 施放起手选定；无持物规则时未指定
   int64 scheduled_millis = 6; // 权威身体时钟；迟到 tick 不改变原生效时刻
   optional bool lock_target = 7;
+  TechniqueReference technique = 8; // 调度器填本次施放的精确式，宿主报打中用；旧存档里的清理意图可缺省
   oneof operation {
     Impulse impulse = 10;
     PresentationIntent presentation = 11;

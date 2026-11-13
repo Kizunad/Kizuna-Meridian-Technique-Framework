@@ -267,8 +267,11 @@ public final class TechniqueProtocol {
     }
 
     private static void validateEffectIdentity(EffectIntent intent) {
-        // 所有世界效果共享施放身份、手位、方向与时钟边界。
+        // 所有世界效果共享施放身份、所属式、手位、方向与时钟边界。
         TechniqueValues.castId(intent.getCastId());
+        if (intent.hasTechnique()) {
+            validateReference(intent.getTechnique());
+        }
         if (!intent.getEffectId().isEmpty()) {
             TechniqueValues.localId(intent.getEffectId(), "effect_id");
         }

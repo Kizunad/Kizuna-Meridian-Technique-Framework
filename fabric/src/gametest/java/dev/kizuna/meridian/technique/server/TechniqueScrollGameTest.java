@@ -2,9 +2,15 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.fabric.TechniqueScrollItems;
+import dev.kizuna.meridian.technique.fabric.testing.RecordingConnection;
+import dev.kizuna.meridian.technique.fabric.testing.TestPlayers;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.KeybindContents;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.LevelBasedPermissionSet;
@@ -12,11 +18,16 @@ import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.GameType;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static dev.kizuna.meridian.technique.server.Fixtures.Shape;
 import static dev.kizuna.meridian.technique.server.Fixtures.body;
@@ -94,6 +105,83 @@ public final class TechniqueScrollGameTest {
             release(player);
         }
         context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void scrollTooltipTellsHowToLearn(GameTestHelper context) {
+        // 物品提示最后一行写怎么学、学了卷轴会不会没。
+        List<Component> lines = tooltip(scroll(BASIC));
+        context.assertTrue(translationKey(lines.getLast()).equals("tooltip.meridian_technique.scroll.learn"),
+                "卷轴提示没有写怎么学：" + lines);
+        context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void scrollTooltipShowsTechniqueAndBookNotes(GameTestHelper context) {
+        // 测试语言文件给第一式和整本书各配了一句补充说明：式的接在那一式后面，书的单独一行。
+        List<Component> lines = tooltip(scroll(BASIC));
+        boolean techniqueNote = lines.getFirst().getSiblings().stream()
+                .anyMatch(part -> translationKey(part).equals("technique.sample_scrolls.first.note"));
+        context.assertTrue(techniqueNote, "式的补充说明没有接在式后面：" + lines.getFirst());
+        long bookNotes = lines.stream()
+                .filter(line -> translationKey(line).equals("book.sample_scrolls.book.note"))
+                .count();
+        context.assertTrue(bookNotes == 1, "整本书的补充说明没有单独一行：" + lines);
+        context.succeed();
+    }
+
+    private static List<Component> tooltip(ItemStack stack) {
+        // 与客户端悬停时走同一个物品入口。
+        List<Component> lines = new ArrayList<>();
+        stack.getItem().appendHoverText(stack, Item.TooltipContext.EMPTY, TooltipDisplay.DEFAULT, lines::add,
+                TooltipFlag.NORMAL);
+        return lines;
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void firstLearnedVolumeExplainsSlotsOnce(GameTestHelper context) {
+        // 学会第一卷时聊天里讲怎么放槽位、怎么进架势，两个键名按玩家的按键绑定显示；学第二卷不再讲。
+        ServerPlayer player = TestPlayers.detached(context.getLevel(), "scroll_help");
+        var connection = new RecordingConnection(List.of());
+        TestPlayers.logIn(player, connection);
+        player.setGameMode(GameType.SURVIVAL);
+        TechniqueGameTestHost.bind(player.getUUID(),
+                new MemoryHost(withProgress(body(Shape.TENDRIL), TechniqueState.empty())));
+        try {
+            context.assertTrue(consumed(use(player, scroll(BASIC))), "没学会第一卷");
+            List<Component> first = slotHelps(connection);
+            context.assertTrue(first.size() == 1, "学会第一卷没有恰好讲一次槽位和架势：" + first.size());
+            List<String> keys = Stream.of(((TranslatableContents) first.getFirst().getContents()).getArgs())
+                    .map(argument -> ((KeybindContents) ((Component) argument).getContents()).getName())
+                    .toList();
+            context.assertTrue(keys.equals(List.of("key.kizuna_inventory_ui.workspace", "key.meridian_combat.stance")),
+                    "键名不是按键绑定：" + keys);
+            context.assertTrue(consumed(use(player, scroll(ADVANCED))), "没学会第二卷");
+            context.assertTrue(slotHelps(connection).size() == 1, "学第二卷又讲了一遍");
+        } finally {
+            connection.disconnectFromClient();
+            TechniqueGameTestHost.unbind(player.getUUID());
+        }
+        context.succeed();
+    }
+
+    private static List<Component> slotHelps(RecordingConnection connection) {
+        // 只数聊天栏里的那一句，动作栏的「学会《…》」不算。
+        return connection.packets().stream()
+                .filter(ClientboundSystemChatPacket.class::isInstance)
+                .map(ClientboundSystemChatPacket.class::cast)
+                .filter(packet -> !packet.overlay())
+                .map(ClientboundSystemChatPacket::content)
+                .filter(content -> translationKey(content).equals("help.meridian_technique.slots"))
+                .toList();
+    }
+
+    private static String translationKey(Component text) {
+        // 不是语言键的文字返回空串。
+        if (text.getContents() instanceof TranslatableContents translatable) {
+            return translatable.getKey();
+        }
+        return "";
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)

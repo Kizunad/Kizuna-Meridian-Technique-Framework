@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.fabric.client;
 
+import dev.kizuna.meridian.technique.fabric.TechniqueScrollItem;
 import dev.kizuna.meridian.technique.server.TechniqueScrollCatalog;
 import dev.kizuna.meridian.technique.server.TechniqueScrollText;
 import org.slf4j.Logger;
@@ -185,7 +186,7 @@ final class TechniqueScrollScreen extends Screen {
             }
         }
         appendWrapped(rows, Component.empty(), textWidth, BODY_COLOR);
-        appendWrapped(rows, Component.translatable("screen.meridian_technique.combat_help"), textWidth, DESCRIPTION_COLOR);
+        appendWrapped(rows, TechniqueScrollItem.slotHelp(), textWidth, DESCRIPTION_COLOR);
         return List.copyOf(rows);
     }
 

@@ -151,6 +151,19 @@ public class TechniqueQiPaymentTest {
     }
 
     @Test
+    public void shortageNamesMeridianRequiredPhaseAndTheThinnerQiThatDoesNotCount() {
+        // 试玩反例：经脉里补满了游离态，要气态以上的式照样付不起。说明里要有经脉、要的形态、不算数的那部分。
+        Qi free = new Qi(Qi.QiAttribute.NONE, QI_AMOUNT, FREE_DENSITY);
+        BodySnapshot onlyFree = withInventory(body(Shape.TENDRIL), new QiInventory(List.of(free)));
+        TechniqueDefinition definition = withCost(flexible(QiPhase.GAS, COST_QI));
+        CastOutcome told = new TechniqueCasting(registry(definition))
+                .cast(new MemoryHost(onlyFree), request(onlyFree, "only-free"));
+        assertEquals(INSUFFICIENT_QI, told.getFailure());
+        assertEquals("测试经脉的真元不够：要气态以上 " + TechniqueScrollText.decimalText(COST_QI) + "，可付 0；另有游离态 "
+                + TechniqueScrollText.decimalText(QI_AMOUNT) + "，不算", told.getReason());
+    }
+
+    @Test
     public void elementMinimumPaysOnlyNamedAttributeAndAcceptsHigherPhase() {
         // 本行模式只扣指定属性；液态水满足气态下限，库存里的别的属性即使够也不抵价。
         MemoryHost fire = castSuccessfully(body(Shape.TENDRIL), withCost(element(FIRE, QiPhase.FREE, COST_QI)));
@@ -199,7 +212,7 @@ public class TechniqueQiPaymentTest {
         assertUnpaid(shortage, withPairedSource(withCost(balance(RICH_FIRE))), INSUFFICIENT_ATTRIBUTE_QI);
         CastOutcome told = new TechniqueCasting(registry(withPairedSource(withCost(balance(RICH_FIRE)))))
                 .cast(new MemoryHost(shortage), request(shortage, "told"));
-        assertEquals("火行真元不够：要 30，可付 10", told.getReason());
+        assertEquals("测试经脉 等 2 条经脉的火行真元不够：要 30，可付 10", told.getReason());
     }
 
     @Test

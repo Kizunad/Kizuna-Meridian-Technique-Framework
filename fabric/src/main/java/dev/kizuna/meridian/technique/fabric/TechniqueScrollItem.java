@@ -29,6 +29,8 @@ import net.minecraft.world.level.Level;
 /** 卷身份由注册物品固定，右键学习和消耗仅由服务器确认。 */
 public final class TechniqueScrollItem extends Item {
     private static final Logger LOG = LoggerFactory.getLogger("meridian_technique/scroll");
+    private static final String WORKSPACE_KEY = "key.kizuna_inventory_ui.workspace";
+    private static final String STANCE_KEY = "key.meridian_combat.stance";
     private final TechniqueScrollCatalog.Scroll scroll;
 
     TechniqueScrollItem(TechniqueScrollCatalog.Scroll scroll, ResourceKey<Item> key) {
@@ -55,10 +57,23 @@ public final class TechniqueScrollItem extends Item {
         for (var technique : scroll.techniques()) {
             tooltip.accept(techniqueLine(technique));
         }
+        // 整本书共通的规矩（拿什么兵器、磨什么）写在书名键加 .note 里，缺键时不显示。
+        String bookNoteKey = TechniqueScrollText.key("book", scroll.volume().getBookId()) + ".note";
+        if (Language.getInstance().has(bookNoteKey)) {
+            tooltip.accept(Component.translatable(bookNoteKey));
+        }
         List<String> prerequisites = scroll.prerequisites();
         if (!prerequisites.isEmpty()) {
             tooltip.accept(Component.literal("前置卷：" + String.join("、", prerequisites)));
         }
+        tooltip.accept(Component.translatable("tooltip.meridian_technique.scroll.learn"));
+    }
+
+    /** 功法怎么放进槽位、怎么进架势；键名按玩家实际绑定的显示。阅读页末尾和学会第一卷时的聊天共用。 */
+    public static Component slotHelp() {
+        // 两个按键分别登记在库存界面框架和战斗界面附属里，这里只引用按键名。
+        return Component.translatable("help.meridian_technique.slots",
+                Component.keybind(WORKSPACE_KEY), Component.keybind(STANCE_KEY));
     }
 
     @Override
@@ -82,8 +97,19 @@ public final class TechniqueScrollItem extends Item {
         }
         Component message = Component.literal("学会《" + scroll.displayName() + "》：").append(techniqueNames());
         serverPlayer.sendOverlayMessage(message);
+        if (knowsOnlyThisVolume(serverPlayer)) {
+            serverPlayer.sendSystemMessage(slotHelp());
+        }
         TechniqueScrollNetworking.learned(serverPlayer, scroll.volume().getId());
         return InteractionResult.CONSUME;
+    }
+
+    private boolean knowsOnlyThisVolume(ServerPlayer player) {
+        // 学完以后已学的式正好是这一卷的式，说明这是玩家学会的第一卷，这时才讲怎么用。
+        Set<TechniqueReference> known = TechniqueFabric.service().known(player.getUUID()).stream()
+                .map(TechniqueService.KnownEntry::technique)
+                .collect(Collectors.toSet());
+        return known.equals(Set.copyOf(scroll.volume().getTechniquesList()));
     }
 
     private Component learn(ServerPlayer player) {

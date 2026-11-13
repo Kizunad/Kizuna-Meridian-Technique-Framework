@@ -5,5 +5,6 @@
   "screen.meridian_technique.learned": "You have learned this volume's techniques",
   "screen.meridian_technique.close": "Close",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / click outside to close; wheel to scroll",
-  "screen.meridian_technique.combat_help": "Press R to enter combat stance. Use /meridian combat slot set <slot> <technique> to assign a slot; Tab completes learned techniques. Press the slot key to cast."
+  "tooltip.meridian_technique.scroll.learn": "Right-click to learn; the scroll is used up",
+  "help.meridian_technique.slots": "A technique must sit in a slot before you can use it: press %s to open the workspace and drag it into a slot under Cultivation → Technique Setup; then press %s to enter combat stance and press the slot key (the hotbar number keys by default) to cast."
 }

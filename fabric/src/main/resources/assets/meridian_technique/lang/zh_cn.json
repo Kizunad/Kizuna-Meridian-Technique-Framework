@@ -5,5 +5,6 @@
   "screen.meridian_technique.learned": "已学会本卷所载招式",
   "screen.meridian_technique.close": "合上",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / 点击纸外：合上；滚轮翻阅",
-  "screen.meridian_technique.combat_help": "按 R 进入战斗架势。用 /meridian combat slot set <槽号> <功法> 填槽，Tab 可补全已学功法；按对应槽位键施放。"
+  "tooltip.meridian_technique.scroll.learn": "右键学习，学会后卷轴消耗",
+  "help.meridian_technique.slots": "功法要放进槽位才能用：按 %s 打开工作台，在「修炼 → 功法配置」里把功法拖进槽位；再按 %s 进入战斗架势，按槽位键（默认是快捷栏的数字键）施放。"
 }

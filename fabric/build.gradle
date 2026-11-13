@@ -58,8 +58,11 @@ sourceSets {
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
     gametest {
-        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output + project(':server').sourceSets.test.output
-        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output + project(':server').sourceSets.test.output
+        // 登录假玩家和记录发包的夹具与下游仓共用 testFixtures。
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output + project(':server').sourceSets.test.output +
+                sourceSets.testFixtures.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output + project(':server').sourceSets.test.output +
+                sourceSets.testFixtures.output
     }
 }
 

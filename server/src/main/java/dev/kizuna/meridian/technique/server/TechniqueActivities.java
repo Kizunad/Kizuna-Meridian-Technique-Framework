@@ -324,12 +324,15 @@ final class TechniqueActivities {
         var released = new ArrayList<QiInventory>();
         Function<String, QiInventory> balance = moduleId -> replacements.getOrDefault(moduleId,
                 opened(states.get(moduleId)).lumenQi());
+        Map<String, String> names = meridianNames(body);
         for (QiCost cost : costs) {
             BoundSlot slot = slots.get(cost.getSlotId());
-            for (CostAllocation allocation : allocations(cost, slot, balance)) {
+            for (CostAllocation allocation : allocations(cost, slot, balance, names)) {
                 String moduleId = allocation.moduleId();
                 QiInventory previous = balance.apply(moduleId);
-                QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount());
+                var payer = new TechniqueQiPayment.Payer(TechniqueNames.meridians(readable(List.of(moduleId), names)),
+                        slot.getModuleIdsCount() > 1);
+                QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount(), payer);
                 replacements.put(moduleId, QiAccounting.debit(previous, debit));
                 released.add(debit);
             }
@@ -347,6 +350,21 @@ final class TechniqueActivities {
         return new Accounts(List.copyOf(changes), QiInventory.combine(released));
     }
 
+    private static Map<String, String> meridianNames(BodySnapshot body) {
+        // 付不起时要说出是哪条经脉；没有可读名字的经脉不出现在说明里。
+        var names = new LinkedHashMap<String, String>();
+        for (Anatomy.MeridianDefinition meridian : body.structure().meridians()) {
+            names.put(meridian.id().value(), TechniqueScrollText.safeName(meridian.displayName(), ""));
+        }
+        return names;
+    }
+
+    private static List<String> readable(List<String> moduleIds, Map<String, String> names) {
+        // 按经脉 ID 的顺序取名字，说明里先写的总是同一条。
+        return moduleIds.stream().map(moduleId -> names.getOrDefault(moduleId, ""))
+                .filter(name -> !name.isEmpty()).toList();
+    }
+
     private static MeridianState opened(MeridianState state) {
         // 扣费前确认经脉仍已开拓；按余额分摊也先检查全部绑定经脉，再计算可付余额。
         if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
@@ -356,7 +374,8 @@ final class TechniqueActivities {
     }
 
     private static List<CostAllocation> allocations(QiCost cost, BoundSlot slot,
-                                                    Function<String, QiInventory> balance) {
+                                                    Function<String, QiInventory> balance,
+                                                    Map<String, String> names) {
         // EVEN 使用稳定的经脉顺序，最后一条吸收浮点余数，确保总扣费仍等于声明总量。
         List<String> moduleIds = slot.getModuleIdsList().stream()
                 .sorted(Comparator.naturalOrder())
@@ -367,13 +386,14 @@ final class TechniqueActivities {
                     .map(moduleId -> new CostAllocation(moduleId, amount))
                     .toList();
             case EVEN -> evenAllocations(moduleIds, amount);
-            case BY_BALANCE -> balanceAllocations(cost, moduleIds, balance);
+            case BY_BALANCE -> balanceAllocations(cost, moduleIds, balance, names);
             default -> throw TechniqueErrors.rejected(INVALID_STATE);
         };
     }
 
     private static List<CostAllocation> balanceAllocations(QiCost cost, List<String> moduleIds,
-                                                           Function<String, QiInventory> balance) {
+                                                           Function<String, QiInventory> balance,
+                                                           Map<String, String> names) {
         // 各经脉按可付余额比例分担；没有可付余额的经脉不分摊，合计不足时与单脉不足给出同一原因。
         double amount = cost.getAmount().getValue();
         var payable = new LinkedHashMap<String, Double>();
@@ -388,7 +408,9 @@ final class TechniqueActivities {
         double total = payable.values().stream().mapToDouble(Double::doubleValue).sum();
         if (payable.isEmpty() || total < amount) {
             throw TechniqueErrors.rejected(TechniqueQiPayment.shortage(cost),
-                    TechniqueQiPayment.shortageReason(cost, amount, total));
+                    TechniqueQiPayment.shortageReason(cost, amount, total,
+                            new TechniqueQiPayment.Payer(TechniqueNames.meridians(readable(moduleIds, names)), false),
+                            moduleIds.stream().map(balance).toList()));
         }
         // 余额最大的经脉（同额取字典序靠前者）吸收余数和不足最小转移量的小份额。
         String largest = payable.entrySet().stream()

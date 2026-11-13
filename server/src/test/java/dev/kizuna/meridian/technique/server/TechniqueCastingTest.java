@@ -200,7 +200,7 @@ public class TechniqueCastingTest {
 
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "even_poor"));
 
-        assertFailure(outcome, INSUFFICIENT_QI, "真元不够：要 15，可付 10");
+        assertFailure(outcome, INSUFFICIENT_QI, "测试经脉的火行真元不够：这条要气态 15，可付 10");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
     }
@@ -220,7 +220,7 @@ public class TechniqueCastingTest {
         BodySnapshot before = body(Shape.PAIRED);
         var host = new MemoryHost(before);
         CastOutcome outcome = new TechniqueCasting(registry(definition)).cast(host, request(before, "poor"));
-        assertFailure(outcome, INSUFFICIENT_QI, "真元不够：要 70，可付 30");
+        assertFailure(outcome, INSUFFICIENT_QI, "测试经脉的水行真元不够：要液态 70，可付 30");
         assertEquals(before, host.current());
         assertEquals(0, host.activitySubmissions);
         assertEquals(0, host.store.environmentQi().totalQi(), 0);

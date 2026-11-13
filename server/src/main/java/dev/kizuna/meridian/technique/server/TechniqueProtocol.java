@@ -262,6 +262,8 @@ public final class TechniqueProtocol {
                 TechniqueBrewEffects.validateUseBrew(intent.getUseBrew());
             }
             case ORGAN_REFINE -> TechniqueOrganRefines.validateIntent(intent.getOrganRefine());
+            case GRAPPLE -> TechniqueGrapples.validateIntent(intent.getGrapple());
+            case THROW -> TechniqueGrapples.validateIntent(intent.getThrow());
             default -> throw TechniqueErrors.invalid("effect", "缺少或未知世界效果");
         }
     }

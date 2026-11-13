@@ -162,8 +162,9 @@ public final class TechniqueLimbStrikes {
     }
 
     static boolean usesArms(TechniqueDefinition definition) {
-        // 只有出拳掌的肢击才要求书级拳掌规则。
-        return strikes(definition).anyMatch(strike -> strike.getLimbCase() == LimbStrike.LimbCase.ARM);
+        // 出拳掌的肢击和擒、摔都按书级拳掌规则结算。
+        return strikes(definition).anyMatch(strike -> strike.getLimbCase() == LimbStrike.LimbCase.ARM)
+                || TechniqueGrapples.usesGrapple(definition);
     }
 
     static boolean usesLegs(TechniqueDefinition definition) {

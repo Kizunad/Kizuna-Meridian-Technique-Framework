@@ -23,6 +23,12 @@ Fabric 接入原版死亡、实体卸载与玩家下线；其他宿主应在撤�
 阶段与事件时刻向上取整缩放，间隔和持续时间共同拉长；每个原始周期边界单独缩放，避免累计取整丢事件。
 没有绑定组织或旧存档没有速度字段时倍率为 1。
 
+`grapple` 和 `throw` 各是一次附属效果，经 `TechniqueFabric.EFFECT_HANDLER` 交给认领处理器 ID 的附属（袖手拳
+`meridian_villager:grapple`）。意图带起手冻结的书级 `ArmRules`，附属按 `base_damage` × 倍率结算打击。
+擒的时长、一靠时刻和飞行时间按起手冻结的速度缩放；倒地与免摔时长属于被摔的人，不缩放。
+附属用 `CAST_ENDED` 放开该施放擒着的目标；被擒、倒地落在有宿主的目标上时写 `HOLD` / `DOWN` 僵直，
+没有宿主的原版生物由附属自己锁。
+
 `organ_refine` 每批是一次附属效果，经 `TechniqueFabric.EFFECT_HANDLER` 交给认领该配方族的宿主，
 `cast_id` 与 `effect_id` 组成幂等身份。批次间隔与窗口终点同样按起手冻结的速度缩放。
 施放结束或打断后功法库不再交付后续批次；宿主用 `TechniqueFabric.CAST_ENDED` 释放该施放占用的器官任务，
@@ -113,7 +119,10 @@ service.stagger(entity.getUUID(),
 `addStaggerListener` 在开始、延长和结束时通知
 `StaggerChanged(entity, remainingMillis, movementMultiplier, kind)`，该种类结束通知为 `0 / 1.0`。
 Fabric 层给 `HIT` 和 `DOWN` 添加临时移动减速，分别用 `meridian_technique:stagger` 和
-`meridian_technique:stagger_down` 两个属性修饰符；`CHARM`、`HOLD` 的定身和动作门禁由宿主执行（Human 对 `CHARM` 把移动/跳跃属性归零）。
+`meridian_technique:stagger_down` 两个属性修饰符；`CHARM`、`HOLD` 的定身和动作门禁由宿主执行。
+Human 对 `CHARM`、`HOLD` 把移动/跳跃属性归零，三种都锁攻击、用物品、挖掘和施放，`DOWN` 另把玩家摆成爬行姿势；
+Threatening 对这三种都停生物大脑，保留重力和击退。
+`TechniqueStaggers.downed(entity)` 按倒地修饰判断是否倒地；移速属性随原版同步，客户端也能据此摆姿势、画倒地。
 任一种结束都不会撤掉另一种属性。
 移动倍率换成移速属性修饰由 Fabric 层的 `TechniqueMovementSpeed` 换算：玩家照倍率加，
 怪物（`Mob`）按 √倍率 加。原版 `Mob.setSpeed` 同时把前进输入设成同一个值，怪物的地面加速度跟移速属性的

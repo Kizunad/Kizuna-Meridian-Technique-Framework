@@ -881,6 +881,7 @@ public final class TechniqueService {
             String requestId = effectRequestId(effect);
             if (!effect.hasSound()) {
                 if (effect.hasBlockWork() || effect.hasUseBrew() || effect.hasOrganRefine()
+                        || effect.hasGrapple() || effect.hasThrow()
                         || effect.hasLaunchProjectile() && effect.getLaunchProjectile().getProjectile().hasBrew()) {
                     HeldItems heldItems = session.host.inspect().heldItems();
                     EffectHandling handling = handleExtensionEffect(entityUuid, effect, heldItems);

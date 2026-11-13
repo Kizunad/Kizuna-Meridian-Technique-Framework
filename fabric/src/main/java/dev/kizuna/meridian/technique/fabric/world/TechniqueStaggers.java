@@ -63,6 +63,13 @@ public final class TechniqueStaggers {
         }
     }
 
+    /** 倒地僵直期间带着倒地减速修饰；移速属性随原版同步，客户端据此摆爬行姿势、画倒地。 */
+    public static boolean downed(LivingEntity entity) {
+        // 只认倒地这一个修饰身份，受击减速不算倒地。
+        AttributeInstance speed = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+        return speed != null && speed.hasModifier(DOWN_MODIFIER_ID);
+    }
+
     static LivingEntity find(MinecraftServer server, UUID entityUuid) {
         // 服务只记实体 UUID，逐个世界查找当前实例；施放者声音也按同一方式找锚点。
         for (ServerLevel world : server.getAllLevels()) {

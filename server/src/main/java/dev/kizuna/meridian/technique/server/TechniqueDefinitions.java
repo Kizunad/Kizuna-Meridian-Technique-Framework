@@ -266,12 +266,7 @@ final class TechniqueDefinitions {
             switch (effect.getOperationCase()) {
                 case TISSUE_MODIFIER -> validateModifier(slots, definition, effect);
                 case WORK -> validateScheduledWork(addons, templates, slots, effect, durationMillis);
-                case BLOCK_WORK -> {
-                    TechniqueBrewEffects.validateBlockWork(effect.getBlockWork());
-                    if (effect.getBlockWork().getDurationMillis() > durationMillis - atMillis) {
-                        throw TechniqueErrors.invalid("block_work.duration_millis", "周期效果超出施放时长");
-                    }
-                }
+                case BLOCK_WORK -> validateBlockWork(effect, durationMillis);
                 case USE_BREW -> TechniqueBrewEffects.validateUseBrew(effect.getUseBrew());
                 case ORGAN_REFINE -> validateOrganRefine(slots, effect, durationMillis);
                 case ELEMENTAL_INFUSION -> TechniqueInfusions.validate(effect.getElementalInfusion());
@@ -280,20 +275,32 @@ final class TechniqueDefinitions {
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
                 case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
                 case LIMB_STRIKE -> TechniqueLimbStrikes.validate(effect.getLimbStrike());
+                case GRAPPLE -> TechniqueGrapples.validateWithin(effect, durationMillis);
+                case THROW -> TechniqueGrapples.validate(effect.getThrow());
                 case BREAK_BLOCKS -> TechniqueCombatEffects.validateBlocks(effect.getBreakBlocks());
                 case LAUNCH_PROJECTILE -> TechniqueProjectiles.validate(effect.getLaunchProjectile());
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
-                case PRESENTATION -> {
-                    PresentationEffect presentation = effect.getPresentation();
-                    id(presentation.getId(), "effect.presentation.id");
-                    millis(presentation.getStartMillis(), "effect.presentation.start_millis");
-                    if (presentation.getDurationValue() <= 0
-                            || presentation.getDuration() == PresentationDuration.UNRECOGNIZED) {
-                        throw TechniqueErrors.invalid("effect.presentation.duration", "未知表现持续规则");
-                    }
-                }
+                case PRESENTATION -> validatePresentationEffect(effect.getPresentation());
                 default -> throw TechniqueErrors.invalid("effects", "未知或缺少算子");
             }
+        }
+    }
+
+    private static void validateBlockWork(TechniqueEffect effect, long durationMillis) {
+        // 方块做功的周期从效果时刻起算，整段都要落在施放时长里。
+        TechniqueBrewEffects.validateBlockWork(effect.getBlockWork());
+        if (effect.getBlockWork().getDurationMillis() > durationMillis - effect.getAtMillis()) {
+            throw TechniqueErrors.invalid("block_work.duration_millis", "周期效果超出施放时长");
+        }
+    }
+
+    private static void validatePresentationEffect(PresentationEffect presentation) {
+        // 表现效果要有 ID、起始毫秒和已知的持续规则。
+        id(presentation.getId(), "effect.presentation.id");
+        millis(presentation.getStartMillis(), "effect.presentation.start_millis");
+        if (presentation.getDurationValue() <= 0
+                || presentation.getDuration() == PresentationDuration.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("effect.presentation.duration", "未知表现持续规则");
         }
     }
 

@@ -458,6 +458,15 @@ message LimbStrikeIntent {
   repeated SoundCue hit_sounds = 3;
   ArmRules arm_rules = 4; // 出拳掌时填写
 }
+// 擒和摔都带上起手保存的书级拳掌规则，处理器按它算伤害。
+message GrappleIntent {
+  Grapple grapple = 1;
+  ArmRules arm_rules = 2;
+}
+message ThrowIntent {
+  Throw throw = 1;
+  ArmRules arm_rules = 2;
+}
 message BreakBlocksIntent {
   BreakBlocks blocks = 1;
   HeldItemRules held_item_rules = 2;
@@ -537,6 +546,8 @@ message TechniqueEffect {
     OrganRefine organ_refine = 23;
     ElementalInfusion elemental_infusion = 24; // 到时由本库写进身体，不产生世界效果意图
     LimbStrike limb_strike = 25; // 同一式不能和 leg_strike 混用
+    Grapple grapple = 26; // 附属处理器认领；所属书须声明拳掌规则
+    Throw throw = 27; // 附属处理器认领；只摔同一施放擒住的目标
   }
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
@@ -575,6 +586,33 @@ message BlockWork {
   Quantity maximum_distance = 3; // METER
   int64 interval_millis = 4;
   int64 duration_millis = 5;
+}
+// 擒：处理器选单体目标拉到施放者身前并锁住，到时放手；施放结束或被打断时立刻放手。
+// 摔不动的目标不擒，改在 lean.delay_millis 后用肩撞开。
+message Grapple {
+  string processor_id = 1;
+  Quantity maximum_distance = 2; // METER，(0, 64]
+  Quantity hold_distance = 3; // METER，(0, maximum_distance]，拉到施放者身前的距离
+  int64 duration_millis = 4; // 正数，不超过施放剩余时长；随施放速度缩放
+  ThrowLean lean = 5;
+}
+// 一靠：按书级空手伤害乘倍率打一下并推开，处理器另给施放者提示摔不动。
+message ThrowLean {
+  int64 delay_millis = 1; // 相对擒的时刻，非负，不晚于擒的时长；随施放速度缩放
+  string damage_type_id = 2;
+  Quantity multiplier = 3; // RATIO，(0, 10]
+  Quantity push = 4; // RATIO，[0, 10]
+}
+// 摔：把同一施放擒住的目标沿弧线抛过施放者头顶，落在身后；落地按书级空手伤害结算一次并倒地。
+message Throw {
+  string processor_id = 1;
+  int64 flight_millis = 2; // 正数，随施放速度缩放
+  Quantity landing_distance = 3; // METER，(0, 64]，落在施放者身后的距离
+  Quantity apex_height = 4; // METER，[0, 16]，最高点高出施放者头顶
+  string damage_type_id = 5;
+  Quantity multiplier = 6; // RATIO，(0, 10]
+  int64 down_millis = 7; // 正数，倒地时长，不随施放速度缩放
+  int64 down_immunity_millis = 8; // 非负，起来以后这段时间内不会再被摔倒
 }
 message UseBrew {
   string processor_id = 1;
@@ -802,6 +840,8 @@ message EffectIntent {
     UseBrew use_brew = 22;
     OrganRefineIntent organ_refine = 23;
     LimbStrikeIntent limb_strike = 24;
+    GrappleIntent grapple = 25;
+    ThrowIntent throw = 26;
   }
 }
 message OrganRefineIntent {

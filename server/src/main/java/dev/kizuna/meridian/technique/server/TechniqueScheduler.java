@@ -286,12 +286,9 @@ public final class TechniqueScheduler {
         return definition.getTempoPeak().getValue();
     }
 
-    private static EffectIntent effectIntent(EffectContext context) {
+    private static EffectIntent.Builder intentHeader(EffectContext context) {
         // 目标和输入方向沿用起手请求；宿主决定实体朝向和实际世界变化。
-        TechniqueDefinition definition = context.definition();
         ActiveCast active = context.active();
-        TechniqueEffect effect = context.effect();
-        int index = context.index();
         EffectIntent.Builder intent = EffectIntent.newBuilder()
                 .setCastId(active.getRequest().getCastId())
                 .setTechnique(active.getRequest().getTechnique())
@@ -303,6 +300,16 @@ public final class TechniqueScheduler {
         if (active.hasLockTarget()) {
             intent.setLockTarget(active.getLockTarget());
         }
+        return intent;
+    }
+
+    private static EffectIntent effectIntent(EffectContext context) {
+        // 公共头取自起手请求，再按效果种类填一种世界意图。
+        TechniqueDefinition definition = context.definition();
+        ActiveCast active = context.active();
+        TechniqueEffect effect = context.effect();
+        int index = context.index();
+        EffectIntent.Builder intent = intentHeader(context);
         switch (effect.getOperationCase()) {
             case IMPULSE -> intent.setImpulse(resolvedImpulse(active, effect.getImpulse()));
             case STATUS_BENEFIT -> intent.setStatusBenefit(effect.getStatusBenefit());
@@ -320,6 +327,8 @@ public final class TechniqueScheduler {
             case LAUNCH_PROJECTILE -> intent.setLaunchProjectile(
                     launchProjectile(active, effect.getLaunchProjectile()));
             case BLOCK_WORK -> intent.setBlockWork(effect.getBlockWork());
+            case GRAPPLE -> intent.setGrapple(TechniqueGrapples.intent(effect.getGrapple(), active.getArmRules()));
+            case THROW -> intent.setThrow(TechniqueGrapples.intent(effect.getThrow(), active.getArmRules()));
             case USE_BREW -> intent.setUseBrew(effect.getUseBrew());
             case ORGAN_REFINE -> intent.setOrganRefine(
                     TechniqueOrganRefines.intent(active, definition.getEffects(index), context.tempo()));
@@ -511,6 +520,12 @@ public final class TechniqueScheduler {
             TechniqueEffect.Builder projected = effect.toBuilder().setAtMillis(projectedAt);
             if (effect.hasBlockWork()) {
                 projected.setBlockWork(TechniqueTempo.scale(effect.getBlockWork(), tempo));
+            }
+            if (effect.hasGrapple()) {
+                projected.setGrapple(TechniqueGrapples.scale(effect.getGrapple(), tempo));
+            }
+            if (effect.hasThrow()) {
+                projected.setThrow(TechniqueGrapples.scale(effect.getThrow(), tempo));
             }
             if (effect.hasPresentation()) {
                 PresentationEffect presentation = effect.getPresentation().toBuilder()

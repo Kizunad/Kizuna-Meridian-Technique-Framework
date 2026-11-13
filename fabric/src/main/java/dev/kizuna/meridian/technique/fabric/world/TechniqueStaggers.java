@@ -13,7 +13,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import java.util.HashSet;
 import java.util.List;
@@ -83,8 +82,8 @@ public final class TechniqueStaggers {
         speed.removeModifier(modifierId);
         if (event.remainingMillis() > 0) {
             // 26.2 的修饰按 ID 识别，不再有 UUID 和名字；受击的 ID 沿用原来的名字。
-            var modifier = new AttributeModifier(modifierId,
-                    event.movementMultiplier() - 1, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
+            // 倍率经统一换算：玩家照倍率，怪物按 √倍率，实际移速都是倍率倍。
+            var modifier = TechniqueMovementSpeed.modifier(entity, modifierId, event.movementMultiplier());
             speed.addTransientModifier(modifier);
         }
         if (entity instanceof ServerPlayer player) {

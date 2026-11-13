@@ -114,7 +114,12 @@ service.stagger(entity.getUUID(),
 `StaggerChanged(entity, remainingMillis, movementMultiplier, kind)`，该种类结束通知为 `0 / 1.0`。
 Fabric 层给 `HIT` 和 `DOWN` 添加临时移动减速，分别用 `meridian_technique:stagger` 和
 `meridian_technique:stagger_down` 两个属性修饰符；`CHARM`、`HOLD` 的定身和动作门禁由宿主执行（Human 对 `CHARM` 把移动/跳跃属性归零）。
-任一种结束都不会撤掉另一种属性。`meridian_technique:stagger` 网络载荷始终同步各种的最大剩余时间
+任一种结束都不会撤掉另一种属性。
+移动倍率换成移速属性修饰由 Fabric 层的 `TechniqueMovementSpeed` 换算：玩家照倍率加，
+怪物（`Mob`）按 √倍率 加。原版 `Mob.setSpeed` 同时把前进输入设成同一个值，怪物的地面加速度跟移速属性的
+平方成正比；开平方后两边的实际移速都是倍率倍。僵直减速，以及怪物宿主的施放限速和身体 tempo 都经这一层；
+玩家宿主直接照倍率加，和这一层对玩家的换算相同。原版药水照原版，不经这一层。
+`meridian_technique:stagger` 网络载荷始终同步各种的最大剩余时间
 （`StaggerStatus` protobuf）发给追踪者和本人，客户端 `TechniqueStaggerClient.remainingMillis` 只供界面读取。
 卸载、下线和死亡清除全部僵直记录。
 
@@ -308,8 +313,9 @@ Framework 现有接口限制已记录，未修改依赖：
 提前终止停止已开始的持续型及一次性表现。缺省倍率 1 的式在首 tick 下发起手效果；
 `movement_speed_multiplier<1` 的式在起手活动成功后立即下发 LOCK、倍率及同刻效果，
 收势、承接、打断、死亡、卸载、下线或恢复时 UNLOCK。两种效果保留原稳定身份。
-宿主按 cast ID 派生属性 UUID，用 `MULTIPLY_TOTAL=(倍率-1)` 管理临时移速属性并同步客户端；
-重复操作去重，移除不存在的修正无副作用。倍率必须在 [0,1] 内，缺省为 1；0 表示站定，不拦冲量或跳跃。
+宿主按 cast ID 派生属性 UUID，用 `MULTIPLY_TOTAL=(属性倍率-1)` 管理临时移速属性并同步客户端；
+属性倍率玩家就是倍率，怪物是 √倍率（见上文僵直一节的 `TechniqueMovementSpeed`）。重复操作去重，移除不存在的修正无副作用。
+倍率必须在 [0,1] 内，缺省为 1；0 表示站定，不拦冲量或跳跃。
 玩家宿主在 LOCK 到 UNLOCK 之间拦原版输入：左键攻击实体、攻击方块与挥手包一律拦；右键（用物品、放方块、
 与方块或实体交互）在 LOCK 的 `allow_use_while_casting=false` 时拦，为 true 时放行。Human 在同一处注册这几个回调。
 本库只发意图，真实属性、动画和速度执行仍属宿主。

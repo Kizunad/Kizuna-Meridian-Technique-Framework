@@ -119,6 +119,7 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
         TechniqueScrollDrops.register();
+        VolumeLearnedTrigger.register();
         TechniqueLeapNetworking.initialize();
         // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
         TechniqueStaggers.CHANNEL.registerClientbound();

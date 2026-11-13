@@ -1,0 +1,5 @@
+{
+  "criteria": {
+    "learned": { "conditions": { "volume": "sample_scrolls:advanced" }, "trigger": "meridian_technique:volume_learned" }
+  }
+}

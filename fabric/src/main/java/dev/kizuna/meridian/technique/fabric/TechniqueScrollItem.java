@@ -101,6 +101,7 @@ public final class TechniqueScrollItem extends Item {
             serverPlayer.sendSystemMessage(slotHelp());
         }
         TechniqueScrollNetworking.learned(serverPlayer, scroll.volume().getId());
+        VolumeLearnedTrigger.TRIGGER.trigger(serverPlayer, scroll.volume().getId());
         return InteractionResult.CONSUME;
     }
 

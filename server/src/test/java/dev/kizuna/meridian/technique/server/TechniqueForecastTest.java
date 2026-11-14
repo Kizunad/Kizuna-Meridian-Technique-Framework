@@ -15,6 +15,12 @@ import static org.junit.Assert.assertTrue;
 public class TechniqueForecastTest {
     private static final long STARTED = 1000;
     private static final long PARTWAY = 40;
+    private static final long EARLY = 300;
+    private static final long LATE = 900;
+    private static final double SHORT_REACH = 2;
+    private static final double LONG_REACH = 2.5;
+    private static final double SHOT_REACH = 24;
+    private static final double TOLERANCE = 1e-9;
 
     @Test
     public void warmupForecastListsFutureStrikesAndIsInterruptible() {
@@ -68,6 +74,59 @@ public class TechniqueForecastTest {
         // 首击取最早的打击效果；没有打击的式没有首击。
         assertEquals(WARMUP, TechniqueForecasts.firstStrike(first()).orElseThrow().millis());
         assertTrue(TechniqueForecasts.firstStrike(definition()).isEmpty());
+    }
+
+    @Test
+    public void firstHitCoversEveryStrikingEffectWithItsOwnReach() {
+        // 拳掌、腿、擒各取自己的距离，都要近身；投射物取 ai_hints 的最远距离，不用近身；兵器同首击。
+        var limb = TechniqueEffect.newBuilder().setAtMillis(EARLY)
+                .setLimbStrike(LimbStrike.newBuilder().setDistance(meters(LONG_REACH))).build();
+        var leg = TechniqueEffect.newBuilder().setAtMillis(EARLY)
+                .setLegStrike(LegStrike.newBuilder().setDistance(meters(LONG_REACH))).build();
+        var grapple = TechniqueEffect.newBuilder().setAtMillis(EARLY)
+                .setGrapple(Grapple.newBuilder().setMaximumDistance(meters(SHORT_REACH))).build();
+        var shot = TechniqueEffect.newBuilder().setAtMillis(EARLY)
+                .setLaunchProjectile(LaunchProjectile.getDefaultInstance()).build();
+        assertEquals(new TechniqueForecasts.FirstHit(EARLY, LONG_REACH, true), firstHit(limb));
+        assertEquals(new TechniqueForecasts.FirstHit(EARLY, LONG_REACH, true), firstHit(leg));
+        assertEquals(new TechniqueForecasts.FirstHit(EARLY, SHORT_REACH, true), firstHit(grapple));
+        assertEquals(new TechniqueForecasts.FirstHit(EARLY, SHOT_REACH, false), firstHit(shot));
+        var weapon = TechniqueForecasts.firstHit(first()).orElseThrow();
+        var strike = TechniqueForecasts.firstStrike(first()).orElseThrow();
+        assertEquals(strike.millis(), weapon.millis());
+        assertEquals(strike.strike().getDistance().getValue(), weapon.reach(), TOLERANCE);
+        assertTrue(weapon.close());
+    }
+
+    @Test
+    public void firstHitIsTheEarliestAndIgnoresEffectsThatHitNobody() {
+        // 擒在前、摔在后的式按擒算；摔不单独算；表现、冲量这些不打人的效果不算，全是这些的式没有这一下。
+        var grapple = TechniqueEffect.newBuilder().setAtMillis(EARLY)
+                .setGrapple(Grapple.newBuilder().setMaximumDistance(meters(SHORT_REACH))).build();
+        var lateFist = TechniqueEffect.newBuilder().setAtMillis(LATE)
+                .setLimbStrike(LimbStrike.newBuilder().setDistance(meters(LONG_REACH))).build();
+        var toss = TechniqueEffect.newBuilder().setAtMillis(LATE).setThrow(Throw.getDefaultInstance()).build();
+        var pose = TechniqueEffect.newBuilder().setAtMillis(0)
+                .setPresentation(PresentationEffect.getDefaultInstance()).build();
+        assertEquals(new TechniqueForecasts.FirstHit(EARLY, SHORT_REACH, true), firstHit(pose, lateFist, grapple, toss));
+        assertTrue(TechniqueForecasts.firstHit(hinted(pose, toss)).isEmpty());
+        assertTrue(TechniqueForecasts.firstHit(definition()).isEmpty());
+    }
+
+    private static TechniqueForecasts.FirstHit firstHit(TechniqueEffect... effects) {
+        return TechniqueForecasts.firstHit(hinted(effects)).orElseThrow();
+    }
+
+    private static TechniqueDefinition hinted(TechniqueEffect... effects) {
+        // 只带 ai_hints 最远距离和给定效果的定义；首击查询不看别的字段。
+        return TechniqueDefinition.newBuilder()
+                .setAiHints(AiHints.newBuilder().setMaximumDistance(meters(SHOT_REACH)))
+                .addAllEffects(List.of(effects))
+                .build();
+    }
+
+    private static Quantity meters(double value) {
+        return Quantity.newBuilder().setValue(value).setUnit(Unit.METER).build();
     }
 
     private static List<Long> hits(TechniqueForecasts.CastForecast forecast) {

@@ -34,6 +34,9 @@ public final class TechniqueForecasts {
     /** 普通起手后的第一次打击：相对起手的毫秒与打击形状。 */
     public record FirstStrike(long millis, WeaponStrike strike) { }
 
+    /** 一式普通起手后最早打到人的那一下：相对起手的毫秒、够得着的距离（米），以及是不是要站到近处才打得到。 */
+    public record FirstHit(long millis, double reach, boolean close) { }
+
     public static Optional<CastForecast> forecast(TechniqueRegistry registry, TechniqueProgress progress,
                                                   long nowMillis) {
         // 没有施放、已过收势或该版本已不在目录中时没有预报。
@@ -59,6 +62,33 @@ public final class TechniqueForecasts {
                 .filter(TechniqueEffect::hasWeaponStrike)
                 .min(Comparator.comparingLong(TechniqueEffect::getAtMillis))
                 .map(effect -> new FirstStrike(effect.getAtMillis(), effect.getWeaponStrike()));
+    }
+
+    public static Optional<FirstHit> firstHit(TechniqueDefinition definition) {
+        // 宿主 AI 判断「这一式会不会打人、多远够得着」只看这里，不按效果类型各写一份；
+        // 没有打人效果的式为空。承接只会让这一下更早，按普通起手估是保守值。
+        return definition.getEffectsList().stream()
+                .flatMap(effect -> hit(definition, effect).stream())
+                .min(Comparator.comparingLong(FirstHit::millis));
+    }
+
+    private static Optional<FirstHit> hit(TechniqueDefinition definition, TechniqueEffect effect) {
+        // 兵器、腿、拳掌取各自的打击距离，擒取抓得到的最远距离，都要站到近处；
+        // 投射物取 ai_hints 的最远距离，不用近身。摔接在擒后面，不单独算。
+        long millis = effect.getAtMillis();
+        return switch (effect.getOperationCase()) {
+            case WEAPON_STRIKE -> Optional.of(new FirstHit(millis, effect.getWeaponStrike().getDistance().getValue(),
+                    true /* close */));
+            case LEG_STRIKE -> Optional.of(new FirstHit(millis, effect.getLegStrike().getDistance().getValue(),
+                    true /* close */));
+            case LIMB_STRIKE -> Optional.of(new FirstHit(millis, effect.getLimbStrike().getDistance().getValue(),
+                    true /* close */));
+            case GRAPPLE -> Optional.of(new FirstHit(millis, effect.getGrapple().getMaximumDistance().getValue(),
+                    true /* close */));
+            case LAUNCH_PROJECTILE -> Optional.of(new FirstHit(millis,
+                    definition.getAiHints().getMaximumDistance().getValue(), false /* close */));
+            default -> Optional.empty();
+        };
     }
 
     private static List<StrikeWindow> strikes(TechniqueDefinition definition, ActiveCast active, long nowMillis) {

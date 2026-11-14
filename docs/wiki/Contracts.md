@@ -405,6 +405,10 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
   起手时刻加偏移减剪辑起点，剪辑起点前的打击不发。没有施放、已过收势或该版本不在目录时为空。
   只有起手期且 `ActiveCast.interruptible_by_damage` 为真时可打断。
 - `TechniqueForecasts.firstStrike(definition)` 给出普通起手后的第一次打击；承接只会更早，按普通起手估是保守值。
+- `TechniqueForecasts.firstHit(definition)` 回答「这一式会不会打人、最早哪一刻、多远够得着、要不要近身」，
+  宿主 AI 认打击只看它，不按效果类型各写一份。兵器、腿、拳掌（`limb_strike`）取各自的 `distance`，
+  擒（`grapple`）取 `maximum_distance`，这四种都要近身；投射物取 `ai_hints.maximum_distance`，不用近身；
+  摔接在擒后面，不单独算；别的效果不算打人，全是这些的式为空。
 - `TechniqueHeldItems.find(rules, items)` 与 `select` 同一规则选手；没有可用手时为空，不抛拒绝。
 
 ## 阶段 7：射击与相对手臂

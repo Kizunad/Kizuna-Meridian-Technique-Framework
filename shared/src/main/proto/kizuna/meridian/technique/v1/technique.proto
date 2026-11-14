@@ -55,6 +55,23 @@ message ScrollDrop {
   string entity_type = 1; // 实体类型 ID，namespace:path，须已注册
   double chance = 2; // (0, 1]
 }
+// 功法谱来源暗示：服务端各附属登记「谁身上有这一卷」，进服和来源变动时整份发给客户端；只用来拼展示句子。
+message VolumeSources { repeated VolumeSource sources = 1; } // 至多 4096 项
+message VolumeSource {
+  string volume_id = 1; // 已登记卷轴的卷 ID
+  oneof kind {
+    VolumeKnower knower = 2;
+    VolumeFoe foe = 3;
+  }
+}
+// 某类生物出生在某一境时会这一卷；share 是那一境里会它的占比 (0, 1]。
+message VolumeKnower {
+  string entity_type = 1; // 实体类型 ID，namespace:path
+  kizuna.meridian.v1.Realm realm = 2;
+  double share = 3;
+}
+// 某个出身的仇家身上带着这一卷；origin_key 是出身显示名的语言键。
+message VolumeFoe { string origin_key = 1; }
 enum BaseDamageSource {
   BASE_DAMAGE_SOURCE_UNSPECIFIED = 0;
   ITEM_ATTACK_DAMAGE = 1;

@@ -58,7 +58,14 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 | 缺前置卷拒绝且不消耗、不写身体 | `TechniqueScrollGameTest.missingPrerequisiteRejectsWithoutConsumingOrWriting` |
 | 创造模式按前置学会两卷且不消耗 | `TechniqueScrollGameTest.creativeLearnsBothVolumesWithoutConsuming` |
 | 无身体玩家拒绝且不消耗 | `TechniqueScrollGameTest.unboundPlayerRejectsWithoutConsuming` |
-| 实际注册表、创造展示与搜索列表、首卷图标、晚到目录仍可服务端查询 | `TechniqueScrollGameTest.creativeGroupContainsEveryEarlyVolumeInBookOrder` |
+| 实际注册表、创造展示与搜索列表（功法谱在最前）、首卷图标、晚到目录仍可服务端查询 | `TechniqueScrollGameTest.creativeGroupContainsEveryEarlyVolumeInBookOrder` |
+| 一本书学一卷不算凑齐、学齐算，所有书学齐才算全谱；命令学会也算 | `TechniqueAdvancementGameTest.completingBooksCompletesBookThenCodexAdvancements` |
+| 生存读掉手上最后一卷，学会它的进度奖励留在读空的主手里 | `TechniqueAdvancementGameTest.rewardForLastScrollStaysInTheEmptiedHand` |
+| 右键功法谱不消耗、不叠放 | `TechniqueCodexGameTest.usingCodexKeepsTheBookInHand` |
+| 书加线经服务器配方表合出一本功法谱 | `TechniqueCodexGameTest.bookAndStringCraftOneCodex` |
+| 来源核对放行完整条目，拦下目录外的卷、缺境界、占比越界、无出身、无类别，报错带登记方 | `TechniqueCodexGameTest.sourceCheckRejectsIncompleteEntries` |
+| 登记的来源进汇总，没卷轴的卷不发，同一身份重复登记报错 | `TechniqueCodexGameTest.registeredSourcesReachTheCollectedList` |
+| 书按卷轴顺序、每式精确版本都学会才算凑齐，全谱要每本有卷轴的书 | `TechniqueCodexBooksTest` |
 | 缺数值、缺单位拒绝 | `TechniqueRegistryTest.rejectsMissingUnits` |
 | 未指定真元分配方式拒绝 | `TechniqueRegistryTest.rejectsUnspecifiedQiDistribution` |
 | 非有限、负费用、过小/过大费用、冲量速度和时间越界拒绝 | `TechniqueRegistryTest.rejectsOutOfRangeParameters` |

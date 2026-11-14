@@ -48,11 +48,14 @@ public final class TechniqueScrollItems {
     }
 
     private static void registerGroup(List<TechniqueScrollItem> ordered) {
-        // 图标使用第一卷；空目录仍登记固定栏身份并显示原版空栏规则。
+        // 图标使用第一卷；功法谱排在最前，后面是各卷。
         CreativeModeTab created = FabricCreativeModeTab.builder()
                 .title(Component.translatable("itemGroup.meridian_technique.techniques"))
                 .icon(() -> icon(ordered))
-                .displayItems((context, entries) -> ordered.forEach(entries::accept))
+                .displayItems((context, entries) -> {
+                    entries.accept(TechniqueCodex.item());
+                    ordered.forEach(entries::accept);
+                })
                 .build();
         group = Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, GROUP_ID, created);
     }

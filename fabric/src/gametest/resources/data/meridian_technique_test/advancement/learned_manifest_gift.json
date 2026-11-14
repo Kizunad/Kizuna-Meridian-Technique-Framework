@@ -1,0 +1,6 @@
+{
+  "criteria": {
+    "learned": { "conditions": { "volume": "sample_manifest:volume" }, "trigger": "meridian_technique:volume_learned" }
+  },
+  "rewards": { "loot": [ "meridian_technique_test:learned_manifest_gift" ] }
+}

@@ -116,10 +116,15 @@ public final class TechniqueFabric implements ModInitializer {
         // 两端在注册表冻结前固定卷轴身份；身体服务仍只由服务端生命周期创建。
         var resources = new TechniqueAddonResources(TechniqueFabric.class.getClassLoader());
         catalogs = TechniqueCatalogDiscovery.prepare(resources::registry);
+        TechniqueCodex.register();
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
         TechniqueScrollDrops.register();
         VolumeLearnedTrigger.register();
+        BookCompletedTrigger.register();
+        CodexCompletedTrigger.register();
+        TechniqueCodexProgress.initialize();
+        TechniqueVolumeSources.initialize();
         TechniqueLeapNetworking.initialize();
         // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
         TechniqueStaggers.CHANNEL.registerClientbound();
@@ -149,6 +154,8 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueService created = new TechniqueService(registry, new TechniqueHostDirectory(entrypoints));
         created.addKnownChangedListener(event -> KNOWN_CHANGED.invoker()
                 .onKnownChanged(event.entityUuid(), event.known()));
+        created.addKnownChangedListener(event -> TechniqueCodexProgress.knownChanged(server, event.entityUuid(),
+                event.known()));
         created.addCastListener(event -> CAST_OBSERVED.invoker()
                 .onCastObserved(event.entityUuid(), event.outcome()));
         created.addCastEndListener(event -> CAST_ENDED.invoker().onCastEnded(event));
@@ -159,6 +166,7 @@ public final class TechniqueFabric implements ModInitializer {
         warnUnregisteredSounds(registry);
         service = created;
         SERVICE_STARTED.invoker().onServiceStarted(created);
+        TechniqueVolumeSources.collect(server);
     }
 
     private static void reportFailure(MinecraftServer server, TechniqueCastEnded event) {

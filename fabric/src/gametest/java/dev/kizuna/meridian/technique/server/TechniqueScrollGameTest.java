@@ -239,7 +239,7 @@ public final class TechniqueScrollGameTest {
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void creativeGroupContainsEveryEarlyVolumeInBookOrder(GameTestHelper context) {
-        // 核对真实注册表、创造展示列表和搜索列表，晚到入口不增加物品。
+        // 核对真实注册表、创造展示列表和搜索列表：功法谱在最前，后面按书序排卷轴，晚到入口不增加物品。
         CreativeModeTab group = TechniqueScrollItems.group();
         var world = context.getLevel();
         var display = new CreativeModeTab.ItemDisplayParameters(world.enabledFeatures(), true /* hasPermissions */,
@@ -253,8 +253,10 @@ public final class TechniqueScrollGameTest {
         List<String> searchable = group.getSearchTabDisplayItems().stream()
                 .map(stack -> BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
                 .toList();
+        List<String> shown = Stream.concat(Stream.of("meridian_technique:technique_codex"), expected.stream()).toList();
         context.assertTrue(registered.equals(expected), "初始化卷轴注册顺序或范围不正确");
-        context.assertTrue(visible.equals(expected) && searchable.equals(expected), "功法创造栏遗漏或打乱了卷轴");
+        context.assertTrue(visible.equals(shown) && searchable.equals(shown),
+                "功法创造栏没把功法谱排最前，或遗漏、打乱了卷轴");
         context.assertTrue(BuiltInRegistries.ITEM.getKey(group.getIconItem().getItem()).toString().equals(expected.get(0)),
                 "功法栏图标不是第一卷");
         context.assertTrue(TechniqueFabric.service().registry().findVolume(HeldTechniqueFixtures.UPPER).isPresent(),

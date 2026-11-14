@@ -25,6 +25,7 @@ public final class TechniqueScrollClient implements ClientModInitializer {
         // 26.2 的界面切换移到 Gui 上。
         TechniqueLeapClient.initialize();
         TechniqueStaggerClient.initialize();
+        TechniqueVolumeSourcesClient.initialize();
         LEARNED.register(scroll -> Minecraft.getInstance().gui.setScreen(new TechniqueScrollScreen(scroll)));
         ClientPlayNetworking.registerGlobalReceiver(TechniqueScrollNetworking.LEARNED,
                 (payload, context) -> notifyLearned(payload.volume()));

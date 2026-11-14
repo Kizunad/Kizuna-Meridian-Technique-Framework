@@ -1,0 +1,36 @@
+{
+  "parent": "minecraft:recipes/root",
+  "criteria": {
+    "has_scroll": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "#meridian_technique:scrolls"
+          }
+        ]
+      }
+    },
+    "learned_volume": {
+      "trigger": "meridian_technique:volume_learned"
+    },
+    "has_the_recipe": {
+      "trigger": "minecraft:recipe_unlocked",
+      "conditions": {
+        "recipe": "meridian_technique:technique_codex"
+      }
+    }
+  },
+  "requirements": [
+    [
+      "has_scroll",
+      "learned_volume",
+      "has_the_recipe"
+    ]
+  ],
+  "rewards": {
+    "recipes": [
+      "meridian_technique:technique_codex"
+    ]
+  }
+}

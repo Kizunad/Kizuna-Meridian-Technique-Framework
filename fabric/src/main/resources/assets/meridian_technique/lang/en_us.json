@@ -1,5 +1,6 @@
 {
   "itemGroup.meridian_technique.techniques": "Techniques",
+  "item.meridian_technique.technique_codex": "Technique Codex",
   "screen.meridian_technique.scroll": "Technique Scroll",
   "screen.meridian_technique.prerequisites": "Prerequisites: ",
   "screen.meridian_technique.learned": "You have learned this volume's techniques",

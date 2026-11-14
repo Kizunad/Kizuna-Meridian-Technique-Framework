@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:book",
+    "minecraft:string"
+  ],
+  "result": {
+    "count": 1,
+    "id": "meridian_technique:technique_codex"
+  }
+}

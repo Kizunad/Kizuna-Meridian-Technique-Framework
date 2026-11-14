@@ -79,7 +79,7 @@ public final class TechniqueScrollItem extends Item {
     @Override
     public InteractionResult use(Level world, Player player, InteractionHand hand) {
         // 客户端只预测使用动画；身体写入、提示与物品消耗均在服务端执行。
-        // 26.2 的结果不再携带物品：客户端 SUCCESS 照旧挥手，服务端 CONSUME 不挥手，物品原地减少。
+        // 客户端 SUCCESS 照旧挥手，服务端 CONSUME 不挥手，卷轴原地减少。
         ItemStack stack = player.getItemInHand(hand);
         if (world.isClientSide()) {
             return InteractionResult.SUCCESS;
@@ -102,7 +102,9 @@ public final class TechniqueScrollItem extends Item {
         }
         TechniqueScrollNetworking.learned(serverPlayer, scroll.volume().getId());
         VolumeLearnedTrigger.TRIGGER.trigger(serverPlayer, scroll.volume().getId());
-        return InteractionResult.CONSUME;
+        // 学会的进度奖励可能已把东西放进读空的这一格；原版把读空的卷轴当成手上的结果并清手，会连它一起清掉，
+        // 所以报手上此刻的东西。
+        return InteractionResult.CONSUME.heldItemTransformedTo(player.getItemInHand(hand));
     }
 
     private boolean knowsOnlyThisVolume(ServerPlayer player) {

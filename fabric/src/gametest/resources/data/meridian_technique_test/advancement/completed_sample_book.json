@@ -1,0 +1,5 @@
+{
+  "criteria": {
+    "completed": { "conditions": { "book": "sample_scrolls:book" }, "trigger": "meridian_technique:book_completed" }
+  }
+}

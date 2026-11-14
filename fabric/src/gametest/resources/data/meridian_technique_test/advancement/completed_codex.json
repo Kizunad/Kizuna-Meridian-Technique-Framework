@@ -1,0 +1,5 @@
+{
+  "criteria": {
+    "completed": { "trigger": "meridian_technique:codex_completed" }
+  }
+}

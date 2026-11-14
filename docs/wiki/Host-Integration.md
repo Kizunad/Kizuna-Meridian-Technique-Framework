@@ -86,6 +86,42 @@ Fabric 装配纯 Java `TechniqueService`，负责主线程 tick、学会命令�
 滚轮浏览正文；ESC、合上按钮、纸面外点击、背包键、右键或使用键均可关闭，键位跟随改绑。
 客户端类只能在客户端入口引用；没有接收端时不发阅读通知，服务端学习与物品消耗照常完成。
 
+### 功法谱与来源登记
+
+功法谱是物品 `meridian_technique:technique_codex`（一本一叠，排在功法创造栏最前），配方是书加线，
+身上有卷轴或用卷轴学会一卷时解锁配方。物品不记任何进度：右键只在客户端触发
+`TechniqueCodex.OPEN`（客户端主线程，不消耗物品，也不发包），书页由界面附属登记，翻开看到的是持书人自己学会的卷。
+
+两个进度触发器按已学全量核对，命令学会的、老档早已学会的都算：
+
+- `meridian_technique:book_completed`（可选字段 `book`）：某本书的每一卷都学会了。
+- `meridian_technique:codex_completed`：所有有卷轴的书都凑齐了。
+
+核对时机是 `KNOWN_CHANGED` 发生时和玩家进服时；原版只授予还没完成的进度，重复核对不重复给。
+「用卷轴学会某卷」仍用 `meridian_technique:volume_learned`（可选字段 `volume`），命令学会不触发。
+这个触发器在卷轴减掉之后发；读掉手上最后一卷时，进度奖励会落进读空的那只手，卷轴把手上此刻的东西报给原版，
+不会被当成空手清掉。
+
+功法谱的来源暗示（「某种生物到某境界身上有这卷」「某个出身的仇家身上有这卷」）由服务端登记处汇总，
+只用来在书页上拼展示句子，不参与学卷、掉落或任何判定：
+
+```java
+TechniqueVolumeSources.register(Identifier.fromNamespaceAndPath("example", "volume_table"),
+        server -> List.of(VolumeSource.newBuilder()
+                .setVolumeId("example:upper")
+                .setKnower(VolumeKnower.newBuilder()
+                        .setEntityType("minecraft:pillager").setRealm(Realm.TRUE_QI).setShare(0.25))
+                .build()));
+```
+
+- 在模组初始化期登记，同一身份只能登记一次；回调在服务端主线程调用，按登记顺序汇总。
+- `VolumeKnower`：实体 ID、`Realm`（不能是 `REALM_UNSPECIFIED`）、占比 (0, 1]（这种生物到这个境界时会这卷的比例）。
+- `VolumeFoe`：出身的语言键，书页拿它拼「某个出身的仇家」。
+- 卷必须在功法目录里；条目不完整、超过 4096 条时，开服（功法服务建好那一刻）就失败，报错带登记方身份。
+  功法谱只列有卷轴的卷，没有卷轴的卷照样核对，但不发给客户端。
+- 玩家进服时整份发到 `meridian_technique:volume_sources`，客户端读 `TechniqueVolumeSourcesClient.current()`，断线清空。
+  来源在运行中变了（例如重载配置）就调 `TechniqueVolumeSources.refresh(server)` 给在线玩家各发一份新的。
+
 清单校验需要 Framework 的模板和符号。启动器按 `binding_templates` 的命名空间读取已安装附属导出的
 `META-INF/kizuna_meridian/addons/<namespace>.pb`，递归收集其声明依赖，以 `AddonRegistry.load` 校验完整内容包集合。
 采用 `meridian:java_reference` 校验画像及参考核心已实现的能力；这是只读目录校验，不替代实体宿主的实际运行能力。

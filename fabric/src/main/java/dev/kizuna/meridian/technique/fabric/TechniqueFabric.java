@@ -3,6 +3,7 @@ package dev.kizuna.meridian.technique.fabric;
 import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapNetworking;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeel;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
@@ -128,6 +129,7 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueLeapNetworking.initialize();
         // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
         TechniqueStaggers.CHANNEL.registerClientbound();
+        TechniqueHitFeel.initialize();
         TechniqueScrollNetworking.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());

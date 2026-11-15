@@ -331,6 +331,26 @@ message StaggerStatus {
   int32 entity_id = 1;
   int64 remaining_millis = 2;
 }
+// 一次打中的表现提示（服务端 → 看得见目标的客户端）：只用来放粒子一类的演出，不参与任何判定。
+message HitFeel {
+  int32 target_entity_id = 1;
+  int32 attacker_entity_id = 2;
+  // 打中的位置（世界坐标）和打过来的水平方向（从出手者指向目标，已归一化）。
+  double x = 3;
+  double y = 4;
+  double z = 5;
+  double direction_x = 6;
+  double direction_z = 7;
+  HitTier tier = 8;
+}
+// 打得多重：按这一下掉的血占目标血量上限的比例分档，打死算最重一档。
+enum HitTier {
+  HIT_TIER_UNSPECIFIED = 0;
+  GRAZE = 1; // 不到 5%
+  LIGHT = 2; // 5% 到 15%
+  HEAVY = 3; // 15% 以上
+  BREAK = 4; // 这一下打死了
+}
 enum PresentationDuration {
   PRESENTATION_DURATION_UNSPECIFIED = 0;
   ONCE = 1;

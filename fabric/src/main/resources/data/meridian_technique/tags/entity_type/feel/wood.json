@@ -1,0 +1,6 @@
+{
+  "values": [
+    {"id": "minecraft:creaking", "required": false},
+    {"id": "meridian_humanoid_dummy:dummy", "required": false}
+  ]
+}

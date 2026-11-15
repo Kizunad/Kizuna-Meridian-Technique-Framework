@@ -18,6 +18,7 @@
       "dev.kizuna.meridian.technique.server.TechniqueAdvancementGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldBlockingGameTest",
+      "dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeelGameTest",
       "dev.kizuna.meridian.technique.fabric.TechniqueCodexGameTest"
     ],
     "meridian_technique_catalog": [

@@ -24,6 +24,11 @@ dependencies {
     // 版本目录条目是 Provider，implementation 不返回依赖对象，嵌套声明单独写。
     implementation libs.protobuf.java
     include libs.protobuf.java
+    // 客户端的打击反馈开关读 TOML，和别的仓一样用 tomlj。
+    implementation libs.tomlj
+    include libs.tomlj
+    implementation libs.antlr.runtime
+    include libs.antlr.runtime
     testImplementation libs.junit4
 }
 

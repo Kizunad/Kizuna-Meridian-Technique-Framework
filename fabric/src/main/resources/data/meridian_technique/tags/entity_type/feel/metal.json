@@ -1,0 +1,6 @@
+{
+  "values": [
+    "minecraft:iron_golem",
+    {"id": "minecraft:copper_golem", "required": false}
+  ]
+}

@@ -10,6 +10,8 @@ import org.junit.Test;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalLong;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
 import static dev.kizuna.meridian.technique.server.Fixtures.*;
@@ -18,6 +20,9 @@ import static org.junit.Assert.*;
 public class TechniqueCastingTest {
     private static final double TOLERANCE = 1e-9;
     private static final long CAST_END = WARMUP + ACTIVE + RECOVERY;
+    private static final long STARTED = 5000;
+    private static final long LATE_EFFECT = WARMUP + ACTIVE + 50;
+    private static final long CLIP_SKIP = 40;
     private static final double EXCESS_QI = QI_AMOUNT + WATER_AMOUNT;
     private static final double EXCESS_POWER = POWER + 1;
     private static final double EVEN_TOTAL_COST = 10.1;
@@ -437,6 +442,65 @@ public class TechniqueCastingTest {
         CastRequest secondRequest = request(before, "two").toBuilder().setTechnique(reference).build();
         assertFailure(casting.cast(host, secondRequest), ALREADY_CASTING, "正运功中");
         assertEquals(paid, host.current());
+    }
+
+    @Test
+    public void anotherTechniqueStartsOnceThePreviousOneIsWindingDown() {
+        // 收招段（出招段过了、效果都出完了）里别的式可以直接起手：前式的动作被换掉，记成正常放完，冷却照它原计划的收势结束算。
+        // 还在起手或出招段时照旧被拒。
+        TechniqueDefinition base = definition();
+        TechniqueDefinition second = base.toBuilder().setId("sample:second").build();
+        TechniqueCatalog catalog = catalog(base).toBuilder().addDefinitions(second).build();
+        TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(catalog));
+        TechniqueProgress known = progress(base).toBuilder()
+                .addAllKnown(progress(second).getKnownList())
+                .build();
+        BodySnapshot before = withProgress(body(Shape.TENDRIL), known);
+        var host = new MemoryHost(before);
+        var casting = new TechniqueCasting(registry);
+        assertSuccess(casting.cast(host, request(before, "one")), CastPhase.WARMUP);
+        ActiveCast first = TechniqueState.read(host.current()).getActiveCast();
+        TechniqueReference reference = TechniqueRegistry.reference(second);
+        host.nowMillis = first.getActiveEndMillis() - 1;
+        CastRequest early = request(before, "early").toBuilder().setTechnique(reference).build();
+        assertFailure(casting.cast(host, early), ALREADY_CASTING, "正运功中");
+        // 这一式没有效果，出招段一结束就是收招段。
+        host.nowMillis = first.getActiveEndMillis();
+        CastRequest next = request(before, "two").toBuilder().setTechnique(reference).build();
+        assertSuccess(casting.cast(host, next), CastPhase.WARMUP);
+        TechniqueProgress progress = TechniqueState.read(host.current());
+        assertEquals("two", progress.getActiveCast().getRequest().getCastId());
+        assertEquals("one", progress.getLastCast().getCastId());
+        assertEquals(CastPhase.FINISHED, progress.getLastCast().getEnding());
+        assertEquals(first.getRecoveryEndMillis() + COOLDOWN, progress.getCooldownsOrThrow(TECHNIQUE_ID));
+        assertEquals(1, host.current().actions().size());
+        assertEquals(progress.getActiveCast().getActionInstanceId(),
+                host.current().actions().stream().findFirst().orElseThrow().instanceId());
+    }
+
+    @Test
+    public void windDownStartsAfterTheLastEffectAndNeverBeforeTheActiveSegmentEnds() {
+        // 收招段从「出招段结束」和「最后一次出效果再过两 tick」里晚的那个开始；表现不算效果；
+        // 承接跳过的那段剪辑里的效果不算，时刻也跟着前移；目录里没有这一式时没有收招段。
+        TechniqueEffect presentation = TechniqueEffect.newBuilder().setAtMillis(0)
+                .setPresentation(PresentationEffect.getDefaultInstance()).build();
+        TechniqueEffect late = TechniqueEffect.newBuilder().setAtMillis(LATE_EFFECT)
+                .setSound(SoundCue.getDefaultInstance()).build();
+        TechniqueDefinition quiet = definition().toBuilder().addEffects(presentation).build();
+        TechniqueDefinition loud = quiet.toBuilder().addEffects(late).build();
+        ActiveCast active = ActiveCast.newBuilder()
+                .setStartedMillis(STARTED)
+                .setWarmupEndMillis(STARTED + WARMUP)
+                .setActiveEndMillis(STARTED + WARMUP + ACTIVE)
+                .setRecoveryEndMillis(STARTED + WARMUP + ACTIVE + RECOVERY)
+                .build();
+        assertEquals(OptionalLong.of(WARMUP + ACTIVE), TechniqueFollowUps.windDownStart(active, Optional.of(quiet)));
+        assertEquals(OptionalLong.of(LATE_EFFECT + TechniqueFollowUps.WIND_DOWN_MARGIN_MILLIS),
+                TechniqueFollowUps.windDownStart(active, Optional.of(loud)));
+        ActiveCast skipped = active.toBuilder().setClipStartMillis(CLIP_SKIP).build();
+        assertEquals(OptionalLong.of(LATE_EFFECT - CLIP_SKIP + TechniqueFollowUps.WIND_DOWN_MARGIN_MILLIS),
+                TechniqueFollowUps.windDownStart(skipped, Optional.of(loud)));
+        assertEquals(OptionalLong.empty(), TechniqueFollowUps.windDownStart(active, Optional.empty()));
     }
 
     @Test

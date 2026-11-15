@@ -26,6 +26,7 @@ public final class TechniqueScrollClient implements ClientModInitializer {
         TechniqueLeapClient.initialize();
         TechniqueStaggerClient.initialize();
         TechniqueHitFeelClient.initialize();
+        TechniqueCastStatusClient.initialize();
         TechniqueVolumeSourcesClient.initialize();
         LEARNED.register(scroll -> Minecraft.getInstance().gui.setScreen(new TechniqueScrollScreen(scroll)));
         ClientPlayNetworking.registerGlobalReceiver(TechniqueScrollNetworking.LEARNED,

@@ -10,6 +10,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.function.Supplier;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.*;
@@ -78,8 +79,13 @@ public final class TechniqueCasting {
             return activeReplay.get();
         }
         TechniqueDefinition definition = requireCastable(body, progress, request, staggeredUntilMillis, inspection);
+        OptionalLong windDownStart = OptionalLong.empty();
+        if (progress.hasActiveCast()) {
+            ActiveCast active = progress.getActiveCast();
+            windDownStart = TechniqueFollowUps.windDownStart(active, registry.find(active.getRequest().getTechnique()));
+        }
         long clipStart = TechniqueFollowUps.clipStart(definition, progress, request,
-                body.settledAt().elapsedMillis());
+                body.settledAt().elapsedMillis(), windDownStart);
         TechniqueActivities.CastBinding selection = bindCast(definition, inspection, clipStart);
         var start = new TechniqueActivities.Start(body, definition, request, progress, selection);
         BodyActivity activity = TechniqueActivities.start(start);

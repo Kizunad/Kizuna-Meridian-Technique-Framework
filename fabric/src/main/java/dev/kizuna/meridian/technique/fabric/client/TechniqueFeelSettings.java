@@ -19,6 +19,9 @@ record TechniqueFeelSettings(boolean hitParticles, boolean blood) {
 
             # 打中有血肉的目标时出不出血。关掉以后换成普通的冲击粒子。
             blood = true
+
+            # 输入缓冲（毫秒，服务端读；单机就是这份文件）：招式按早了一点，替你记这么久，到能出手时自己放出来。0 是关掉。
+            input_buffer_millis = 400
             """;
 
     static TechniqueFeelSettings load() {

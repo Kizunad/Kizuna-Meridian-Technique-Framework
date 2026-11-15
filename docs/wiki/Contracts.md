@@ -258,7 +258,22 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 
 `CastRequest.entry=AUTO`（缺省）在合法窗口自动承接，否则普通起手；显式 `FOLLOW_UP` 窗外返回
 `FOLLOW_UP_UNAVAILABLE`。`only_follow_up=true` 单独起手返回 `FOLLOW_UP_REQUIRED`，附玩家口吻原因。
-没有合法窗口且另有当前施放时仍返回 `ALREADY_CASTING`。学会、资源、身体、冷却和旧曲线限制始终检查。
+没有合法窗口且另有当前施放时仍返回 `ALREADY_CASTING`，**收招段除外**：当前施放的出招段已过、效果都出完了
+（最后一次出效果再过 100 ms，表现不算），别的式可以直接起手，不用等收势走完。这样起手和承接一样原子替换前式：
+前式记成 `FINISHED`、冷却照它原定的收势结束算、持续表现收到 STOP；后式从头播，不跳剪辑。
+只能承接的式（`only_follow_up`）不走这条。学会、资源、身体、冷却和旧曲线限制始终检查。
+生物的选式（`TechniqueSelector`）不用收招段，施放中仍然只考虑承接。
+
+**输入缓冲**（`TechniqueInputBuffer.press`，玩家按键入口）：被 `ALREADY_CASTING`、`COOLING_DOWN`、
+`FOLLOW_UP_REQUIRED`、`FOLLOW_UP_UNAVAILABLE` 拒绝、且离能出手不到 `input_buffer_millis`（`config/meridian-technique-feel.toml`，
+默认 400，0 关闭，上限 2000）的按键由服务端记着，只记最后一次，每 tick 用新的 `cast_id` 再试，能出手的那一 tick 放出来。
+「能出手」取这一式自己的冷却、和当前施放到能接它的时刻（有承接窗口取窗口打开，没有取收招段开始）里晚的。
+被打出僵直、死亡、断线、又按了别的键、等过窗口时作废；等过头或换成别的拒绝原因时才把原因发到动作栏。
+判定仍全部在 `TechniqueService.cast`，这里不采信客户端的任何时间。
+
+**施放状态同步**（`meridian_technique:cast_status`，服务端 → 施放者本人，`CastStatus`）：起手、结束、预备变化、按键被拒时各发一条。
+内容是相对起手的毫秒：三段边界、各次打击、收招段从哪一刻开始（`free_millis`）、本人会的能接的式和各自窗口、
+服务端记着的那一式、这次被拒的式和失败码。只是显示副本（施放条、槽位提示），不参与判定；客户端按世界时间自己往下走。
 承接提前结束前式收势，保留其原定冷却与曲线；后式起手、生效、收势边界均按起播偏移前移。
 原效果时刻小于起播偏移的预备效果不发，包含组织修正；其余效果减去偏移。
 修正默认在起手完整原子提交；显式 `AT_EFFECT_TIME` 的修正按投影后的效果时刻登记。

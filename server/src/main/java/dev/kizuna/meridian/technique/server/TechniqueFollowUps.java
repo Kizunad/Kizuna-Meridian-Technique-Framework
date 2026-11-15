@@ -16,12 +16,16 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.ALREADY_CASTING;
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.FOLLOW_UP_REQUIRED;
 import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure.FOLLOW_UP_UNAVAILABLE;
 
-/** 承接窗口只依据身体时钟与最近施放事实，不接受客户端预输入。 */
+/**
+ * 承接窗口只依据身体时钟与最近施放事实，不采信客户端报的时间。
+ * 按早了的按键可以由服务端替玩家记一小会儿（输入缓冲），到窗口打开时由服务端按自己的时钟再试，判定仍在这里。
+ */
 final class TechniqueFollowUps {
     private TechniqueFollowUps() {
         // 玩家施放和 AI 共用同一窗口判定，避免两套承接规则漂移。
@@ -115,8 +119,25 @@ final class TechniqueFollowUps {
         return Optional.empty();
     }
 
-    static long clipStart(TechniqueDefinition definition, TechniqueProgress progress, CastRequest request, long now) {
+    /** 收招段：最后一次出效果以后再过这么久，前式剩下的收招才可以被下一式顶掉（留两 tick，保证那次效果已经发出去）。 */
+    static final long WIND_DOWN_MARGIN_MILLIS = 100;
+
+    /**
+     * 前式从这一刻（相对它的起手）起进入收招段：出招段已经过了、效果也都出完了，只剩身体收回来。
+     * 目录里已经没有前式时为空，那就只能等它走完。
+     */
+    static OptionalLong windDownStart(ActiveCast active, Optional<TechniqueDefinition> definition) {
+        if (definition.isEmpty()) {
+            return OptionalLong.empty();
+        }
+        long effectsEnd = TechniqueScheduler.effectsEnd(definition.get(), active) + WIND_DOWN_MARGIN_MILLIS;
+        return OptionalLong.of(Math.max(active.getActiveEndMillis() - active.getStartedMillis(), effectsEnd));
+    }
+
+    static long clipStart(TechniqueDefinition definition, TechniqueProgress progress, CastRequest request, long now,
+                          OptionalLong windDownStart) {
         // AUTO 在合法窗口内自动承接；显式承接在窗外失败，普通式仍可单独起手。
+        // 前式已经在收招段时，别的式也可以直接起手：前式的收招到此为止，它的冷却照原计划算。
         Optional<FollowUp> transition = available(definition, progress, now);
         if (transition.isPresent()) {
             return transition.get().getStartMillis();
@@ -127,7 +148,8 @@ final class TechniqueFollowUps {
         if (definition.getFollowUp().getOnlyFollowUp()) {
             throw TechniqueErrors.rejected(FOLLOW_UP_REQUIRED);
         }
-        if (progress.hasActiveCast()) {
+        if (progress.hasActiveCast() && (windDownStart.isEmpty()
+                || now - progress.getActiveCast().getStartedMillis() < windDownStart.getAsLong())) {
             throw TechniqueErrors.rejected(ALREADY_CASTING);
         }
         return 0;
@@ -146,14 +168,16 @@ final class TechniqueFollowUps {
 
     private static boolean inWindow(LastCast previous, FollowUp transition, long now) {
         // 窗口两端包含边界；用减法比较结束后时长避免长整型时钟溢出。
-        long activeEnd = previous.getActiveEndMillis();
         long recoveryEnd = previous.getRecoveryEndMillis();
-        long recovery = recoveryEnd - activeEnd;
-        long startOffset = (long) Math.ceil(recovery * transition.getRecoveryStartRatio().getValue());
-        long start = activeEnd + startOffset;
-        if (now < start) {
+        if (now < windowOpen(previous.getActiveEndMillis(), recoveryEnd, transition)) {
             return false;
         }
         return now <= recoveryEnd || now - recoveryEnd <= transition.getAfterRecoveryMillis();
+    }
+
+    static long windowOpen(long activeEnd, long recoveryEnd, FollowUp transition) {
+        // 收势过了声明的比例才开窗。
+        long recovery = recoveryEnd - activeEnd;
+        return activeEnd + (long) Math.ceil(recovery * transition.getRecoveryStartRatio().getValue());
     }
 }

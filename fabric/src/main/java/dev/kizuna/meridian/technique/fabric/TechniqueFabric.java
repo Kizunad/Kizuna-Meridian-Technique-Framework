@@ -3,7 +3,9 @@ package dev.kizuna.meridian.technique.fabric;
 import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapNetworking;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueCastStatusSync;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeel;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
@@ -130,10 +132,11 @@ public final class TechniqueFabric implements ModInitializer {
         // 服务端发往客户端的通道也要在公共初始化里登记，客户端才能解码。
         TechniqueStaggers.CHANNEL.registerClientbound();
         TechniqueHitFeel.initialize();
+        TechniqueCastStatusSync.CHANNEL.registerClientbound();
         TechniqueScrollNetworking.initialize();
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());
-        ServerTickEvents.END_SERVER_TICK.register(server -> tick());
+        ServerTickEvents.END_SERVER_TICK.register(this::tick);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
@@ -163,6 +166,8 @@ public final class TechniqueFabric implements ModInitializer {
         created.addCastEndListener(event -> CAST_ENDED.invoker().onCastEnded(event));
         created.addCastEndListener(event -> reportFailure(server, event));
         created.addStaggerListener(TechniqueStaggers.listener(server));
+        TechniqueCastStatusSync.listen(server, created);
+        TechniqueInputBuffer.start();
         created.addSoundListener(TechniqueSounds.listener(server));
         created.setEffectHandler(event -> EFFECT_HANDLER.invoker().onEffect(event));
         warnUnregisteredSounds(registry);
@@ -200,10 +205,11 @@ public final class TechniqueFabric implements ModInitializer {
         }
     }
 
-    private void tick() {
-        // TechniqueService 内部按已登记施放推进，不按毫秒创建定时任务。
+    private void tick(MinecraftServer server) {
+        // TechniqueService 内部按已登记施放推进，不按毫秒创建定时任务；推进完再替玩家重试记着的按键。
         if (service != null) {
             service.tick();
+            TechniqueInputBuffer.tick(server);
         }
     }
 
@@ -211,6 +217,7 @@ public final class TechniqueFabric implements ModInitializer {
         // 玩家断线事件在宿主撤销身体访问前清除当前动作。
         if (service != null) {
             TechniqueTissueEffects.of(player).suspend();
+            TechniqueInputBuffer.clear(player.getUUID());
             service.cancelOnDisconnect(player.getUUID());
         }
     }

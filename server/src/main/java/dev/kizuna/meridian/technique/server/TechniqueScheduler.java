@@ -206,6 +206,30 @@ public final class TechniqueScheduler {
         return new Period(work.getIntervalMillis(), count, "block_work_");
     }
 
+    /**
+     * 这一次施放最后一次出效果的时刻（相对起手的毫秒）：之后只剩身体收回来。
+     * 表现本身不算；承接跳过的那一段、动作节奏放慢都按这一次施放实际的算。
+     */
+    public static long effectsEnd(TechniqueDefinition definition, ActiveCast active) {
+        double tempo = TechniqueTempo.multiplier(active);
+        long clipStart = active.getClipStartMillis();
+        long last = 0;
+        for (TechniqueEffect original : definition.getEffectsList()) {
+            if (original.hasPresentation()) {
+                continue;
+            }
+            long offset = original.getAtMillis() - clipStart;
+            if (original.hasBlockWork() || original.hasOrganRefine()) {
+                Period period = period(original);
+                offset += (period.count() - 1) * period.intervalMillis();
+            }
+            if (offset >= 0) {
+                last = Math.max(last, TechniqueTempo.scale(offset, tempo));
+            }
+        }
+        return last;
+    }
+
     public static List<EffectIntent> stopEffects(TechniqueDefinition definition, ActiveCast active,
                                                   long previousMillis, long currentMillis) {
         // 显式提供目录的调用方从该定义获取表现声明，其他状态保持起手时的值。

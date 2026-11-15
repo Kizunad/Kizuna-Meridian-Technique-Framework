@@ -331,6 +331,27 @@ message StaggerStatus {
   int32 entity_id = 1;
   int64 remaining_millis = 2;
 }
+// 施放者本人的施放状态副本（服务端 → 本人）：施放条、承接提示、预备提示和预播起手用，不参与任何判定。
+// 时刻都是相对起手的毫秒；客户端按收到时已经过去的毫秒对齐自己的时钟。
+message CastStatus {
+  string technique_id = 1; // 正在施放的式；空表示没有在施放
+  string cast_id = 2;
+  int64 elapsed_millis = 3; // 发出这条消息时离起手过了多久
+  int64 warmup_end_millis = 4;
+  int64 active_end_millis = 5;
+  int64 recovery_end_millis = 6;
+  repeated int64 hit_millis = 7; // 各次打击的时刻
+  repeated FollowUpHint follow_ups = 8; // 本人会的、能接在这一式后面的式和各自的承接窗口
+  string buffered_technique_id = 9; // 服务端替本人记着、等能出手就放的那一次按键；空表示没有
+  string rejected_technique_id = 10; // 这条消息同时通报一次没放出来的按键；空表示没有
+  TechniqueFailure rejected_failure = 11;
+  int64 free_millis = 12; // 收招段从这一刻开始：效果都出完了，这以后按别的式直接起手，不用等收势走完
+}
+message FollowUpHint {
+  string technique_id = 1;
+  int64 open_millis = 2;
+  int64 close_millis = 3;
+}
 // 一次打中的表现提示（服务端 → 看得见目标的客户端）：只用来放粒子一类的演出，不参与任何判定。
 message HitFeel {
   int32 target_entity_id = 1;

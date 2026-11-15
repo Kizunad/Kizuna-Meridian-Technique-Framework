@@ -244,7 +244,7 @@ enum ImpulseDirection {
   IMPULSE_DIRECTION_UNSPECIFIED = 0;
   FORWARD = 1;
   UP = 2;
-  TOWARD_TARGET = 3;
+  TOWARD_TARGET = 3; // 朝施放目标的水平方向；起手时没有选中目标的，宿主按面朝的方向推进
   INPUT = 4; // 输入为零或缺省时使用 input_default_direction，未声明则向前
   BACKWARD = 5;
 }

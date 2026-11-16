@@ -124,8 +124,9 @@ public final class TechniqueLimbStrikeTest {
 
     @Test
     public void armRulesRequireBothFlagsAndPositiveBaseDamage() {
-        // 两个开关必须显式为 true，空手基础伤害必须大于零。
+        // 忽略持物必须为 true，要不要着地必须显式写（true、false 都行），空手基础伤害必须大于零。
         TechniqueArmRules.validate(armRules());
+        TechniqueArmRules.validate(armRules().toBuilder().setRequireGrounded(false /* requireGrounded */).build());
         assertThrows(IllegalArgumentException.class,
                 () -> TechniqueArmRules.validate(armRules().toBuilder()
                         .setIgnoreHeldItems(false /* ignoreHeldItems */)
@@ -194,6 +195,23 @@ public final class TechniqueLimbStrikeTest {
         assertEquals(TechniqueFailure.NOT_GROUNDED, refused.getFailure());
         assertEquals("要站在地上才能出拳", refused.getReason());
         assertEquals(0, host.activitySubmissions);
+    }
+
+    @Test
+    public void armCastOffGroundStartsWhenBookDoesNotRequireGround() {
+        // 书声明不要求着地时，离地也能出拳起手。
+        TechniqueDefinition definition = armDefinition();
+        TechniqueBook airborne = armBook().toBuilder()
+                .setArmRules(armRules().toBuilder().setRequireGrounded(false /* requireGrounded */))
+                .build();
+        TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(armCatalog(definition, airborne)));
+        BodySnapshot prepared = withProgress(body(Shape.TENDRIL), progress(definition));
+        MemoryHost host = new MemoryHost(prepared);
+        host.inspectFacts = TechniqueInspection.defaults().toBuilder()
+                .setGrounded(false /* grounded */)
+                .build();
+        CastOutcome started = new TechniqueCasting(registry).cast(host, request(definition, prepared, "airborne_ok"));
+        assertEquals(CastPhase.WARMUP, started.getPhase());
     }
 
     @Test

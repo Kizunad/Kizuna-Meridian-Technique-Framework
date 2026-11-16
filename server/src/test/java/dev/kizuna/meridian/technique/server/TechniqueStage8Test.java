@@ -132,6 +132,43 @@ public final class TechniqueStage8Test {
     }
 
     @Test
+    public void legCastOffGroundStartsWhenBookDoesNotRequireGround() {
+        // 书声明不要求着地时，离地也能起手腿法；腿法书仍必须写明这一项。
+        TechniqueDefinition definition = legDefinition();
+        LegRules airborne = legRules().toBuilder().setRequireGrounded(false /* requireGrounded */).build();
+        TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(legCatalog(definition, airborne)));
+        BodySnapshot prepared = withProgress(body(Shape.TENDRIL), progress(definition));
+        MemoryHost host = new MemoryHost(prepared);
+        host.inspectFacts = TechniqueInspection.defaults().toBuilder()
+                .setGrounded(false /* grounded */)
+                .build();
+        CastOutcome started = new TechniqueCasting(registry).cast(host, request(definition, prepared, CAST_ID));
+        assertEquals(CastPhase.WARMUP, started.getPhase());
+        assertThrows(IllegalArgumentException.class, () -> TechniqueRegistry.load(addons(),
+                List.of(legCatalog(definition, legRules().toBuilder().clearRequireGrounded().build()))));
+    }
+
+    @Test
+    public void legLeapOffGroundKeepsOnlyTheHorizontalImpulse() {
+        // 腿法的向上冲量是蹬地起跳：到期那一刻不站在地上就不给，水平那份照给；站在地上两份都给。
+        TechniqueDefinition kick = legDefinition().toBuilder()
+                .addEffects(impulseAtStart(ImpulseDirection.UP))
+                .addEffects(impulseAtStart(ImpulseDirection.FORWARD))
+                .build();
+        LegRules airborne = legRules().toBuilder().setRequireGrounded(false /* requireGrounded */).build();
+        TechniqueCatalog kicks = legCatalog(kick, airborne);
+        assertEquals(List.of(ImpulseDirection.FORWARD), dueImpulses(kicks, kick, false /* grounded */));
+        assertEquals(List.of(ImpulseDirection.UP, ImpulseDirection.FORWARD),
+                dueImpulses(kicks, kick, true /* grounded */));
+
+        // 不出拳脚的功法不归着地规则管，离地时向上冲量照给。
+        TechniqueDefinition plain = definition().toBuilder()
+                .addEffects(impulseAtStart(ImpulseDirection.UP))
+                .build();
+        assertEquals(List.of(ImpulseDirection.UP), dueImpulses(catalog(plain), plain, false /* grounded */));
+    }
+
+    @Test
     public void publicLegacyInspectionRejectsLegsAndKeepsOrdinaryCasting() throws NoSuchMethodException {
         // 外部宿主仍能调用两参数入口；缺少移动事实不能支付费用并起手腿法。
         var constructor = TechniqueHost.Inspection.class.getConstructor(BodySnapshot.class, HeldItems.class);
@@ -229,6 +266,31 @@ public final class TechniqueStage8Test {
         double base = TechniqueSelector.score(new TechniqueSelector.Context(registry, strong, availability), known);
         assertEquals(base * BEHIND_WEIGHT * AIRBORNE_WEIGHT * FLEEING_WEIGHT,
                 TechniqueSelector.score(strongContext, known), 1e-9);
+    }
+
+    private static TechniqueEffect impulseAtStart(ImpulseDirection direction) {
+        // 起手那一刻到期的冲量，速度取值只要合法即可。
+        Impulse impulse = Impulse.newBuilder()
+                .setDirection(direction)
+                .setSpeed(quantity(LEG_DISTANCE, Unit.METERS_PER_SECOND))
+                .build();
+        return TechniqueEffect.newBuilder().setAtMillis(0).setImpulse(impulse).build();
+    }
+
+    private static List<ImpulseDirection> dueImpulses(TechniqueCatalog catalog, TechniqueDefinition definition,
+                                                       boolean grounded) {
+        // 按给定的着地事实起手并推进过起手边界，返回这一段交付的冲量方向。
+        TechniqueCasting casting = new TechniqueCasting(TechniqueRegistry.load(addons(), List.of(catalog)));
+        BodySnapshot prepared = withProgress(body(Shape.TENDRIL), progress(definition));
+        MemoryHost host = new MemoryHost(prepared);
+        host.inspectFacts = TechniqueInspection.defaults().toBuilder().setGrounded(grounded).build();
+        CastOutcome started = casting.cast(host, request(definition, prepared, CAST_ID));
+        assertEquals(CastPhase.WARMUP, started.getPhase());
+        long startedMillis = TechniqueState.read(host.current()).getActiveCast().getStartedMillis();
+        return casting.advance(host, startedMillis - 1).effects().stream()
+                .filter(EffectIntent::hasImpulse)
+                .map(effect -> effect.getImpulse().getDirection())
+                .toList();
     }
 
     private static TechniqueDefinition legDefinition() {

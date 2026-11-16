@@ -197,11 +197,11 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 阶段 8 的 `TechniqueEffect.leg_strike=20` 与持物打击共用单体/扇形和目标预算，`StrikeFacing` 额外提供
 `STRIKE_BACKWARD` 身后扇形。`LegStrike` 必须显式声明 `FRONT_LEG/REAR_LEG/BOTH_LEGS`、命名空间伤害类型 ID、
 击退方式与大小、被盾挡住是否仍击退、`last_strike` 和 `dedup_group`；同一范围组每个目标只命中一次，
-全部组共享 `cast_target_limit`。`LegRules` 书级规则固定声明忽略手持物品、要求着地，以及基础伤害、每点靴子护甲加成和每式耐久消耗。
+全部组共享 `cast_target_limit`。`LegRules` 书级规则固定声明忽略手持物品、写明要不要着地（`require_grounded` 必须显式写，true 或 false），以及基础伤害、每点靴子护甲加成和每式耐久消耗。
 腿法书不能同时声明 `held_item_rules`。
 
 `TechniqueHostFacts` 与身体、双手在同一次 `inspect` 回执中提供 `grounded/in_water/climbing/riding/gliding`，
-并可成对提供 `boot_armor/boot_durability`。腿法起手在水中、攀爬、骑乘、滑翔或未着地时返回
+并可成对提供 `boot_armor/boot_durability`。书写了 `require_grounded=true` 的腿法起手在水中、攀爬、骑乘、滑翔或未着地时返回
 `NOT_GROUNDED` /「要站在地上才能出腿」。`EffectIntent.leg_strike=20` 携带起手保存的 `LegRules`，不携带手位规则。
 腿击不能用 `LIFT` 击退，掀起须改用 `limb_strike`。
 
@@ -213,11 +213,13 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 同一式不能同时有 `leg_strike` 和 `limb_strike`。
 
 出拳掌的肢击要求所属书声明 `TechniqueBook.arm_rules=11`（`ArmRules`）：必须显式写 `ignore_held_items=true`、
-`require_grounded=true` 和正的 `base_damage`（`DAMAGE_POINT`）。出腿的肢击仍要求书级 `leg_rules`。
-拳掌书和腿法书都不能声明 `held_item_rules`。拳掌起手的着地条件和腿法相同，拒绝码也是 `NOT_GROUNDED`，
+显式的 `require_grounded`（true 或 false）和正的 `base_damage`（`DAMAGE_POINT`）。出腿的肢击仍要求书级 `leg_rules`。
+拳掌书和腿法书都不能声明 `held_item_rules`。书写了 `require_grounded=true` 时，拳掌起手的着地条件和腿法相同，拒绝码也是 `NOT_GROUNDED`，
 只出拳掌的式玩家文本为「要站在地上才能出拳」；同时出腿的式用腿法文本。拒绝不扣费。
 `ActiveCast.arm_rules=31` 在起手时保存书级拳掌规则，`EffectIntent.limb_strike=24`（`LimbStrikeIntent`）
 携带打击、`hit_sounds=3`，以及出力肢对应的一份书级规则（`leg_rules=2` 或 `arm_rules=4`，不能两份都带），不带手位。
+
+出腿、出拳掌、擒摔的功法里，方向为 `UP` 的冲量当作蹬地起跳：到期那一刻施放者不站在地上（未着地、水中、攀爬、骑乘、滑翔）就不交付这一条，同刻的水平冲量照常交付，免得半空里再跳一次。站在地上时照旧。别的功法（兵器、射击等）的 `UP` 冲量不受这条限制。
 
 腿击意图可以直接换算成肢击意图：`TechniqueLimbStrikes.fromLeg(LegStrike)` 与 `fromLeg(LegStrikeIntent)`
 按线格式重读，可选字段有没有填写原样保留，宿主可以用同一个执行器处理两种意图。

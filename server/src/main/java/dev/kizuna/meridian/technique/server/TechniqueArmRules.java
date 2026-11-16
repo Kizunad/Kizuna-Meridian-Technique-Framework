@@ -10,11 +10,10 @@ final class TechniqueArmRules {
     }
 
     static void validate(ArmRules rules) {
-        // 拳掌必须明确忽略手里的东西并要求着地，空手基础伤害不能依赖默认值。
+        // 拳掌必须明确忽略手里的东西，并写明要不要着地（不能靠默认值）；空手基础伤害也不能依赖默认值。
         boolean ignoresHeldItems = rules.hasIgnoreHeldItems() && rules.getIgnoreHeldItems();
-        boolean requiresGround = rules.hasRequireGrounded() && rules.getRequireGrounded();
-        if (!ignoresHeldItems || !requiresGround) {
-            throw TechniqueErrors.invalid("arm_rules", "拳掌须显式忽略手持物品并要求着地");
+        if (!ignoresHeldItems || !rules.hasRequireGrounded()) {
+            throw TechniqueErrors.invalid("arm_rules", "拳掌须显式忽略手持物品并写明要不要着地");
         }
         TechniqueValues.positive(rules.getBaseDamage(), Unit.DAMAGE_POINT,
                 TechniqueValues.MAX_QUANTITY, "arm_rules.base_damage");

@@ -395,13 +395,38 @@ public final class TechniqueCasting {
             boundaryMillis = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
             paidBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
         }
-        TechniqueScheduler.Due due = due(active, previousMillis, boundaryMillis);
+        TechniqueScheduler.Due due = leapsFromGround(host, definition,
+                due(active, previousMillis, boundaryMillis));
         CastPhase current = TechniqueScheduler.phase(active, boundaryMillis);
         if (!due.recoveryDue()) {
             return new AdvanceResult(outcome(active, current, paidBody.revision()),
                     due.effects(), Optional.empty(), boundaryMillis);
         }
         return stop(host, paidBody, TechniqueState.read(paidBody), CastPhase.FINISHED, due.effects());
+    }
+
+    private static TechniqueScheduler.Due leapsFromGround(TechniqueHost host,
+                                                         Optional<TechniqueDefinition> definition,
+                                                         TechniqueScheduler.Due due) {
+        // 拳脚功法的向上冲量是蹬地起跳：到这一刻不站在地上就不给，水平那份照给，免得半空里再跳一次。
+        // 只有真有向上冲量到期时才多查一次宿主；兵器功法不归着地规则管，照旧。
+        boolean leaping = due.effects().stream().anyMatch(TechniqueCasting::leap);
+        if (!leaping || definition.isEmpty() || !usesLimbs(definition.get())
+                || TechniqueInspection.standsOnGround(host.inspect().facts())) {
+            return due;
+        }
+        List<EffectIntent> kept = due.effects().stream().filter(effect -> !leap(effect)).toList();
+        return new TechniqueScheduler.Due(kept, due.endState());
+    }
+
+    private static boolean leap(EffectIntent effect) {
+        // 向上冲量只有 UP 一个方向，其余方向都是水平推进。
+        return effect.hasImpulse() && effect.getImpulse().getDirection() == ImpulseDirection.UP;
+    }
+
+    private static boolean usesLimbs(TechniqueDefinition definition) {
+        // 和起手的着地条件用同一个范围：出腿、出拳掌、擒摔。
+        return TechniqueLimbStrikes.usesLegs(definition) || TechniqueLimbStrikes.usesArms(definition);
     }
 
     public AdvanceResult interruptByStagger(TechniqueHost host, long previousMillis) {

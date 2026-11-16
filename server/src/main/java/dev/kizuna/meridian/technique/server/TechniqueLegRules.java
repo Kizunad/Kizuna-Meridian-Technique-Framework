@@ -12,13 +12,13 @@ final class TechniqueLegRules {
     }
 
     static void validate(LegRules rules) {
-        // 腿法必须明确忽略手持物品并要求着地，鞋的三项参数不能依赖默认值。
+        // 腿法必须明确忽略手持物品、写明要不要着地，鞋的三项参数不能依赖默认值。
         if (!rules.hasIgnoreHeldItems() || !rules.getIgnoreHeldItems()
-                || !rules.hasRequireGrounded() || !rules.getRequireGrounded()
+                || !rules.hasRequireGrounded()
                 || !rules.hasDurabilityCost() || rules.getDurabilityCost() < 1
                 || rules.getDurabilityCost() > MAX_DURABILITY_COST) {
             throw TechniqueErrors.invalid(
-                    "leg_rules", "腿法须显式忽略手持物品、要求着地并声明靴子耐久消耗");
+                    "leg_rules", "腿法须显式忽略手持物品、写明要不要着地并声明靴子耐久消耗");
         }
         TechniqueValues.positive(rules.getBaseDamage(), Unit.DAMAGE_POINT,
                 TechniqueValues.MAX_QUANTITY, "leg_rules.base_damage");

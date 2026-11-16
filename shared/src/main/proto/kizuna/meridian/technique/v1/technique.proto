@@ -416,14 +416,14 @@ enum LegKnockbackKind {
 }
 message LegRules {
   optional bool ignore_held_items = 1;
-  optional bool require_grounded = 2;
+  optional bool require_grounded = 2; // 必须显式写；true 时不着地起手返回 NOT_GROUNDED
   Quantity base_damage = 3; // DAMAGE_POINT，光脚基础伤害
   Quantity armor_damage = 4; // DAMAGE_POINT，每点靴子护甲增加的伤害
   optional int32 durability_cost = 5; // 每式最后一击扣除的靴子耐久
 }
 message ArmRules {
   optional bool ignore_held_items = 1; // 必须为 true
-  optional bool require_grounded = 2; // 必须为 true，失败码沿用 NOT_GROUNDED
+  optional bool require_grounded = 2; // 必须显式写；true 时不着地起手返回 NOT_GROUNDED
   Quantity base_damage = 3; // DAMAGE_POINT，(0, 1e9]，空手基础伤害
 }
 message TechniqueHostFacts {

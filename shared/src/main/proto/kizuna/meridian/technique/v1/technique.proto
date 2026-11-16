@@ -471,6 +471,33 @@ message LimbStrike {
   optional bool last_strike = 13;
   string dedup_group = 14;
   Quantity lift_speed = 16; // METERS_PER_SECOND，(0, 100]；只有 LIFT 填写
+  // 17 号起只有肢击才有，腿击意图换成肢击时都是缺省。
+  // 打哪个部位：两个都不写时照伤害类型的部位组由伤害附属选。写了其中一个、或带透劲、或带命中附带，
+  // 宿主对绑了身体的目标走可信指定部位的直接伤害；没绑身体的目标照旧走普通受伤入口。
+  oneof part {
+    string fixed_part_id = 17; // 目标身体上的部位 ID，左右按目标自己算
+    bool armed_forearm = 18; // 只接受 true：对方拿着东西那一侧的前臂；两手都拿或都空取主手一侧
+  }
+  Penetration penetration = 19;
+  repeated StrikeAttachment attachments = 20; // 最多 4 条，同一种只能有一条
+  optional bool disarm = 21; // true：打中以后卸掉对方主手拿的东西
+}
+// 透劲：这一下透进器官的份额，和只对这一下生效的局部护甲倍数；两项都要写。
+message Penetration {
+  Quantity organ_share = 1; // RATIO，[0, 1]
+  Quantity armor_multiplier = 2; // RATIO，[0, 1]；1 表示护甲照常
+}
+// 命中附带：和这一下的伤害同一笔加到目标身上。封脉到用它的那一段再加。
+message StrikeAttachment {
+  oneof kind {
+    Numb numb = 1;
+  }
+}
+// 麻：打中的部位上的肌肉，力量和功率乘 multiplier，持续 duration_millis。
+message Numb {
+  Quantity multiplier = 1; // RATIO，[0.05, 1)
+  int64 duration_millis = 2; // (0, 300000]
+  optional bool whole_arm = 3; // true：打中的是手臂时，连同这条手臂其余部位上的肌肉一起麻
 }
 message WeaponStrike {
   StrikeShape shape = 1;
@@ -652,7 +679,7 @@ message Grapple {
   Quantity maximum_distance = 2; // METER，(0, 64]
   Quantity hold_distance = 3; // METER，(0, maximum_distance]，拉到施放者身前的距离
   int64 duration_millis = 4; // 正数，不超过施放剩余时长；随施放速度缩放
-  ThrowLean lean = 5;
+  ThrowLean lean = 5; // 可缺省：不声明时，摔不动的目标既不擒也不靠
 }
 // 一靠：按书级空手伤害乘倍率打一下并推开，处理器另给施放者提示摔不动。
 message ThrowLean {

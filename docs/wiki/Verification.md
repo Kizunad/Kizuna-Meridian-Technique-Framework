@@ -590,6 +590,7 @@ Human 的玩家谓词改为自己排除原版同伴，玩家侧行为不变。
 | 腿击参数、身后朝向和目标预算 | `TechniqueStage8Test.legStrikeUsesRearFacingAndSharedTargetBudget`：复用持物打击的同组去重与整式目标上限，并检查后腿、推开及身后朝向 |
 | 起手保存书级规则与末击约束 | `TechniqueStage8Test.legStrikeSchedulesSavedRulesAndRejectsWrongFinalStrike`：意图携带 `LegRules`，腿击不携带手位，错误末击声明在目录边界拒绝 |
 | 书级条件与手持物品互斥 | `TechniqueStage8Test.legBookRequiresGroundingRulesAndRejectsHeldRules`：腿法书必须显式忽略手持物品、写明要不要着地和鞋参数，不能同时声明持物规则；`legCastOffGroundStartsWhenBookDoesNotRequireGround`、`TechniqueLimbStrikeTest.armCastOffGroundStartsWhenBookDoesNotRequireGround`：书声明不要求着地时离地也能起手；`legLeapOffGroundKeepsOnlyTheHorizontalImpulse`：腿法的向上冲量离地时不交付、水平冲量照给，站在地上两份都给，不出拳脚的功法不受限 |
+| 肢击的部位、透劲、附带、卸兵器 | `TechniqueLimbStrikeTest.directFieldsDecideThePathAndRejectHalfWrittenValues`：三样任意一样写了就走直接路，腿击换成的肢击不走；每样都要写全、写在范围里，同一种附带不能重复 |
 | inspect 着地事实和失败原因 | `TechniqueStage8Test.nonGroundedLegCastReturnsPlayerReasonAndSavesRules`：水中、攀爬、骑乘、滑翔和离地统一返回 `NOT_GROUNDED` 及中文原因，成功起手保存规则 |
 | `WorkCost.training` 与目录训练能力 | `TechniqueStage8Test.trainingWorkIsMarkedOnCastAndLeapAndUntrainedCatalogIsRejected`：训练做功转为 `ActivityEffort.training`，跃步同样传递，未声明 `TissueTraining` 的匹配组织拒绝 |
 | AI 新情境和两腿有效力量 | `TechniqueStage8Test.aiFactsMultiplyLegWeightsAndEnforceEffectiveForce`：身后、空中、逃跑权重相乘，低于腿力门槛的候选不可用 |

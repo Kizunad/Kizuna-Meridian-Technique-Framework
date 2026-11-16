@@ -8,14 +8,18 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LimbStrike;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LimbStrikeIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Numb;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Penetration;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundAnchor;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundCue;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeAttachment;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeFacing;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeShape;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -32,6 +36,10 @@ public final class TechniqueLimbStrikes {
     private static final int MAX_TARGETS = 128;
     private static final double FULL_CIRCLE = 360;
     private static final double SINGLE_TARGET_ANGLE = 60;
+    private static final int MAX_ATTACHMENTS = 4;
+    /** 和能力修正接受的最低倍率一致，再低框架会拒绝。 */
+    private static final double MIN_NUMB_MULTIPLIER = 0.05;
+    private static final long MAX_NUMB_MILLIS = 300_000;
 
     private TechniqueLimbStrikes() {
         // 伤害、击退和目标筛选由宿主执行，本类只拒绝无法解释的目录数据。
@@ -67,6 +75,53 @@ public final class TechniqueLimbStrikes {
         validateBudget(strike);
         validateShape(strike, angle);
         validateKnockback(strike);
+        validateDirect(strike);
+    }
+
+    /** 这一下要不要走可信指定部位的直接伤害：指定了部位、带透劲或带命中附带。目标没绑身体时宿主仍走普通路。 */
+    public static boolean direct(LimbStrike strike) {
+        return strike.getPartCase() != LimbStrike.PartCase.PART_NOT_SET || strike.hasPenetration()
+                || strike.getAttachmentsCount() > 0;
+    }
+
+    private static void validateDirect(LimbStrike strike) {
+        // 部位选法、透劲、命中附带、卸兵器各自写全；缺省的那几样不检查。
+        switch (strike.getPartCase()) {
+            case FIXED_PART_ID -> localId(strike.getFixedPartId(), "limb_strike.fixed_part_id");
+            case ARMED_FOREARM -> require(strike.getArmedForearm(), "limb_strike.armed_forearm",
+                    "对方持械前臂只接受 true");
+            case PART_NOT_SET -> { /* 照伤害类型的部位组选。 */ }
+        }
+        if (strike.hasPenetration()) {
+            Penetration penetration = strike.getPenetration();
+            quantity(penetration.getOrganShare(), Unit.RATIO, 0, 1, "limb_strike.penetration.organ_share");
+            quantity(penetration.getArmorMultiplier(), Unit.RATIO, 0, 1,
+                    "limb_strike.penetration.armor_multiplier");
+        }
+        validateAttachments(strike.getAttachmentsList());
+        require(!strike.hasDisarm() || strike.getDisarm(), "limb_strike.disarm", "卸兵器只接受 true");
+    }
+
+    private static void validateAttachments(List<StrikeAttachment> attachments) {
+        // 附带最多 4 条，同一种只能有一条；麻的倍数和时长落在能力修正接受的范围里。
+        require(attachments.size() <= MAX_ATTACHMENTS, "limb_strike.attachments", "命中附带最多 4 条");
+        var kinds = EnumSet.noneOf(StrikeAttachment.KindCase.class);
+        for (StrikeAttachment attachment : attachments) {
+            require(attachment.getKindCase() != StrikeAttachment.KindCase.KIND_NOT_SET
+                    && kinds.add(attachment.getKindCase()), "limb_strike.attachments", "命中附带缺少种类或同一种重复");
+            Numb numb = attachment.getNumb();
+            double multiplier = quantity(numb.getMultiplier(), Unit.RATIO, MIN_NUMB_MULTIPLIER, 1,
+                    "limb_strike.attachments.numb.multiplier");
+            require(multiplier < 1 && numb.getDurationMillis() > 0 && numb.getDurationMillis() <= MAX_NUMB_MILLIS,
+                    "limb_strike.attachments.numb", "麻的倍数要小于 1，时长在 (0, 300000] 毫秒");
+        }
+    }
+
+    private static void require(boolean satisfied, String path, String message) {
+        // 条件不成立时按目录校验错误抛出。
+        if (!satisfied) {
+            throw TechniqueErrors.invalid(path, message);
+        }
     }
 
     public static void validateIntent(LimbStrikeIntent intent) {

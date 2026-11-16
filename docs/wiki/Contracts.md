@@ -13,8 +13,8 @@
 
 ## 擒与摔
 
-- `Grapple` 声明处理器 ID、正数米制抓取距离（≤ 抓取上限）、拉到身前的距离（≤ 抓取距离）、正数擒住时长和必填的一靠
-  `ThrowLean`；擒住时长不得超出施放结束。一靠声明时刻（不晚于擒住时长）、伤害类型、倍率 (0, 10] 和推开强度 [0, 10]。
+- `Grapple` 声明处理器 ID、正数米制抓取距离（≤ 抓取上限）、拉到身前的距离（≤ 抓取距离）、正数擒住时长和可缺省的一靠
+  `ThrowLean`；擒住时长不得超出施放结束。不声明一靠时，摔不动的目标既不擒也不靠，这一式别的效果照常走。一靠声明时刻（不晚于擒住时长）、伤害类型、倍率 (0, 10] 和推开强度 [0, 10]。
 - `Throw` 声明处理器 ID、正数飞行时长、正数落地距离、最高点 [0, 16] m、伤害类型、倍率 (0, 10]、正数倒地时长和
   非负免摔时长。
 - 两种效果都要求所属书声明 `ArmRules`；`GrappleIntent` / `ThrowIntent` 必须携带起手冻结的那份规则。
@@ -211,6 +211,19 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 其他击退方式不能填 `lift_speed`。其余约束与腿击相同：单体/扇形、显式朝向、盾规则、`dedup_group`、
 同组每个目标只命中一次、全部肢击共享 `cast_target_limit`、只有最后一段写 `last_strike=true`。
 同一式不能同时有 `leg_strike` 和 `limb_strike`。
+
+17 号起是只有肢击才有的字段，都可以不写；腿击换成的肢击这几项都是缺省：
+
+| 字段 | 含义与约束 |
+|---|---|
+| `oneof part`：`fixed_part_id=17` / `armed_forearm=18` | 打哪个部位。`fixed_part_id` 是目标身体上的部位 ID（局部标识，左右按目标自己算）；`armed_forearm` 只接受 `true`，表示对方拿着东西那一侧的前臂，两手都拿或都空取主手一侧。两个都不写时照伤害类型的部位组由伤害附属选 |
+| `penetration=19`（`Penetration`） | 透劲：`organ_share`（透进器官的份额）和 `armor_multiplier`（只对这一下生效的局部护甲倍数），都是 `RATIO`、[0, 1]，两项都要写 |
+| `attachments=20`（`StrikeAttachment`） | 命中附带，和这一下的伤害同一笔加到目标身上；最多 4 条，同一种只能有一条。现在只有 `numb`（`Numb`）：打中部位上的肌肉力量和功率乘 `multiplier`（`RATIO`，[0.05, 1)），持续 `duration_millis`（(0, 300000]）；`whole_arm=true` 时连同这条手臂其余部位上的肌肉 |
+| `disarm=21` | 只接受 `true`：打中以后卸掉对方主手拿的东西 |
+
+`TechniqueLimbStrikes.direct(strike)` 判断这一下走哪条路：指定了部位、带透劲或带命中附带时为真，宿主对绑了身体的目标
+走可信指定部位的直接伤害（不吃无敌帧、不击退，盾由宿主先查）；没绑身体的目标照旧走普通受伤入口，
+透劲只剩护甲打折、麻由内容附属另行处理。功法库只校验数据，不解释部位和肌肉。
 
 出拳掌的肢击要求所属书声明 `TechniqueBook.arm_rules=11`（`ArmRules`）：必须显式写 `ignore_held_items=true`、
 显式的 `require_grounded`（true 或 false）和正的 `base_damage`（`DAMAGE_POINT`）。出腿的肢击仍要求书级 `leg_rules`。

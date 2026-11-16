@@ -81,15 +81,15 @@ public final class TechniqueGrappleTest {
 
     @Test
     public void invalidGrappleAndThrowDeclarationsAreRejected() {
-        // 处理器、距离、时长、一靠和落地数值逐项越界都拒绝。
+        // 处理器、距离、时长、一靠和落地数值逐项越界都拒绝；一靠可以整个不声明（摔不动的就不擒也不靠）。
         Grapple grapple = grapple();
         TechniqueGrapples.validate(grapple);
+        TechniqueGrapples.validate(grapple.toBuilder().clearLean().build());
         List<Grapple> invalidGrapples = List.of(
                 grapple.toBuilder().clearProcessorId().build(),
                 grapple.toBuilder().setMaximumDistance(quantity(0, Unit.METER)).build(),
                 grapple.toBuilder().setHoldDistance(quantity(REACH + 1, Unit.METER)).build(),
                 grapple.toBuilder().setDurationMillis(0).build(),
-                grapple.toBuilder().clearLean().build(),
                 grapple.toBuilder().setLean(lean().toBuilder().setDelayMillis(HOLD_MILLIS + 1)).build(),
                 grapple.toBuilder().setLean(lean().toBuilder().clearDamageTypeId()).build(),
                 grapple.toBuilder().setLean(lean().toBuilder().setPush(quantity(-1, Unit.RATIO))).build());

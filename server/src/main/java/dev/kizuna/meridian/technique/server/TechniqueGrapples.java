@@ -27,14 +27,15 @@ public final class TechniqueGrapples {
     }
 
     static void validate(Grapple grapple) {
-        // 抓取距离有界，拉到身前的距离不超过抓取距离；一靠的时刻落在擒的时长里。
+        // 抓取距离有界，拉到身前的距离不超过抓取距离；声明了一靠时，它的时刻落在擒的时长里。
         TechniqueValues.id(grapple.getProcessorId(), "grapple.processor_id");
         double reach = TechniqueValues.positive(grapple.getMaximumDistance(), Unit.METER,
                 TechniqueValues.MAX_DISTANCE, "grapple.maximum_distance");
         TechniqueValues.positive(grapple.getHoldDistance(), Unit.METER, reach, "grapple.hold_distance");
         positiveMillis(grapple.getDurationMillis(), "grapple.duration_millis");
         if (!grapple.hasLean()) {
-            throw TechniqueErrors.invalid("grapple.lean", "必须声明摔不动时的一靠");
+            // 不声明一靠：摔不动的目标既不擒也不靠，这一式别的效果照常走（如缠腕只拧不擒）。
+            return;
         }
         validateLean(grapple.getLean());
         if (grapple.getLean().getDelayMillis() > grapple.getDurationMillis()) {

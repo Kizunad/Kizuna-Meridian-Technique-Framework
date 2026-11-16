@@ -23,6 +23,11 @@ public final class TechniqueLimbStrikeTest {
     private static final String ARM_VOLUME_ID = "sample:fist_volume";
     private static final String DAMAGE_TYPE_ID = "sample:fist_torso";
     private static final String DEDUP_GROUP = "fist";
+    private static final double ORGAN_SHARE = 0.6;
+    private static final double HALF_ARMOR = 0.5;
+    private static final double OVER_ONE = 1.5;
+    private static final double NUMB_MULTIPLIER = 0.3;
+    private static final long NUMB_MILLIS = 6_000;
     private static final String HIT_SOUND_ID = "sample:fist_hit";
     private static final String PEDDLER_RESOURCE = "/peddler_leg_strikes.txtpb";
     private static final int PEDDLER_STRIKES = 13;
@@ -120,6 +125,33 @@ public final class TechniqueLimbStrikeTest {
                 .setKnockbackKind(LegKnockbackKind.LIFT)
                 .build();
         assertThrows(IllegalArgumentException.class, () -> TechniqueCombatEffects.validateLegStrike(liftingLeg));
+    }
+
+    @Test
+    public void directFieldsDecideThePathAndRejectHalfWrittenValues() {
+        // 指定部位、透劲、命中附带任意一样写了就走直接路；每样都要写全、写在范围里。腿击换成的肢击不走直接路。
+        assertFalse(TechniqueLimbStrikes.direct(armStrike()));
+        assertFalse(TechniqueLimbStrikes.direct(TechniqueLimbStrikes.fromLeg(legStrikeTemplate())));
+        LimbStrike inchPower = armStrike().toBuilder().setPenetration(penetration(ORGAN_SHARE, HALF_ARMOR)).build();
+        LimbStrike wristLock = armStrike().toBuilder().setArmedForearm(true /* armedForearm */)
+                .addAttachments(numb(NUMB_MULTIPLIER, NUMB_MILLIS)).setDisarm(true /* disarm */).build();
+        LimbStrike chestPoint = armStrike().toBuilder().setFixedPartId("chest").build();
+        for (LimbStrike strike : List.of(inchPower, wristLock, chestPoint)) {
+            TechniqueLimbStrikes.validate(strike);
+            assertTrue(TechniqueLimbStrikes.direct(strike));
+        }
+
+        assertInvalid(armStrike().toBuilder().setArmedForearm(false /* armedForearm */).build());
+        assertInvalid(armStrike().toBuilder().setFixedPartId("Chest!").build());
+        assertInvalid(armStrike().toBuilder().setDisarm(false /* disarm */).build());
+        assertInvalid(armStrike().toBuilder().setPenetration(penetration(OVER_ONE, HALF_ARMOR)).build());
+        assertInvalid(armStrike().toBuilder().setPenetration(
+                penetration(ORGAN_SHARE, HALF_ARMOR).toBuilder().clearArmorMultiplier()).build());
+        assertInvalid(armStrike().toBuilder().addAttachments(StrikeAttachment.getDefaultInstance()).build());
+        assertInvalid(armStrike().toBuilder().addAttachments(numb(1, NUMB_MILLIS)).build());
+        assertInvalid(armStrike().toBuilder().addAttachments(numb(NUMB_MULTIPLIER, 0)).build());
+        assertInvalid(armStrike().toBuilder().addAttachments(numb(NUMB_MULTIPLIER, NUMB_MILLIS))
+                .addAttachments(numb(NUMB_MULTIPLIER, NUMB_MILLIS)).build());
     }
 
     @Test
@@ -307,6 +339,23 @@ public final class TechniqueLimbStrikeTest {
             String text = new String(input.readAllBytes(), StandardCharsets.UTF_8);
             return TechniqueCatalogManifest.parseText(PEDDLER_RESOURCE, text);
         }
+    }
+
+    private static Penetration penetration(double organShare, double armorMultiplier) {
+        // 透劲两项都写：器官份额和本次护甲倍数。
+        return Penetration.newBuilder()
+                .setOrganShare(quantity(organShare, Unit.RATIO))
+                .setArmorMultiplier(quantity(armorMultiplier, Unit.RATIO))
+                .build();
+    }
+
+    private static StrikeAttachment numb(double multiplier, long durationMillis) {
+        // 麻：打中部位的肌肉乘这个倍数，持续这么久。
+        Numb numb = Numb.newBuilder()
+                .setMultiplier(quantity(multiplier, Unit.RATIO))
+                .setDurationMillis(durationMillis)
+                .build();
+        return StrikeAttachment.newBuilder().setNumb(numb).build();
     }
 
     private static LimbStrike armStrike() {

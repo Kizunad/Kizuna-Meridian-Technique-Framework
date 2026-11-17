@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveInfusio
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ElementalInfusion;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InfusionCounter;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InfusionStatus;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundAnchor;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundCue;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -18,6 +19,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 import dev.kizuna.meridian.technique.server.TechniqueInfusions.InfusionStrike;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -70,7 +72,11 @@ public final class TechniqueInfusionTest {
     private static final double RATIO = 0.25;
     private static final double HALF = 0.5;
     private static final double DOSE = 6;
-    private static final int IGNITE_TICKS = 20;
+    private static final int BURN_TICKS = 20;
+    private static final double BURN_DAMAGE = 1;
+    private static final String STATUS = "sample:fire_infusion_status";
+    private static final String OTHER_STATUS = "sample:water_infusion_status";
+    private static final int STATUS_COLOR = 0xE0522D;
     private static final double COUNTER = 1.5;
     private static final double COUNTERED = 0.5;
     private static final double COUNTER_VOLUME = 1.5;
@@ -103,8 +109,16 @@ public final class TechniqueInfusionTest {
                 valid.toBuilder().clearCurve().addCurve(point(0, 0)).build(),
                 valid.toBuilder().clearRatio().build(),
                 valid.toBuilder().setRatio(quantity(0, Unit.RATIO)).build(),
-                valid.toBuilder().setIgniteTicks(-1).build(),
-                valid.toBuilder().setFreezeTicks(TechniqueInfusions.MAX_TICKS + 1).build(),
+                valid.toBuilder().setBurnTicks(-1).build(),
+                valid.toBuilder().setChillTicks(TechniqueInfusions.MAX_TICKS + 1).build(),
+                valid.toBuilder().setBurnDamage(quantity(-1, Unit.DAMAGE_POINT)).build(),
+                valid.toBuilder().setBurnDamage(quantity(BURN_DAMAGE, Unit.RATIO)).build(),
+                valid.toBuilder().setBurnDamage(
+                        quantity(TechniqueInfusions.MAX_BURN_DAMAGE_HP + 1, Unit.DAMAGE_POINT)).build(),
+                valid.toBuilder().setBurnTicks(0).build(),
+                valid.toBuilder().setStatus(valid.getStatus().toBuilder().setId("没有命名空间")).build(),
+                valid.toBuilder().setStatus(valid.getStatus().toBuilder().setColorRgb(-1)).build(),
+                valid.toBuilder().setStatus(valid.getStatus().toBuilder().setColorRgb(0x1000000)).build(),
                 valid.toBuilder().setExtraKnockback(quantity(-1, Unit.RATIO)).build(),
                 valid.toBuilder().addCounters(counter(METAL, COUNTER, 1, 0)).build(),
                 valid.toBuilder().setCounters(0, counter(METAL, 0, 1, 0)).build(),
@@ -156,6 +170,79 @@ public final class TechniqueInfusionTest {
         assertTrue(host.effects.isEmpty());
         assertEquals(CURVE_LENGTH - LATE, service.infusionRemainingMillis(ENTITY));
         assertEquals(0, service.infusionRemainingMillis(UUID.randomUUID()));
+    }
+
+    @Test
+    public void listenersHearTheInfusionOnceWhenItIsWritten() {
+        // 表现层靠这个事件挂图标：起手结束前不响；写进身体那一下响一次，带着图标身份和剩余时间；之后不再响。
+        MemoryHost host = host(infused());
+        TechniqueService service = HeldTechniqueFixtures.service(host, registry(infused()));
+        List<TechniqueService.InfusionBegan> heard = new ArrayList<>();
+        service.addInfusionListener(heard::add);
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), CAST)).getPhase());
+        host.nowMillis = WARMUP - 1;
+        service.tick();
+        assertTrue(heard.isEmpty());
+        host.nowMillis = WARMUP + LATE;
+        service.tick();
+        assertEquals(1, heard.size());
+        assertEquals(ENTITY, heard.getFirst().entityUuid());
+        assertEquals(STATUS, heard.getFirst().infusion().getStatus().getId());
+        assertEquals(CURVE_LENGTH - LATE, heard.getFirst().remainingMillis());
+        host.nowMillis = FINISHED;
+        service.tick();
+        assertEquals(1, heard.size());
+        assertEquals(heard.getFirst().infusion(), service.activeInfusion(ENTITY).orElseThrow().infusion());
+        assertEquals(WARMUP + CURVE_LENGTH - FINISHED, service.activeInfusion(ENTITY).orElseThrow().remainingMillis());
+        assertTrue(service.activeInfusion(UUID.randomUUID()).isEmpty());
+    }
+
+    @Test
+    public void interruptedWarmupDoesNotAnnounceAnInfusion() {
+        // 起手被打断，附行没写进身体，表现层也听不到，不会挂出图标。
+        MemoryHost host = host(infused());
+        TechniqueService service = HeldTechniqueFixtures.service(host, registry(infused()));
+        List<TechniqueService.InfusionBegan> heard = new ArrayList<>();
+        service.addInfusionListener(heard::add);
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), CAST)).getPhase());
+        host.nowMillis = WARMUP / 2;
+        service.stagger(ENTITY, HIT_STAGGER);
+        service.tick();
+        host.nowMillis = FINISHED;
+        service.tick();
+        assertTrue(heard.isEmpty());
+        assertTrue(service.activeInfusion(ENTITY).isEmpty());
+    }
+
+    @Test
+    public void endingTheInfusionByItsStatusClearsItOnce() {
+        // 图标被牛奶清掉时表现层调 endInfusion：身份对得上才清，清掉以后不再附伤；再调一次、别人的图标、没有宿主都不动身体。
+        MemoryHost host = host(infused());
+        TechniqueService service = HeldTechniqueFixtures.service(host, registry(infused()));
+        finishCast(service, host, CAST);
+        long revision = host.current().revision();
+        assertFalse(service.endInfusion(ENTITY, OTHER_STATUS));
+        assertFalse(service.endInfusion(UUID.randomUUID(), STATUS));
+        assertEquals(revision, host.current().revision());
+        assertTrue(service.endInfusion(ENTITY, STATUS));
+        assertEquals(revision + 1, host.current().revision());
+        assertFalse(TechniqueState.read(host.current()).hasActiveInfusion());
+        assertEquals(0, service.infusionRemainingMillis(ENTITY));
+        assertTrue(TechniqueInfusions.strike(host.inspect().body(), Optional.empty(), DOSE).isEmpty());
+        assertFalse(service.endInfusion(ENTITY, STATUS));
+        assertEquals(revision + 1, host.current().revision());
+    }
+
+    @Test
+    public void endingAnInfusionThatAlreadyLapsedDoesNothing() {
+        // 图标自然到期那一刻附行也到期了：不提交，身体版本不变。
+        MemoryHost host = host(infused());
+        TechniqueService service = HeldTechniqueFixtures.service(host, registry(infused()));
+        finishCast(service, host, CAST);
+        host.nowMillis = WARMUP + CURVE_LENGTH;
+        long revision = host.inspect().body().revision();
+        assertFalse(service.endInfusion(ENTITY, STATUS));
+        assertEquals(revision, host.current().revision());
     }
 
     @Test
@@ -246,8 +333,9 @@ public final class TechniqueInfusionTest {
         InfusionStrike strike = TechniqueInfusions.strike(owner, Optional.empty(), DOSE).orElseThrow();
         assertEquals(DAMAGE_TYPE, strike.damageTypeId());
         assertEquals(1, strike.multiplier(), 0);
-        assertEquals(IGNITE_TICKS, strike.igniteTicks());
-        assertEquals(0, strike.freezeTicks());
+        assertEquals(BURN_TICKS, strike.burnTicks());
+        assertEquals(BURN_DAMAGE, strike.burnDamageHp(), 0);
+        assertEquals(0, strike.chillTicks());
         assertEquals(0, strike.extraKnockback(), 0);
         assertTrue(TechniqueInfusions.strike(owner, Optional.empty(), 0).isEmpty());
         BodySnapshot early = ownerAt(SAVED_START - 1, infusion());
@@ -340,7 +428,9 @@ public final class TechniqueInfusionTest {
                 .addCurve(point(RAMP, 1))
                 .addCurve(point(PLATEAU_END, 1))
                 .addCurve(point(CURVE_LENGTH, 0))
-                .setIgniteTicks(IGNITE_TICKS)
+                .setBurnTicks(BURN_TICKS)
+                .setBurnDamage(quantity(BURN_DAMAGE, Unit.DAMAGE_POINT))
+                .setStatus(InfusionStatus.newBuilder().setId(STATUS).setColorRgb(STATUS_COLOR))
                 .addCounters(counter(METAL, COUNTER, COUNTER_VOLUME, 0))
                 .addCounters(counter(WATER, COUNTERED, COUNTERED_VOLUME, COUNTERED_PITCH))
                 .setHitSound(hit)

@@ -84,8 +84,8 @@ public final class TechniqueStatusBenefits {
     }
 
     public static boolean quiet(MobEffect effect) {
-        // 命令给予同种效果也保持无粒子。
-        return effect instanceof QuietBenefit;
+        // 命令给予同种效果也保持无粒子；附行图标和伤害附属的灼伤、寒侵也算。
+        return effect instanceof TechniqueQuietEffect;
     }
 
     public static void apply(LivingEntity actor, StatusBenefit benefit) {
@@ -105,7 +105,7 @@ public final class TechniqueStatusBenefits {
         }
     }
 
-    private static final class QuietBenefit extends MobEffect {
+    private static final class QuietBenefit extends TechniqueQuietEffect {
         private QuietBenefit(int color) {
             // 图标和颜色来自内容，行为由共享跃步宿主执行。
             super(MobEffectCategory.BENEFICIAL, color);

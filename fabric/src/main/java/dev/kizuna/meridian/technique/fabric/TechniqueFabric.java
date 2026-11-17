@@ -5,6 +5,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueLeapNetworking;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueCastStatusSync;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeel;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueInfusionStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
@@ -109,7 +110,7 @@ public final class TechniqueFabric implements ModInitializer {
         return service;
     }
 
-    static boolean running() {
+    public static boolean running() {
         // 掉落条件在服务未起时直接判不会，不抛出到原版掉落流程。
         return service != null;
     }
@@ -122,6 +123,7 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueCodex.register();
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
+        TechniqueInfusionStatuses.register(catalogs.earlySources());
         TechniqueScrollDrops.register();
         VolumeLearnedTrigger.register();
         BookCompletedTrigger.register();
@@ -166,6 +168,7 @@ public final class TechniqueFabric implements ModInitializer {
         created.addCastEndListener(event -> CAST_ENDED.invoker().onCastEnded(event));
         created.addCastEndListener(event -> reportFailure(server, event));
         created.addStaggerListener(TechniqueStaggers.listener(server));
+        created.addInfusionListener(TechniqueInfusionStatuses.listener(server));
         TechniqueCastStatusSync.listen(server, created);
         TechniqueInputBuffer.start();
         created.addSoundListener(TechniqueSounds.listener(server));

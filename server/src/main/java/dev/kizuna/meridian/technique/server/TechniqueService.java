@@ -3,14 +3,17 @@ package dev.kizuna.meridian.technique.server;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.ActivityEffort;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
+import dev.kizuna.meridian.server.BodyActivityExecution;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.BodyCommand;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.SetAddonProgress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveInfusion;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ElementalInfusion;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
@@ -43,6 +46,7 @@ public final class TechniqueService {
     public static final String LEARN_SOURCE = "meridian_technique:command";
     private static final String LEARN_REQUEST_PREFIX = "technique_learn_";
     private static final String EFFECT_REQUEST_PREFIX = "technique_effect_";
+    private static final String END_INFUSION_PREFIX = "technique_end_infusion_";
     private static final long BEFORE_START_MILLIS = Long.MIN_VALUE;
     private static final long NOT_STAGGERED_MILLIS = Long.MIN_VALUE;
     private static final long MAX_STAGGER_MILLIS = 60_000;
@@ -56,6 +60,7 @@ public final class TechniqueService {
     private final List<Consumer<StaggerChanged>> staggerListeners = new ArrayList<>();
     private final List<Consumer<CastObserved>> castListeners = new ArrayList<>();
     private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
+    private final List<Consumer<InfusionBegan>> infusionListeners = new ArrayList<>();
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
     private final List<Consumer<StrikeReport>> strikeListeners = new ArrayList<>();
     private TechniqueEffectHandler effectHandler;
@@ -433,6 +438,64 @@ public final class TechniqueService {
         castListeners.remove(listener);
     }
 
+    public void addInfusionListener(Consumer<InfusionBegan> listener) {
+        // 表现层订阅「附行写进身体了」，据此挂图标；监听器只在服务线程调用。
+        infusionListeners.add(Objects.requireNonNull(listener));
+    }
+
+    public void removeInfusionListener(Consumer<InfusionBegan> listener) {
+        // 服务器停止时移除表现层监听器，避免保留旧服务器对象。
+        infusionListeners.remove(listener);
+    }
+
+    /** 身体上还没到期的附行和它的剩余时间；宿主不认领、拒绝查询、没有附行都是空。 */
+    public Optional<InfusionBegan> activeInfusion(UUID entityUuid) {
+        // 供表现层在实体装载后对一次图标；平时不要每 tick 调。
+        TechniqueHost host = hosts.resolve(Objects.requireNonNull(entityUuid)).orElse(null);
+        if (host == null) {
+            return Optional.empty();
+        }
+        try {
+            BodySnapshot body = host.inspect().body();
+            return TechniqueInfusions.active(body).map(active -> new InfusionBegan(entityUuid, active.getInfusion(),
+                    TechniqueInfusions.remainingMillis(body)));
+        } catch (TechniqueErrors.HostRejected exception) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 提前结束身体上的附行：它的图标被牛奶、指令清掉时由表现层调用，不留下看不见的附行。
+     *
+     * @param statusId 被清掉的图标；身体上的附行不是这一个（已经换了一式）就不动
+     * @return 这次调用把附行清掉了
+     */
+    public boolean endInfusion(UUID entityUuid, String statusId) {
+        // 没有附行、已到期、死体（另有清除路径）、宿主拒绝都返回 false；请求号带施放身份，重复提交无害。
+        Objects.requireNonNull(statusId);
+        TechniqueHost host = hosts.resolve(Objects.requireNonNull(entityUuid)).orElse(null);
+        if (host == null) {
+            return false;
+        }
+        try {
+            BodySnapshot body = host.inspect().body();
+            Optional<ActiveInfusion> active = TechniqueInfusions.active(body);
+            if (active.isEmpty() || !active.get().getInfusion().getStatus().getId().equals(statusId)) {
+                return false;
+            }
+            TechniqueProgress cleared = TechniqueState.read(body).toBuilder().clearActiveInfusion().build();
+            BodyActivity activity = BodyActivity.newBuilder()
+                    .putProgress(TechniqueState.KEY, TechniqueState.pack(cleared))
+                    .build();
+            BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
+            host.submit(new TechniqueHost.Submission(END_INFUSION_PREFIX + active.get().getCastId(),
+                    body.revision(), activity));
+            return true;
+        } catch (TechniqueErrors.HostRejected exception) {
+            return false;
+        }
+    }
+
     public void addCastEndListener(Consumer<TechniqueCastEnded> listener) {
         // 附属模组按实体和 cast_id 释放世界接管，监听器只在服务线程调用。
         castEndListeners.add(Objects.requireNonNull(listener));
@@ -501,6 +564,17 @@ public final class TechniqueService {
                 listener.accept(event);
             } catch (RuntimeException ignored) {
                 // 调试记录失败只影响观察输出，施放状态仍以本服务为准。
+            }
+        }
+    }
+
+    private void publishInfusion(InfusionBegan event) {
+        // 图标挂不上不能撤销已经写进身体的附行。
+        for (Consumer<InfusionBegan> listener : List.copyOf(infusionListeners)) {
+            try {
+                listener.accept(event);
+            } catch (RuntimeException ignored) {
+                // 图标只是显示，附伤仍以身体上的附行为准。
             }
         }
     }
@@ -754,6 +828,8 @@ public final class TechniqueService {
             }
             session.pendingAdvance = result;
             wrote = wroteToHost(result, body);
+            result.infusionBegan().ifPresent(began -> publishInfusion(
+                    new InfusionBegan(entityUuid, began.infusion(), began.remainingMillis())));
         }
         if (!deliverPending(entityUuid, session)) {
             return Optional.empty();
@@ -1231,6 +1307,15 @@ public final class TechniqueService {
             if (immobilizing != standsStill) {
                 throw new IllegalArgumentException("受击、倒地的移动倍率必须在 (0, 1] 内，魅惑、被擒必须为 0");
             }
+        }
+    }
+
+    /** 附行刚写进身体，或装载后查到的还在生效的附行；表现层据此挂图标。 */
+    public record InfusionBegan(UUID entityUuid, ElementalInfusion infusion, long remainingMillis) {
+        public InfusionBegan {
+            // 事件只描述身体上的事实，监听器不能借此改写服务状态。
+            Objects.requireNonNull(entityUuid);
+            Objects.requireNonNull(infusion);
         }
     }
 

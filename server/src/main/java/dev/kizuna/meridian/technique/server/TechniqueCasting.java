@@ -20,15 +20,35 @@ public final class TechniqueCasting {
     private static final long NO_PREVIOUS_MILLIS = Long.MIN_VALUE;
     private final TechniqueRegistry registry;
 
-    /** 一次可信时钟推进产生的效果意图和可选终止回执。 */
+    /**
+     * 一次可信时钟推进产生的效果意图和可选终止回执。
+     *
+     * @param infusionBegan 这次推进把附行写进了身体时，是哪一个附行、还剩多久
+     */
     public record AdvanceResult(CastOutcome outcome, List<EffectIntent> effects,
-                                Optional<TechniqueHost.Commit> recoveryCommit, long advancedMillis) {
+                                Optional<TechniqueHost.Commit> recoveryCommit, long advancedMillis,
+                                Optional<InfusionBegan> infusionBegan) {
         public AdvanceResult {
             // 调度结果在交给宿主前固定下来，避免调用方修改效果顺序。
             effects = List.copyOf(effects);
             recoveryCommit = Objects.requireNonNull(recoveryCommit);
+            Objects.requireNonNull(infusionBegan);
+        }
+
+        public AdvanceResult(CastOutcome outcome, List<EffectIntent> effects,
+                             Optional<TechniqueHost.Commit> recoveryCommit, long advancedMillis) {
+            // 多数推进不写附行。
+            this(outcome, effects, recoveryCommit, advancedMillis, Optional.empty());
+        }
+
+        private AdvanceResult with(Optional<InfusionBegan> began) {
+            // 写附行和收势落在同一个边界时，收势的结果也要带上这条。
+            return new AdvanceResult(outcome, effects, recoveryCommit, advancedMillis, began);
         }
     }
+
+    /** 刚写进身体的附行。 */
+    public record InfusionBegan(ElementalInfusion infusion, long remainingMillis) { }
 
     public TechniqueCasting(TechniqueRegistry registry) {
         // 只持有不可变定义，运行状态全部位于宿主的身体与回执中。
@@ -379,6 +399,7 @@ public final class TechniqueCasting {
         Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
         long boundaryMillis;
         BodySnapshot paidBody;
+        Optional<InfusionBegan> began = Optional.empty();
         if (definition.isPresent()) {
             TechniqueDefinition currentDefinition = definition.get();
             long workBoundary = TechniqueScheduledWork.boundary(
@@ -391,6 +412,11 @@ public final class TechniqueCasting {
             BodySnapshot workedBody = TechniqueScheduledWork.payDue(
                     host, currentDefinition, modifiedBody, boundaryMillis);
             paidBody = TechniqueScheduledInfusions.applyDue(host, currentDefinition, workedBody, boundaryMillis);
+            if (paidBody != workedBody) {
+                // applyDue 只有真写了附行才换一份身体回来。
+                began = TechniqueInfusions.active(paidBody).map(written -> new InfusionBegan(written.getInfusion(),
+                        TechniqueInfusions.remainingMillis(paidBody)));
+            }
         } else {
             boundaryMillis = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
             paidBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
@@ -400,9 +426,9 @@ public final class TechniqueCasting {
         CastPhase current = TechniqueScheduler.phase(active, boundaryMillis);
         if (!due.recoveryDue()) {
             return new AdvanceResult(outcome(active, current, paidBody.revision()),
-                    due.effects(), Optional.empty(), boundaryMillis);
+                    due.effects(), Optional.empty(), boundaryMillis, began);
         }
-        return stop(host, paidBody, TechniqueState.read(paidBody), CastPhase.FINISHED, due.effects());
+        return stop(host, paidBody, TechniqueState.read(paidBody), CastPhase.FINISHED, due.effects()).with(began);
     }
 
     private static TechniqueScheduler.Due leapsFromGround(TechniqueHost host,

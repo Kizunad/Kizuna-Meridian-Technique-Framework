@@ -33,9 +33,19 @@ public final class TechniqueInfusions {
     private static final int MAX_CURVE_POINTS = 16;
     private static final String NO_ATTRIBUTE = Qi.QiAttribute.NONE.id().value();
 
-    /** 一记附伤：伤害附属照此打出本行伤害、做原版附带并播命中声。damageHp 是原版 HP。 */
-    public record InfusionStrike(String damageTypeId, double damageHp, double multiplier, int igniteTicks,
-                                 int freezeTicks, double extraKnockback, Optional<SoundCue> sound) {
+    static final double MAX_BURN_DAMAGE_HP = 20;
+    private static final int MAX_COLOR = 0xFFFFFF;
+
+    /**
+     * 一记附伤：伤害附属照此打出本行伤害、给目标挂附带的状态并播命中声。damageHp、burnDamageHp 是原版 HP。
+     *
+     * @param burnTicks    目标灼伤的时长，0 不灼伤
+     * @param burnDamageHp 一次灼伤一共掉的血
+     * @param chillTicks   目标寒侵加的时长，0 不寒侵
+     */
+    public record InfusionStrike(String damageTypeId, double damageHp, double multiplier, int burnTicks,
+                                 double burnDamageHp, int chillTicks, double extraKnockback,
+                                 Optional<SoundCue> sound) {
     }
 
     private TechniqueInfusions() {
@@ -66,7 +76,17 @@ public final class TechniqueInfusions {
             sound = Optional.of(adjustedSound(infusion.getHitSound(), counter));
         }
         return Optional.of(new InfusionStrike(infusion.getDamageTypeId(), damage, multiplier,
-                infusion.getIgniteTicks(), infusion.getFreezeTicks(), extraKnockback(infusion), sound));
+                infusion.getBurnTicks(), infusion.getBurnDamage().getValue(), infusion.getChillTicks(),
+                extraKnockback(infusion), sound));
+    }
+
+    /** 身体上还没到期的附行；死体、没有附行、已到期都是空。 */
+    public static Optional<ActiveInfusion> active(BodySnapshot body) {
+        // 和 remainingMillis 同一个口径：按身体时钟算到曲线末点。
+        if (remainingMillis(body) == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(TechniqueState.read(body).getActiveInfusion());
     }
 
     public static long remainingMillis(BodySnapshot body) {
@@ -134,8 +154,22 @@ public final class TechniqueInfusions {
         TechniqueValues.id(infusion.getDamageTypeId(), "elemental_infusion.damage_type_id");
         TechniqueValues.positive(infusion.getRatio(), Unit.RATIO, MAX_RATIO, "elemental_infusion.ratio");
         validateCurve(infusion.getCurveList());
-        validateTicks(infusion.getIgniteTicks(), "elemental_infusion.ignite_ticks");
-        validateTicks(infusion.getFreezeTicks(), "elemental_infusion.freeze_ticks");
+        validateTicks(infusion.getBurnTicks(), "elemental_infusion.burn_ticks");
+        validateTicks(infusion.getChillTicks(), "elemental_infusion.chill_ticks");
+        if (infusion.hasBurnDamage()) {
+            TechniqueValues.quantity(infusion.getBurnDamage(), Unit.DAMAGE_POINT, 0, MAX_BURN_DAMAGE_HP,
+                    "elemental_infusion.burn_damage");
+            if (infusion.getBurnTicks() == 0) {
+                throw TechniqueErrors.invalid("elemental_infusion.burn_damage", "不灼伤（burn_ticks 为 0）时不能填灼伤的血量");
+            }
+        }
+        if (infusion.hasStatus()) {
+            TechniqueValues.id(infusion.getStatus().getId(), "elemental_infusion.status.id");
+            int color = infusion.getStatus().getColorRgb();
+            if (color < 0 || color > MAX_COLOR) {
+                throw TechniqueErrors.invalid("elemental_infusion.status.color_rgb", "颜色必须位于 [0, 0xFFFFFF]");
+            }
+        }
         if (infusion.hasExtraKnockback()) {
             TechniqueValues.quantity(infusion.getExtraKnockback(), Unit.RATIO, 0, MAX_RATIO,
                     "elemental_infusion.extra_knockback");
@@ -248,7 +282,7 @@ public final class TechniqueInfusions {
     }
 
     private static void validateTicks(int ticks, String path) {
-        // 原版附带的刻数有界，0 表示不做这项附带。
+        // 附带状态的刻数有界，0 表示不做这项附带。
         if (ticks < 0 || ticks > MAX_TICKS) {
             throw TechniqueErrors.invalid(path, "刻数必须位于 [0, " + MAX_TICKS + "]");
         }

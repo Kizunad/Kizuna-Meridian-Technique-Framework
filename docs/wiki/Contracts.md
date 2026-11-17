@@ -594,14 +594,17 @@ Fabric 端用 `LootTableEvents.MODIFY` 只往该实体自带的掉落表（`Enti
 ## 五行附行
 
 `TechniqueEffect.elemental_infusion=24` 声明一个附行。附行生效以后，主人每次可附伤的命中都另打一记本行伤害。
-哪些命中可附伤、附伤落在哪里、怎么做原版附带，都由伤害附属决定；本库只保存状态，并算出附伤数值。
+哪些命中可附伤、附伤落在哪里、附带的状态怎么挂，都由伤害附属决定；本库保存状态、算出附伤数值，并管主人身上的附行图标。
 
 | 字段 | 规则 |
 |---|---|
 | `attribute`、`damage_type_id` | 本行属性 ID、附伤用的原版伤害类型 ID，都是 `namespace:path` |
 | `ratio` | RATIO，(0, 10]，附伤占主击剂量的比例 |
 | `curve` | 偏移单位 ms，相对效果时刻；2–16 点，首点偏移 0，首尾值 0，偏移严格递增，值在 [0, 1]；末点就是到期，不超过 300000。附行比施放长，所以不受「施放时长 + 冷却」限制 |
-| `ignite_ticks`、`freeze_ticks` | [0, 1200]，目标着火刻数、冻结刻数增量；0 表示不做 |
+| `burn_ticks` | [0, 1200]，目标「灼伤」的时长刻数，已在灼伤时取剩余和它的较大者；0 表示不做。编号 5，原名 `ignite_ticks` |
+| `burn_damage` | DAMAGE_POINT，[0, 20]，一次灼伤（`burn_ticks` 刻）一共掉的原版 HP；省略为 0。`burn_ticks` 为 0 时不能填 |
+| `chill_ticks` | [0, 1200]，目标「寒侵」每中一次加的时长刻数，封顶由伤害附属定；0 表示不做。编号 6，原名 `freeze_ticks` |
+| `status` | `{id, color_rgb}`，附行期间挂在主人身上的状态效果图标；省略不显示。`id` 是 `namespace:path`，颜色在 [0, 0xFFFFFF] |
 | `extra_knockback` | RATIO，[0, 10]，原版击退强度；省略为 0 |
 | `counters` | 最多 16 条，按目标主属性取倍率，目标属性不重复；未列出的属性 ×1。五行谁克谁由内容附属写在这里，本库不内置 |
 | `counters[].damage_multiplier` | RATIO，(0, 10] |
@@ -610,6 +613,31 @@ Fabric 端用 `LootTableEvents.MODIFY` 只往该实体自带的掉落表（`Enti
 | `hit_sound` | 锚点必须是 `TARGET`；省略不播。启动时的未注册声音告警也列它 |
 
 一式最多一个附行效果。附行不生成 `EffectIntent`，宿主不必认识这个算子。
+
+灼伤、寒侵是伤害附属注册的两个状态效果（`meridian_vanilla_damage:burn`、`meridian_vanilla_damage:chill`），
+不碰原版的着火刻和冻结刻。旧名 `ignite_ticks`、`freeze_ticks` 的文本目录要跟着改名，否则解析时按未知字段拒绝；
+线上编号没变，存档里正生效的附行照样读得出来。
+
+### 附行图标
+
+`status` 声明的图标在模组初始化时按目录注册成不出粒子的有益状态效果（和状态增益同一套），语言和贴图由内容附属提供：
+`effect.<namespace>.<path>`、`textures/mob_effect/<path>.png`。几式共用一个 `id` 时颜色要一致。
+
+身体上的附行是准，图标只是它的显示（`TechniqueInfusionStatuses`）：
+
+- **起。** 附行写进身体时，`TechniqueService` 发 `InfusionBegan`（`addInfusionListener`）。表现层摘掉这个实体身上所有附行图标，
+  再挂这一个，时长取附行剩余时间折成 tick 向上取整。换一式就是旧图标没、新图标上；起手被打断不写附行，也就没有事件、没有图标。
+- **到期。** 图标按挂上时的时长倒计时，和附行同一刻到头；图标自然到期不回头动身体。
+- **图标被清掉。** 牛奶、`/effect clear`、不死图腾把图标清掉时，表现层调 `TechniqueService.endInfusion(entityUuid, statusId)`，
+  提交一笔只带进度的 `BodyActivity` 清掉 `active_infusion`，请求 ID 是 `technique_end_infusion_<cast_id>`。
+  身体上的附行不是这个图标的（已经换了一式）、已到期、死体、宿主拒绝，都不动身体，返回 false。
+- **外面给的图标不收。** `/effect give` 之类直接给附行图标，`addEffect`、`forceAddEffect` 入口拒绝。
+- **装载。** 玩家读档后、别的实体带着附行图标读档后，等身体宿主认领（最多 100 tick），用 `TechniqueService.activeInfusion` 查一次：
+  有附行就按剩余时间重摆图标，没有就摘掉。
+- 全部由事件触发，平时不读身体。
+
+不出粒子的状态效果继承 `TechniqueQuietEffect`：`/effect give` 给出来的也不出粒子、照常有图标。
+状态增益、附行图标和伤害附属的灼伤、寒侵都是它。
 
 ### 身体上的附行
 
@@ -638,7 +666,8 @@ Fabric 端用 `LootTableEvents.MODIFY` 只往该实体自带的掉落表（`Enti
 - `strike(owner, Optional<target>, doseHp)` 返回 `Optional<InfusionStrike>`。
   - 主人身体死了、没有附行、曲线值为 0（起点以前、末点以后）或剂量不大于 0，都返回空。
   - 附伤 `damageHp = doseHp × ratio × 曲线值 × 相克倍率`，单位和剂量相同（原版 HP）。曲线在相邻拐点间线性插值。
-  - `InfusionStrike` 另带伤害类型 ID、倍率、着火与冻结刻数、追加击退，以及按相克调好的命中声。
+  - `burnTicks`、`burnDamageHp`、`chillTicks` 原样取目录里的值，不乘曲线和相克倍率。
+  - `InfusionStrike` 另带伤害类型 ID、倍率、灼伤的时长和总血量、寒侵加的时长、追加击退，以及按相克调好的命中声。
   - 命中声：音量乘倍率后不超过 4；音调加偏移后夹在 `[0.5 + 抖动, 2 − 抖动]` 里，抖动的两端也能播。
 - `primaryAttribute(body)` 求目标主属性：
   - 只看所有经脉的内腔，不算管壁和器官缓存；

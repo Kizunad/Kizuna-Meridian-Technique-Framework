@@ -652,11 +652,19 @@ message ElementalInfusion {
   Quantity ratio = 3; // RATIO，(0, 10]，附伤占主击剂量的比例
   // 偏移单位 ms，相对效果时刻，值为 [0, 1]；2–16 点，首点偏移 0，首尾值 0，末点是到期，不超过 300000。
   repeated kizuna.meridian.v1.CurvePoint curve = 4;
-  int32 ignite_ticks = 5; // [0, 1200]，目标着火刻数；0 不点火
-  int32 freeze_ticks = 6; // [0, 1200]，目标冻结刻数增量；0 不冻结
+  // 5、6 原名 ignite_ticks、freeze_ticks（点着、加冻结刻）；现在是伤害附属的「灼伤」「寒侵」两个状态效果，编号不变。
+  int32 burn_ticks = 5; // [0, 1200]，目标灼伤的时长刻数，再中取剩余和它的较大者；0 不灼伤
+  int32 chill_ticks = 6; // [0, 1200]，目标寒侵每中一次加的刻数；0 不寒侵
   Quantity extra_knockback = 7; // RATIO，[0, 10]，原版击退强度；省略为 0
   repeated InfusionCounter counters = 8; // 按目标主属性取倍率，目标属性不重复；未列出的为 ×1
   SoundCue hit_sound = 9; // 锚点必须是 TARGET；省略不播
+  InfusionStatus status = 10; // 附行期间挂在主人身上的状态效果图标；省略不显示
+  Quantity burn_damage = 11; // DAMAGE_POINT，[0, 20]，一次灼伤（burn_ticks 刻）一共掉的原版 HP；省略为 0，burn_ticks 为 0 时不能填
+}
+// 附行的图标：按 id 注册成不出粒子的有益状态效果，语言和贴图由内容附属提供。
+message InfusionStatus {
+  string id = 1; // 状态效果 ID，各附行、各状态增益之间不重复
+  int32 color_rgb = 2; // [0, 0xFFFFFF]
 }
 // 目标主属性是 target_attribute 时，附伤与命中声的调整。
 message InfusionCounter {

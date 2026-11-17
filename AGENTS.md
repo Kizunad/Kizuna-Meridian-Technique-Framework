@@ -14,6 +14,16 @@
 - 每个方法、构造器内部写中文意图注释；一行不超过 120 列，不嵌套 builder，不用复杂三元。
 - 自有方法不使用布尔参数，参数超过 5 个用 record；方法超过约 40 行按完整业务阶段拆分。
 - 整体测试只保留公开契约、关键流程、模块交互与已知缺陷保护；临时探针验证后清理。
-- 交付运行 `./gradlew test build`、`python3 "scripts/check_docs.py"` 和 `git diff --check`，汇报代码形状自查。
+- 交付运行 `python3 "scripts/check_docs.py"` 和 `git diff --check`，汇报代码形状自查。
 - 提交、推送、远端建仓分别按用户授权执行，不强推、不重写历史。
 - 原创部分采用 PolyForm Noncommercial 1.0.0，保留第三方许可。
+
+## 构建和测试
+
+构建、测试一律走工作区的 `kz`（`~/Code/Kizuna-remote-session/scripts/kz`），不直接运行 `./gradlew`。细则以 `~/Code/Kizuna-remote-session/handoff/codex-worker-rules.md` 为准，动手前先读。
+
+- 单测、构建和服务端 GameTest：`kz test ~/Code/<本仓的 worktree>`
+- 要带上别的仓的 worktree 一起测：每个加一次 `--with ~/Code/<那个仓的 worktree>`
+- 客户端测试：`kz client ~/Code/<本仓的 worktree>` 列出有哪些项，`kz client ~/Code/<本仓的 worktree> <项>` 跑其中一项
+- 要自己写 Gradle 参数时：`kz gradle ~/Code/<本仓的 worktree> -- <参数>`
+- 不提交、不推送；在自己的 worktree（`~/Code/wt-*`）里改，不改主目录。

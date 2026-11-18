@@ -42,6 +42,8 @@ public final class TechniqueState {
             ActiveCast active = progress.getActiveCast();
             if (!active.getRequest().getBodyId().equals(body.id().value())
                     || active.getStartedMillis() > body.settledAt().elapsedMillis()
+                    || (active.hasSustained() && active.getSustained().hasEndRequestedMillis()
+                        && active.getSustained().getEndRequestedMillis() > body.settledAt().elapsedMillis())
                     || active.getBinding().getRevision() >= body.revision()) {
                 throw TechniqueErrors.invalid(KEY, "当前施放的身体、时间或绑定 revision 不一致");
             }
@@ -129,12 +131,17 @@ public final class TechniqueState {
         long warmupEnd = active.getWarmupEndMillis();
         long activeEnd = active.getActiveEndMillis();
         long recoveryEnd = active.getRecoveryEndMillis();
-        if (started < 0 || warmupEnd < started || activeEnd < warmupEnd || recoveryEnd <= started
-                || recoveryEnd < activeEnd || recoveryEnd - started > TechniqueValues.MAX_MILLIS
+        if (started < 0 || warmupEnd < started
                 || active.getActionInstanceId().isBlank() || !active.hasInterruptibleByDamage()
                 || !active.getBinding().getBodyId().equals(active.getRequest().getBodyId())
                 || active.getBinding().getRevision() < 0) {
             throw TechniqueErrors.invalid("active_cast", "施放边界、动作身份或绑定信息非法");
+        }
+        if (active.hasSustained()) {
+            TechniqueSustained.validateActive(active);
+        } else if (activeEnd < warmupEnd || recoveryEnd <= started
+                || recoveryEnd < activeEnd || recoveryEnd - started > TechniqueValues.MAX_MILLIS) {
+            throw TechniqueErrors.invalid("active_cast", "有限施放边界非法");
         }
         var slots = new HashSet<String>();
         validateCastRules(active);
@@ -243,6 +250,9 @@ public final class TechniqueState {
             throw TechniqueErrors.invalid("active_cast.presentations", "表现数量超限");
         }
         long duration = active.getRecoveryEndMillis() - active.getStartedMillis();
+        if (active.hasSustained()) {
+            duration = active.getWarmupEndMillis() - active.getStartedMillis();
+        }
         long previous = 0;
         for (TechniqueEffect effect : active.getPresentationsList()) {
             PresentationEffect presentation = effect.getPresentation();

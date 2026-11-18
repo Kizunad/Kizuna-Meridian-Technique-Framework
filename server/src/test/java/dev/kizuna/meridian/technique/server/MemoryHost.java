@@ -178,6 +178,11 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
         nextEffectFailure = FailureCode.INTERNAL_ERROR;
     }
 
+    void conflictNextActivity() {
+        // 收势提交冲突必须由功法服务保留请求并自动重试。
+        nextFailure = FailureCode.REVISION_CONFLICT;
+    }
+
     MemoryHost restore() {
         // 模拟快照二进制存档与回执恢复，释放账户也一起保留。
         BodySnapshot restored = BodyProtobuf.decodeSnapshot(BodyProtobuf.encodeSnapshot(current()));

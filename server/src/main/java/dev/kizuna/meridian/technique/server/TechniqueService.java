@@ -13,6 +13,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EndActiveRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ElementalInfusion;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
@@ -59,6 +60,7 @@ public final class TechniqueService {
     private final Map<StaggerKey, Long> staggerEnds = new LinkedHashMap<>();
     private final List<Consumer<StaggerChanged>> staggerListeners = new ArrayList<>();
     private final List<Consumer<CastObserved>> castListeners = new ArrayList<>();
+    private final List<Consumer<CastStateChanged>> castStateListeners = new ArrayList<>();
     private final List<Consumer<TechniqueCastEnded>> castEndListeners = new ArrayList<>();
     private final List<Consumer<InfusionBegan>> infusionListeners = new ArrayList<>();
     private final List<Consumer<SoundDue>> soundListeners = new ArrayList<>();
@@ -79,6 +81,212 @@ public final class TechniqueService {
         CastOutcome outcome = resolveCast(entityUuid, request);
         publishCast(new CastObserved(entityUuid, outcome));
         return outcome;
+    }
+
+    public CastOutcome endActive(UUID entityUuid, EndActiveRequest request) {
+        // 收势请求与起式分开校验，不重做费用或宿主起式准入。
+        Objects.requireNonNull(entityUuid);
+        try {
+            TechniqueProtocol.validateEndActive(request);
+        } catch (IllegalArgumentException rejected) {
+            return releaseFailure(request, TechniqueFailure.INVALID_REQUEST);
+        }
+        try {
+            return receiveEndActive(entityUuid, request);
+        } catch (TechniqueErrors.HostRejected rejected) {
+            return hostFailureOutcome(request.getCastId(), rejected.failure());
+        } catch (TechniqueErrors.Rejected rejected) {
+            return releaseFailure(request, rejected.code);
+        } catch (IllegalArgumentException rejected) {
+            return releaseFailure(request, TechniqueFailure.INVALID_STATE);
+        }
+    }
+
+    public Optional<GuardState> activeGuard(UUID entityUuid) {
+        // 已接收收势或正在终止时立即撤防，不等活动重试；其余只读权威进度。
+        Session session = sessions.get(Objects.requireNonNull(entityUuid));
+        if (session != null && (session.terminating || session.pendingRelease != null
+                || session.deferred != null && session.deferred != Transition.STAGGER)) {
+            return Optional.empty();
+        }
+        TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
+        if (host == null) {
+            return Optional.empty();
+        }
+        try {
+            BodySnapshot body = host.inspect().body();
+            ActiveCast active = TechniqueState.read(body).getActiveCast();
+            var vitality = body.vitality();
+            if (vitality.dead() || vitality.remainingSeconds() == 0 || !active.hasSustained()
+                    || TechniqueScheduler.phase(active, body.settledAt().elapsedMillis()) != CastPhase.EFFECTIVE
+                    || hardControlled(entityUuid)) {
+                return Optional.empty();
+            }
+            CastRequest request = active.getRequest();
+            return Optional.of(new GuardState(body.id().value(), request.getCastId(),
+                    request.getTechnique(), active.getSustained().getGuard()));
+        } catch (TechniqueErrors.HostRejected rejected) {
+            return Optional.empty();
+        }
+    }
+
+    private CastOutcome receiveEndActive(UUID entityUuid, EndActiveRequest request) {
+        // 首次接受时刻随当前会话保存，重复请求不延长收势。
+        Session session = sessions.get(entityUuid);
+        TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
+        if (host == null) {
+            return releaseFailure(request, TechniqueFailure.NO_HOST);
+        }
+        BodySnapshot body = host.inspect().body();
+        var vitality = body.vitality();
+        if (!body.id().value().equals(request.getBodyId()) || vitality.dead() || vitality.remainingSeconds() == 0) {
+            return releaseFailure(request, TechniqueFailure.BODY_UNAVAILABLE);
+        }
+        TechniqueProgress progress = TechniqueState.read(body);
+        if (!progress.hasActiveCast()) {
+            return releaseIdle(request);
+        }
+        ActiveCast active = progress.getActiveCast();
+        validateReleaseSession(session, active, request);
+        boolean replayed = session.pendingRelease != null || active.getSustained().hasEndRequestedMillis();
+        if (!replayed && !session.terminating) {
+            session.pendingRelease = new PendingRelease(request, body.settledAt().elapsedMillis());
+        }
+        if (!session.processing) {
+            advance(entityUuid, session);
+        }
+        var receipt = CastOutcome.newBuilder()
+                .setCastId(request.getCastId())
+                .setReplayed(replayed);
+        return receivedRelease(session, receipt);
+    }
+
+    private static void validateReleaseSession(Session session, ActiveCast active, EndActiveRequest request) {
+        // 身体已经匹配后再验证施放身份，旧请求不能作用于后来的一式。
+        String castId = request.getCastId();
+        if (!active.getRequest().getCastId().equals(castId)) {
+            throw TechniqueErrors.rejected(TechniqueFailure.CAST_ID_CONFLICT);
+        }
+        if (!active.hasSustained()) {
+            throw TechniqueErrors.rejected(TechniqueFailure.INVALID_REQUEST);
+        }
+        if (session == null || !session.castId.equals(castId)) {
+            throw TechniqueErrors.rejected(TechniqueFailure.INVALID_STATE);
+        }
+    }
+
+    private static CastOutcome receivedRelease(Session session, CastOutcome.Builder receipt) {
+        // 成功提交后返回新阶段；排队时只报告最后确认的身体事实。
+        if (session.bodyStopped && session.terminationOutcome != null) {
+            return receipt.setPhase(session.terminationOutcome.getPhase())
+                    .setRevision(session.terminationOutcome.getRevision())
+                    .build();
+        }
+        BodySnapshot body = session.inspected;
+        ActiveCast active = TechniqueState.read(body).getActiveCast();
+        CastPhase phase = CastPhase.FINISHED;
+        if (active.hasSustained()) {
+            phase = TechniqueScheduler.phase(active, body.settledAt().elapsedMillis());
+        }
+        return receipt.setPhase(phase)
+                .setRevision(body.revision())
+                .build();
+    }
+
+    private static CastOutcome releaseFailure(EndActiveRequest request, TechniqueFailure failure) {
+        // 收势沿用施放的结构化失败，不要求下游识别异常文本。
+        return CastOutcome.newBuilder()
+                .setCastId(request.getCastId())
+                .setFailure(failure)
+                .setReason(TechniqueErrors.playerReason(failure))
+                .build();
+    }
+
+    private void applyRelease(UUID entityUuid, Session session, BodySnapshot body) {
+        // 请求只在交付安全点写入；宿主瞬时拒绝时保留同一请求与首次接收时刻。
+        PendingRelease pending = session.pendingRelease;
+        EndActiveRequest request = pending.request();
+        long requestedMillis = pending.requestedMillis();
+        TechniqueProgress progress = TechniqueState.read(body);
+        if (!progress.hasActiveCast()) {
+            session.pendingRelease = null;
+            return;
+        }
+        ActiveCast active = progress.getActiveCast();
+        if (!body.id().value().equals(request.getBodyId())
+                || !active.getRequest().getCastId().equals(request.getCastId())) {
+            throw TechniqueErrors.invalid("end_active", "会话身体或施放身份已变化");
+        }
+        if (!active.getSustained().hasEndRequestedMillis()) {
+            BodyActivity activity = TechniqueSustained.release(body, requestedMillis);
+            String requestId = "technique_release_" + session.castId;
+            Optional<TechniqueHost.Commit> receipt = session.host.findActivity(requestId);
+            if (receipt.isEmpty()) {
+                TechniqueHost.Commit commit = session.host.submit(
+                        new TechniqueHost.Submission(requestId, body.revision(), activity));
+                validateCommit(body, activity, commit);
+            }
+        }
+        BodySnapshot releasedBody = session.host.inspect().body();
+        session.inspected = releasedBody;
+        session.pendingRelease = null;
+        ActiveCast released = TechniqueState.read(releasedBody).getActiveCast();
+        if (!released.getSustained().hasEndRequestedMillis()) {
+            throw TechniqueErrors.invalid("end_active", "收势回执没有对应的已保存收势事实");
+        }
+        publishState(entityUuid, session, released, requestedMillis);
+    }
+
+    private void publishState(UUID entityUuid, Session session, ActiveCast active, long millis) {
+        // 只发布真实阶段或首次确定的结束边界；同阶段 tick 不重播表现。
+        if (!active.hasSustained()) {
+            return;
+        }
+        CastPhase phase = TechniqueScheduler.phase(active, millis);
+        if (phase == CastPhase.FINISHED) {
+            return;
+        }
+        ActiveCast previous = session.publishedActive;
+        if (previous != null && phase == session.publishedPhase
+                && previous.getSustained().equals(active.getSustained())) {
+            return;
+        }
+        session.publishedActive = active;
+        session.publishedPhase = phase;
+        var event = new CastStateChanged(entityUuid, active, phase);
+        for (Consumer<CastStateChanged> listener : List.copyOf(castStateListeners)) {
+            try {
+                listener.accept(event);
+            } catch (RuntimeException ignored) {
+                // 通知故障不回滚已经提交的施放事实。
+            }
+        }
+    }
+
+    private static CastOutcome releaseIdle(EndActiveRequest request) {
+        // 同身体已无施放时，迟到的松开只得到幂等空闲回执。
+        return CastOutcome.newBuilder()
+                .setCastId(request.getCastId())
+                .setPhase(CastPhase.IDLE)
+                .setReplayed(true /* replayed */)
+                .build();
+    }
+
+    private boolean hardControlled(UUID entityUuid) {
+        // 普通受击不撤防，三种硬控各自按身体时钟判断。
+        return staggerRemainingMillis(entityUuid, StaggerKind.CHARM) > 0
+                || staggerRemainingMillis(entityUuid, StaggerKind.HOLD) > 0
+                || staggerRemainingMillis(entityUuid, StaggerKind.DOWN) > 0;
+    }
+
+    public void addCastStateListener(Consumer<CastStateChanged> listener) {
+        // 宿主订阅持续施放的阶段及结束边界变化。
+        castStateListeners.add(Objects.requireNonNull(listener));
+    }
+
+    public void removeCastStateListener(Consumer<CastStateChanged> listener) {
+        // 停服时移除宿主监听，避免保留旧世界对象。
+        castStateListeners.remove(listener);
     }
 
     private CastOutcome resolveCast(UUID entityUuid, CastRequest request) {
@@ -315,7 +523,10 @@ public final class TechniqueService {
         if (stagger.durationMillis() == 0 || !recordStagger(entityUuid, stagger)) {
             return Optional.empty();
         }
-        return transition(entityUuid, Transition.STAGGER);
+        if (stagger.kind() == StaggerKind.HIT) {
+            return transition(entityUuid, Transition.STAGGER);
+        }
+        return transition(entityUuid, Transition.HARD_CONTROL);
     }
 
     private boolean recordStagger(UUID entityUuid, Stagger stagger) {
@@ -738,10 +949,21 @@ public final class TechniqueService {
             finishSession(entityUuid, previous);
         }
         long previousMillis = previousMillis(active.getStartedMillis());
-        List<EffectIntent> cleanup = TechniqueScheduler.stopEffects(active,
-                active.getRecoveryEndMillis(), active.getRecoveryEndMillis());
+        long cleanupMillis = active.getRecoveryEndMillis();
+        if (active.hasSustained()) {
+            cleanupMillis = active.getWarmupEndMillis();
+        }
+        List<EffectIntent> cleanup = TechniqueScheduler.stopEffects(active, cleanupMillis, cleanupMillis);
         Session session = new Session(host, previousMillis, castId, cleanup);
         sessions.put(entityUuid, session);
+        if (active.hasSustained()) {
+            session.inspected = body;
+            process(entityUuid, session, () -> {
+                publishState(entityUuid, session, active, body.settledAt().elapsedMillis());
+                advanceOnce(entityUuid, session);
+                return Optional.empty();
+            });
+        }
         if (TechniqueMovement.multiplier(active) < 1 || active.getPredecessorCleanupCount() > 0
                 || active.getLockTarget()) {
             advance(entityUuid, session);
@@ -782,6 +1004,11 @@ public final class TechniqueService {
                 terminate(entityUuid, session);
                 return;
             }
+            if (session.pendingRelease != null && session.pendingAdvance == null) {
+                applyRelease(entityUuid, session, body);
+                body = session.host.inspect().body();
+                session.inspected = body;
+            }
             // 迟到 tick 逐边界完成做功和效果；异常回执保留当前批次，下次仍从同一边界重试。
             for (int boundary = 0; boundary <= TechniqueValues.MAX_TIMELINE_EVENTS + 1; boundary++) {
                 Optional<BodySnapshot> next = advanceBoundary(entityUuid, session, body);
@@ -805,7 +1032,8 @@ public final class TechniqueService {
         // 一、宿主报的已提交版本还是本会话上次查询到的那一版，即身体从那以后没被任何人改过；
         // 二、按宿主报的时钟用那份身体试算，没有任何到期的曲线、做功、效果或收势。
         // 版本对不上、宿主报不出读数、有没交付完的批次或正在清理时，一律照常查询。
-        if (session.inspected == null || session.terminating || session.pendingAdvance != null) {
+        if (session.inspected == null || session.terminating || session.pendingAdvance != null
+                || session.pendingRelease != null) {
             return false;
         }
         Optional<TechniqueBodyStamp> stamp = hosts.bodyStamp(entityUuid);
@@ -834,7 +1062,8 @@ public final class TechniqueService {
         if (!deliverPending(entityUuid, session)) {
             return Optional.empty();
         }
-        if (sessions.get(entityUuid) != session || session.terminating || session.deferred != null) {
+        if (sessions.get(entityUuid) != session || session.terminating || session.deferred != null
+                || session.pendingRelease != null) {
             return Optional.empty();
         }
         BodySnapshot current = body;
@@ -872,6 +1101,9 @@ public final class TechniqueService {
                 session.endReason = TechniqueCastEndReason.COMPLETED;
             }
             finishSession(entityUuid, session);
+        } else if (session.inspected != null) {
+            ActiveCast active = TechniqueState.read(session.inspected).getActiveCast();
+            publishState(entityUuid, session, active, result.advancedMillis());
         }
         return true;
     }
@@ -901,6 +1133,7 @@ public final class TechniqueService {
                                   CastOutcome outcome) {
         // 清理声明独立于业务游标，覆盖部分成功和身体已先收势的两种情况。
         session.terminating = true;
+        session.pendingRelease = null;
         session.pendingAdvance = null;
         session.endReason = reason;
         session.terminationOutcome = outcome;
@@ -938,7 +1171,12 @@ public final class TechniqueService {
                 session.bodyStopped = true;
                 return;
             }
-            TechniqueCasting.AdvanceResult stopped = casting.cancelOnUnload(session.host, session.previousMillis);
+            TechniqueCasting.AdvanceResult stopped;
+            if (session.endReason == TechniqueCastEndReason.STAGGERED) {
+                stopped = casting.interruptSustained(session.host, session.previousMillis);
+            } else {
+                stopped = casting.cancelOnUnload(session.host, session.previousMillis);
+            }
             if (success(stopped.outcome())) {
                 session.bodyStopped = true;
                 if (session.terminationOutcome == null) {
@@ -956,6 +1194,9 @@ public final class TechniqueService {
         for (EffectIntent effect : effects) {
             String requestId = effectRequestId(effect);
             if (!effect.hasSound()) {
+                if (session.completedCleanup.contains(requestId)) {
+                    continue;
+                }
                 if (effect.hasBlockWork() || effect.hasUseBrew() || effect.hasOrganRefine()
                         || effect.hasGrapple() || effect.hasThrow()
                         || effect.hasLaunchProjectile() && effect.getLaunchProjectile().getProjectile().hasBrew()) {
@@ -967,6 +1208,9 @@ public final class TechniqueService {
                     continue;
                 }
                 session.host.submitEffect(new TechniqueHost.EffectSubmission(requestId, effect));
+                if (session.cleanup.remove(requestId) != null) {
+                    session.completedCleanup.add(requestId);
+                }
             } else if (session.sounded.add(requestId)) {
                 publishSound(new SoundDue(entityUuid, effect.getSound()));
             }
@@ -1055,6 +1299,7 @@ public final class TechniqueService {
         // 当前交付结束后最多消费一个排队迁移；回调再次排队留到下一 tick。
         // 这样避免递归或忙循环。
         session.processing = true;
+        PendingRelease initialRelease = session.pendingRelease;
         try {
             Transition queued = session.deferred;
             session.deferred = null;
@@ -1067,6 +1312,12 @@ public final class TechniqueService {
             if (deferred != null && sessions.get(entityUuid) == session) {
                 transitionOnce(entityUuid, session, deferred);
             }
+            if (sessions.get(entityUuid) == session && !session.terminating
+                    && session.pendingRelease != null && session.pendingAdvance == null && session.deferred == null) {
+                if (session.pendingRelease != initialRelease) {
+                    advanceOnce(entityUuid, session);
+                }
+            }
             return result;
         } finally {
             session.processing = false;
@@ -1075,9 +1326,23 @@ public final class TechniqueService {
 
     private Optional<CastOutcome> transitionOnce(UUID entityUuid, Session session, Transition transition) {
         // 卸载不再补发尚未确认的业务效果，只完成取消和独立清理。
+        if (transition == Transition.HARD_CONTROL) {
+            if (session.inspected == null
+                    || !TechniqueState.read(session.inspected).getActiveCast().hasSustained()) {
+                return interruptByStagger(entityUuid, session);
+            }
+        }
         if (transition != Transition.STAGGER || session.terminating) {
             if (!session.terminating) {
-                beginTermination(entityUuid, session, endReason(transition), cancellationOutcome(session.castId));
+                CastOutcome outcome;
+                if (transition == Transition.HARD_CONTROL) {
+                    outcome = cancellationOutcome(session.castId).toBuilder()
+                            .setPhase(CastPhase.INTERRUPTED)
+                            .build();
+                } else {
+                    outcome = cancellationOutcome(session.castId);
+                }
+                beginTermination(entityUuid, session, endReason(transition), outcome);
             } else {
                 terminate(entityUuid, session);
             }
@@ -1126,7 +1391,7 @@ public final class TechniqueService {
     private static TechniqueCastEndReason endReason(Transition transition) {
         // 生命周期迁移使用稳定原因，附属无需解释内部状态机分支。
         return switch (transition) {
-            case STAGGER -> TechniqueCastEndReason.STAGGERED;
+            case STAGGER, HARD_CONTROL -> TechniqueCastEndReason.STAGGERED;
             case UNLOAD -> TechniqueCastEndReason.UNLOADED;
             case DISCONNECT -> TechniqueCastEndReason.DISCONNECTED;
             case DEATH -> TechniqueCastEndReason.DIED;
@@ -1186,11 +1451,11 @@ public final class TechniqueService {
     private List<KnownEntry> entries(TechniqueProgress progress) {
         // 目录缺包时保留 ID，名称退回稳定的公开标识，不能丢失可信学会记录。
         List<KnownEntry> result = new ArrayList<>();
-        for (KnownTechnique known : progress.getKnownList()) {
-            String name = registry.find(known.getTechnique())
+        for (TechniqueReference reference : TechniqueKnowledge.references(registry, progress)) {
+            String name = registry.find(reference)
                     .map(this::nameOf)
-                    .orElse(known.getTechnique().getId());
-            result.add(new KnownEntry(known.getTechnique(), name));
+                    .orElse(reference.getId());
+            result.add(new KnownEntry(reference, name));
         }
         return List.copyOf(result);
     }
@@ -1218,10 +1483,9 @@ public final class TechniqueService {
                 .build();
     }
 
-    private static boolean isKnown(TechniqueProgress progress, TechniqueReference reference) {
+    private boolean isKnown(TechniqueProgress progress, TechniqueReference reference) {
         // 精确版本已存在时学习命令幂等返回，不产生第二条记录或通知。
-        return progress.getKnownList().stream()
-                .anyMatch(known -> known.getTechnique().equals(reference));
+        return TechniqueKnowledge.contains(registry, progress, reference);
     }
 
     private static String learnRequestId(List<TechniqueReference> references) {
@@ -1354,6 +1618,15 @@ public final class TechniqueService {
         }
     }
 
+    public record CastStateChanged(UUID entityUuid, ActiveCast active, CastPhase phase) {
+        public CastStateChanged {
+            // 事件只携带不可变施放快照，不承担当下防御的权威存储。
+            Objects.requireNonNull(entityUuid);
+            Objects.requireNonNull(active);
+            Objects.requireNonNull(phase);
+        }
+    }
+
     /** 一次施放者声音到期：目录里锚点为 CASTER 的声音，由表现层在该实体处播放。 */
     public record SoundDue(UUID entityUuid, SoundCue cue) {
         public SoundDue {
@@ -1423,6 +1696,8 @@ public final class TechniqueService {
         }
     }
 
+    private record PendingRelease(EndActiveRequest request, long requestedMillis) { }
+
     private static final class Session {
         private final TechniqueHost host;
         private final String castId;
@@ -1430,7 +1705,11 @@ public final class TechniqueService {
         private BodySnapshot inspected;
         private long previousMillis;
         private TechniqueCasting.AdvanceResult pendingAdvance;
+        private PendingRelease pendingRelease;
+        private ActiveCast publishedActive;
+        private CastPhase publishedPhase;
         private final Map<String, EffectIntent> cleanup = new LinkedHashMap<>();
+        private final Set<String> completedCleanup = new HashSet<>();
         /** 已交给声音监听者的请求 ID；整批重试时跳过，避免同一声音重复播放。 */
         private final Set<String> sounded = new HashSet<>();
         private boolean terminating;
@@ -1454,7 +1733,7 @@ public final class TechniqueService {
 
         private void defer(Transition transition) {
             // 卸载与断线优先于僵直，重复取消合并为一次迁移。
-            if (deferred == null || transition != Transition.STAGGER) {
+            if (deferred == null || transition.ordinal() > deferred.ordinal()) {
                 deferred = transition;
             }
         }
@@ -1462,6 +1741,7 @@ public final class TechniqueService {
 
     private enum Transition {
         STAGGER,
+        HARD_CONTROL,
         UNLOAD,
         DISCONNECT,
         DEATH

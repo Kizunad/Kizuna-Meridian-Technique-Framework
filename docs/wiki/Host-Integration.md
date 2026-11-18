@@ -1,5 +1,35 @@
 # 宿主与施放流程
 
+## 持续施放的收势与查询
+
+`TechniqueService.endActive(UUID, EndActiveRequest)` 接收带 `body_id/cast_id` 的正常收势；玩家松开与伤害宿主
+主动撤防共用此入口，不重跑起式准入、绑定或扣费。调用一次，`CastOutcome.failure` 未设置即算接收。
+同身体不同施放返回 `CAST_ID_CONFLICT`，不同身体返回 `BODY_UNAVAILABLE`，有限式返回 `INVALID_REQUEST`；
+已无施放则返回幂等 IDLE。标识校验使用 `TechniqueProtocol.validateEndActive`，没有专门的 encode/decode 包装。
+
+宿主回调中收势或提交发生瞬时冲突时，服务把首次请求和身体时刻保存在现有 Session，安全点自行提交或重试；
+下游无需维护重试队列。请求被接受后 `activeGuard(UUID)` 立即为空。提交后唯一权威状态仍在 Framework 的
+`addon_progress["meridian_technique:state"]`。同身份重试不延长收势，死亡、卸载和硬控优先于排队的收势。
+永久提交失败进入终止清理；清理效果未确认时保留原身份重试，不丢弃解锁责任。
+
+`activeGuard` 只在存活的持续生效段返回冻结 Guard；起手、收势、硬控和清理中均为空。
+它不检查伤害类型或挡位，伤害附属自行判定并在伤害事务完成后调用 `endActive`。
+`addCastStateListener/removeCastStateListener` 订阅进程内只读的
+`CastStateChanged(UUID entityUuid, ActiveCast active, CastPhase phase)`：开始、阶段变更及首次确定结束边界各通知一次。
+短按会收到结束边界已知的 WARMUP 更新，再进入 RECOVERING；同阶段 tick 不反复通知，零长度阶段不制造事件。
+终态沿用 `CastEnded`。迟到 tick 的监听者应结合事件边界跳过过时动画，状态通知不负责权威防御或唯一解锁。
+
+普通 HIT 仍只打断可打断起手；CHARM/HOLD/DOWN 对持续式任意阶段立即终止，有限式保持原规则。
+死亡、断线、卸载、停服和 `recoverOnLoad` 均清理持续式，不恢复“还按着键”。
+持续式即使移动倍率为 1 也发送 LOCK/UNLOCK，供宿主维护输入占用；禁疾跑、举盾准入和部位判断仍归宿主。
+持续式停止效果的身份和载荷从起手就保持不变，`scheduled_millis` 使用起手时刻作为幂等标记，执行时刻由调度决定。
+
+`CastStatus.end_times_unknown=true` 时结束/可接时刻都为 0，客户端不能据此过期或放行输入。
+收势边界确定后状态监听立即同步，同 cast 更新不重新对表或重播起手。
+`TechniqueInputBuffer.press` 对持续式永不排队；未知结束前的普通式也不排队。
+`clear(UUID, String castId)` 只清理对应按键，旧松开不得清掉后来普通式的缓冲。
+玩家端需保存按压到 body/cast 的可信映射，并保证松开不被按下限流吞掉。
+
 ## 附属周期效果与施放结束
 
 `TechniqueService.setEffectHandler` 安装一个附属桥接器；Fabric 的 `EFFECT_HANDLER` 统一完成多附属分发。

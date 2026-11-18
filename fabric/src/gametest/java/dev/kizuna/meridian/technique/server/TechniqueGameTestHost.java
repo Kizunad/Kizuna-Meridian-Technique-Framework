@@ -28,6 +28,7 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
                 .setId(HELD_TECHNIQUE_ID)
                 .build();
         return TechniqueRegistry.load(addons(), List.of(catalog(definitionWithEffects()),
+                catalog(GuardTechniqueFixtures.guard()),
                 HeldTechniqueFixtures.groupedCatalog(held), combatCatalog(),
                 ProjectileTechniqueFixtures.archery(TechniqueProjectileGameTest.definition())));
     }

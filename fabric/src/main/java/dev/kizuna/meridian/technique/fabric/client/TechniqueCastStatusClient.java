@@ -82,7 +82,7 @@ public final class TechniqueCastStatusClient {
         double elapsed = (now(partialTick) - startedTick) * MILLIS_PER_TICK;
         long end = status.getFollowUpsList().stream().mapToLong(hint -> hint.getCloseMillis())
                 .max().orElse(0);
-        if (elapsed > Math.max(end, status.getRecoveryEndMillis())) {
+        if (!status.getEndTimesUnknown() && elapsed > Math.max(end, status.getRecoveryEndMillis())) {
             return Optional.empty();
         }
         return Optional.of(new Cast(status, elapsed));

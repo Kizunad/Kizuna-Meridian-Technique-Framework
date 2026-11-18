@@ -43,7 +43,8 @@ public final class TechniqueAdvancementGameTest {
             ItemStack stack = new ItemStack(TechniqueScrollItems.scrolls().get(Identifier.parse(BASIC + "_scroll")));
             player.setItemInHand(InteractionHand.MAIN_HAND, stack);
             player.gameMode.useItem(player, player.level(), stack, InteractionHand.MAIN_HAND);
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == 1, "卷轴没有学会");
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == 1 + GuardTechniqueFixtures.INNATE_COUNT, "卷轴没有学会");
             context.assertTrue(done(player, BASIC_LEARNED), "用卷轴学会基础卷后进度没完成");
             context.assertTrue(done(player, ANY_LEARNED), "用卷轴学会一卷后任意一卷进度没完成");
             context.assertFalse(done(player, ADVANCED_LEARNED), "学会基础卷却完成了进阶卷进度");
@@ -78,7 +79,8 @@ public final class TechniqueAdvancementGameTest {
         try {
             context.assertTrue(GameTestCommands.run(source, "meridian technique learn @s " + BASIC) == 1,
                     "学习命令失败");
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == 1, "命令没有学会");
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == 1 + GuardTechniqueFixtures.INNATE_COUNT, "命令没有学会");
             context.assertFalse(done(player, ANY_LEARNED), "命令加卷触发了卷轴进度");
         } finally {
             release(player);

@@ -60,6 +60,15 @@ public final class TechniqueProtocol {
         }
     }
 
+    public static void validateEndActive(EndActiveRequest request) {
+        // 收势只能携带身体和施放身份，匹配当前宿主由服务负责。
+        TechniqueValues.knownFields(request);
+        TechniqueValues.castId(request.getCastId());
+        if (request.getBodyId().isBlank() || request.getBodyId().length() > TechniqueValues.MAX_TEXT) {
+            throw TechniqueErrors.invalid("end_active.body_id", "身体身份缺失或过长");
+        }
+    }
+
     static void validateReference(TechniqueReference reference) {
         // 进度和请求使用完全相同的精确版本约束。
         TechniqueValues.id(reference.getId(), "technique.id");

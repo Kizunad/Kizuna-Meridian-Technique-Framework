@@ -4,7 +4,6 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastStatus;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUp;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUpHint;
-import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueProgress;
@@ -29,16 +28,22 @@ public final class TechniqueCastTimelines {
         status.setTechniqueId(technique.getId())
                 .setCastId(active.getRequest().getCastId())
                 .setElapsedMillis(nowMillis - started)
-                .setWarmupEndMillis(active.getWarmupEndMillis() - started)
-                .setActiveEndMillis(active.getActiveEndMillis() - started)
+                .setWarmupEndMillis(active.getWarmupEndMillis() - started);
+        if (TechniqueSustained.unknownEnd(active)) {
+            return status.setEndTimesUnknown(true /* endTimesUnknown */);
+        }
+        status.setActiveEndMillis(active.getActiveEndMillis() - started)
                 .setRecoveryEndMillis(active.getRecoveryEndMillis() - started);
+        if (active.hasSustained()) {
+            return status.setFreeMillis(active.getRecoveryEndMillis() - started);
+        }
         Optional<TechniqueDefinition> definition = registry.find(technique);
         definition.ifPresent(found -> hits(found, active, status));
         // 收招段从哪一刻开始；目录里没有这一式时写成收势结束，等于不能提前。
         status.setFreeMillis(TechniqueFollowUps.windDownStart(active, definition)
                 .orElse(active.getRecoveryEndMillis() - started));
-        for (KnownTechnique known : progress.getKnownList()) {
-            registry.find(known.getTechnique()).ifPresent(next -> followUp(next, active, status));
+        for (TechniqueReference reference : TechniqueKnowledge.references(registry, progress)) {
+            registry.find(reference).ifPresent(next -> followUp(next, active, status));
         }
         return status;
     }

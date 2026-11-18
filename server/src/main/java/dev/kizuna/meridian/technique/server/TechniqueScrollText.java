@@ -43,6 +43,14 @@ public final class TechniqueScrollText {
     public static List<String> details(TechniqueDefinition definition) {
         // 起手、出招、收势和冷却均按目录毫秒转换，费用保持 EACH 与 EVEN 的差异。
         var phases = definition.getPhases();
+        if (TechniqueSustained.enabled(definition)) {
+            // 按住才持续的式没有固定的出招时长：只写起手和收势，中间写明看按多久。
+            return List.of("真元：" + qiCost(definition) + "　冷却：" + seconds(definition.getCooldownMillis()) + " 秒",
+                    "施放：起手 " + seconds(phases.getWarmupMillis()) + " 秒，按住多久持续多久，松手后收势 "
+                            + seconds(phases.getRecoveryMillis()) + " 秒",
+                    "持物：" + heldText(definition) + "　移动：" + decimal(TechniqueMovement.multiplier(definition))
+                            + " 倍　冲刺：否");
+        }
         long total = phases.getWarmupMillis() + phases.getActiveMillis() + phases.getRecoveryMillis();
         String phasesText = "起手 " + seconds(phases.getWarmupMillis()) + " / 出招 "
                 + seconds(phases.getActiveMillis()) + " / 收势 " + seconds(phases.getRecoveryMillis());

@@ -46,6 +46,7 @@ final class TechniqueFollowUps {
             long startMillis = transition.getStartMillis();
             TechniqueDefinition previousDefinition = definitions.get(reference);
             if (previousDefinition == null || reference.equals(TechniqueRegistry.reference(definition))
+                    || TechniqueSustained.enabled(previousDefinition)
                     || !previous.add(reference) || !transition.hasAfterRecoveryMillis()
                     || !transition.hasStartMillis() || startMillis < 0
                     || startMillis >= definition.getPhases().getWarmupMillis()) {
@@ -98,6 +99,9 @@ final class TechniqueFollowUps {
         LastCast previous;
         if (progress.hasActiveCast()) {
             ActiveCast active = progress.getActiveCast();
+            if (active.hasSustained()) {
+                return Optional.empty();
+            }
             CastPhase phase = TechniqueScheduler.phase(active, now);
             if (phase != CastPhase.RECOVERING && phase != CastPhase.FINISHED) {
                 return Optional.empty();
@@ -127,7 +131,8 @@ final class TechniqueFollowUps {
      * 目录里已经没有前式时为空，那就只能等它走完。
      */
     static OptionalLong windDownStart(ActiveCast active, Optional<TechniqueDefinition> definition) {
-        if (definition.isEmpty()) {
+        // 持续施放必须完整收势，不能从最后一个效果反推替换时刻。
+        if (active.hasSustained() || definition.isEmpty()) {
             return OptionalLong.empty();
         }
         long effectsEnd = TechniqueScheduler.effectsEnd(definition.get(), active) + WIND_DOWN_MARGIN_MILLIS;

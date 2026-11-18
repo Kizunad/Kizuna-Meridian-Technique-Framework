@@ -34,6 +34,7 @@ public final class TechniqueCastStatusSync {
             }
         });
         service.addCastEndListener(ended -> send(server, ended.entityUuid()));
+        service.addCastStateListener(changed -> send(server, changed.entityUuid()));
     }
 
     static void send(MinecraftServer server, UUID entityUuid) {

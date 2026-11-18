@@ -28,6 +28,14 @@ public final class TechniqueSelector {
         FLEEING
     }
 
+    public static boolean isOrdinarySupport(TechniqueDefinition definition) {
+        // 独立防御角色不进入接敌准备、恢复或机动的辅助选式。
+        return switch (definition.getAiHints().getSupport().getRole()) {
+            case AI_ROLE_PREPARE, AI_ROLE_RECOVER, AI_ROLE_REPOSITION -> true;
+            default -> false;
+        };
+    }
+
     public enum Visibility { VISIBLE, HIDDEN }
 
     public enum Approach { APPROACHING, NOT_APPROACHING }

@@ -1,10 +1,12 @@
 package dev.kizuna.meridian.technique.fabric;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.KnownTechnique;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.server.TechniqueScrollCatalog;
 import dev.kizuna.meridian.technique.server.TechniqueScrollText;
 import dev.kizuna.meridian.technique.server.TechniqueService;
+import dev.kizuna.meridian.technique.server.TechniqueState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,10 +110,13 @@ public final class TechniqueScrollItem extends Item {
     }
 
     private boolean knowsOnlyThisVolume(ServerPlayer player) {
-        // 学完以后已学的式正好是这一卷的式，说明这是玩家学会的第一卷，这时才讲怎么用。
-        Set<TechniqueReference> known = TechniqueFabric.service().known(player.getUUID()).stream()
-                .map(TechniqueService.KnownEntry::technique)
-                .collect(Collectors.toSet());
+        // 第一卷提示只看真实学习记录，天生会的式不算以前学过卷轴。
+        Set<TechniqueReference> known = TechniqueFabric.service().observe(player.getUUID())
+                .map(observation -> TechniqueState.read(observation.body())
+                        .getKnownList().stream()
+                        .map(KnownTechnique::getTechnique)
+                        .collect(Collectors.toSet()))
+                .orElse(Set.of());
         return known.equals(Set.copyOf(scroll.volume().getTechniquesList()));
     }
 

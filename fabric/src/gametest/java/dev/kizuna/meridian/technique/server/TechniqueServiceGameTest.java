@@ -57,7 +57,8 @@ public final class TechniqueServiceGameTest {
         context.assertTrue(service.registry().findLatest(TECHNIQUE_ID).isPresent(), "旧 Java 入口目录未合并");
         UUID entityUuid = prepared.entity().getUUID();
         var learned = service.learn(entityUuid, "sample_manifest:volume");
-        context.assertTrue(learned.size() == 1 && service.known(entityUuid).size() == 1, "清单卷未写入已学进度");
+        context.assertTrue(learned.size() == 1 + GuardTechniqueFixtures.INNATE_COUNT
+                && service.known(entityUuid).equals(learned), "清单卷未写入已学进度");
         release(prepared);
         context.succeed();
     }
@@ -77,7 +78,8 @@ public final class TechniqueServiceGameTest {
         int learned = GameTestCommands.run(server.createCommandSourceStack(),
                 "meridian technique learn " + entityUuid + " " + TECHNIQUE_ID);
         TechniqueService service = TechniqueFabric.service();
-        context.assertTrue(learned == 1 && changes.size() == 1, "学会命令或 KNOWN_CHANGED 事件未生效");
+        context.assertTrue(learned == 1 && changes.size() == 1 + GuardTechniqueFixtures.INNATE_COUNT,
+                "学会命令或 KNOWN_CHANGED 事件未生效");
         context.assertTrue(service.known(entityUuid).equals(changes), "known 没有返回已提交的学会记录");
         context.assertTrue(service.cast(entityUuid, request(prepared.host().current(), "gametest"))
                         .getPhase() == CastPhase.WARMUP,
@@ -131,7 +133,8 @@ public final class TechniqueServiceGameTest {
                 server.createCommandSourceStack().withPermission(LevelBasedPermissionSet.MODERATOR),
                 command + TECHNIQUE_ID);
         context.assertTrue(unknown == 0 && denied == 0, "非法学会命令没有拒绝");
-        context.assertTrue(TechniqueFabric.service().known(prepared.entity().getUUID()).isEmpty(),
+        context.assertTrue(TechniqueFabric.service().known(prepared.entity().getUUID()).size()
+                == GuardTechniqueFixtures.INNATE_COUNT,
                 "非法命令写入了知识");
         release(prepared);
         context.succeed();
@@ -148,7 +151,7 @@ public final class TechniqueServiceGameTest {
         int learned = GameTestCommands.run(server.createCommandSourceStack(), command + HeldTechniqueFixtures.UPPER);
         TechniqueService service = TechniqueFabric.service();
         context.assertTrue(learned == 1 && service.known(prepared.entity().getUUID()).size()
-                == VOLUME_TECHNIQUE_COUNT, "按卷学习没有保存全部单式");
+                == VOLUME_TECHNIQUE_COUNT + GuardTechniqueFixtures.INNATE_COUNT, "按卷学习没有保存全部单式");
         MemoryHost host = prepared.host();
         host.heldItems = HeldTechniqueFixtures.hands(HeldItem.getDefaultInstance(),
                 HeldTechniqueFixtures.durableItem("minecraft:iron_axe", HeldTechniqueFixtures.AXES));

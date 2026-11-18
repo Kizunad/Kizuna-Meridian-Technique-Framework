@@ -120,16 +120,18 @@ public final class TechniqueScheduler {
                 effects.add(targetLock(active));
             }
         }
-        if (movementMultiplier < 1 && previousMillis < startedMillis && currentMillis >= startedMillis) {
+        if ((movementMultiplier < 1 || active.hasSustained())
+                && previousMillis < startedMillis && currentMillis >= startedMillis) {
             effects.add(movement(active, MovementAction.LOCK));
         }
         effects.addAll(worldEffects(definition, active, previousOffset, currentOffset, tempo));
-        if (movementMultiplier < 1
-                && previousMillis < recoveryEndMillis && currentMillis >= recoveryEndMillis) {
+        if (!TechniqueSustained.unknownEnd(active) && (movementMultiplier < 1 || active.hasSustained())
+                && (previousMillis < recoveryEndMillis || active.hasSustained())
+                && currentMillis >= recoveryEndMillis) {
             effects.add(movement(active, MovementAction.UNLOCK));
         }
         EndState endState = EndState.RUNNING;
-        if (currentMillis >= recoveryEndMillis) {
+        if (!TechniqueSustained.unknownEnd(active) && currentMillis >= recoveryEndMillis) {
             endState = EndState.RECOVERY_DUE;
         }
         return new Due(effects, endState);
@@ -140,7 +142,6 @@ public final class TechniqueScheduler {
         // 表现停止按表现声明次序编号，相同内容和时刻的两个效果仍有独立身份。
         var effects = new ArrayList<EffectIntent>();
         int presentationIndex = 0;
-        long recoveryOffset = active.getRecoveryEndMillis() - active.getStartedMillis();
         for (int index = 0; index < definition.getEffectsCount(); index++) {
             Optional<TechniqueEffect> projected = project(definition.getEffects(index), active.getClipStartMillis(),
                     tempo);
@@ -151,6 +152,7 @@ public final class TechniqueScheduler {
             // 修正、做功和附行走身体活动；目标锚点的声音并入同刻打击，不单独成为世界意图。
             if (effect.getOperationCase() == TechniqueEffect.OperationCase.TISSUE_MODIFIER
                     || effect.hasWork()
+                    || effect.hasGuard()
                     || effect.hasElementalInfusion()
                     || TechniqueSoundCues.targetAnchored(effect)) {
                 continue;
@@ -165,11 +167,7 @@ public final class TechniqueScheduler {
                 effects.add(effectIntent(new EffectContext(definition, active, effect, index,
                         atMillis, "effect_" + index, tempo)));
             }
-            if (effect.getOperationCase() == TechniqueEffect.OperationCase.PRESENTATION
-                    && effect.getPresentation().getDuration() == PresentationDuration.UNTIL_RECOVERY_END
-                    && recoveryOffset > previousOffset
-                    && recoveryOffset <= currentOffset
-                    && atMillis <= currentOffset) {
+            if (presentationEnds(active, effect, previousOffset, currentOffset)) {
                 effects.add(presentationStop(active, effect, presentationIndex));
             }
             if (effect.hasPresentation()) {
@@ -177,6 +175,26 @@ public final class TechniqueScheduler {
             }
         }
         return List.copyOf(effects);
+    }
+
+    private static boolean presentationEnds(ActiveCast active, TechniqueEffect effect,
+                                            long previousOffset, long currentOffset) {
+        // 结束边界未定时不发停止；松开当刻已经推进过也要补交同身份停止。
+        if (!effect.hasPresentation() || TechniqueSustained.unknownEnd(active)) {
+            return false;
+        }
+        PresentationDuration duration = effect.getPresentation().getDuration();
+        long endMillis;
+        if (duration == PresentationDuration.UNTIL_ACTIVE_END) {
+            endMillis = active.getActiveEndMillis();
+        } else if (duration == PresentationDuration.UNTIL_RECOVERY_END) {
+            endMillis = active.getRecoveryEndMillis();
+        } else {
+            return false;
+        }
+        long endOffset = endMillis - active.getStartedMillis();
+        return endOffset <= currentOffset && effect.getAtMillis() <= currentOffset
+                && (endOffset > previousOffset || active.hasSustained());
     }
 
     private static void addPeriodicEffects(List<EffectIntent> effects, PeriodicContext context) {
@@ -254,7 +272,7 @@ public final class TechniqueScheduler {
                 effects.add(presentationStop(active, effect, index));
             }
         }
-        if (TechniqueMovement.multiplier(active) < 1) {
+        if (TechniqueMovement.multiplier(active) < 1 || active.hasSustained()) {
             effects.add(movement(active, MovementAction.UNLOCK));
         }
         return List.copyOf(effects);
@@ -275,7 +293,7 @@ public final class TechniqueScheduler {
         if (millis < active.getWarmupEndMillis()) {
             return CastPhase.WARMUP;
         }
-        if (millis < active.getActiveEndMillis()) {
+        if (TechniqueSustained.unknownEnd(active) || millis < active.getActiveEndMillis()) {
             return CastPhase.EFFECTIVE;
         }
         if (millis < active.getRecoveryEndMillis()) {
@@ -488,7 +506,7 @@ public final class TechniqueScheduler {
                 .setTargetId(active.getRequest().getTargetId())
                 .setDirection(active.getRequest().getDirection())
                 .setEffectId("presentation_stop_" + index)
-                .setScheduledMillis(active.getRecoveryEndMillis())
+                .setScheduledMillis(cleanupTime(active))
                 .setSelectedHand(active.getSelectedHand())
                 .setPresentation(presentation)
                 .build();
@@ -520,6 +538,14 @@ public final class TechniqueScheduler {
     private static long movementTime(ActiveCast active, MovementAction action) {
         // 清理效果保留计划边界，提前终止重试也使用相同载荷和身份。
         if (action == MovementAction.LOCK) {
+            return active.getStartedMillis();
+        }
+        return cleanupTime(active);
+    }
+
+    private static long cleanupTime(ActiveCast active) {
+        // 持续式起手时结束边界未知，停止载荷采用不变的起手时刻保证重试身份一致。
+        if (active.hasSustained()) {
             return active.getStartedMillis();
         }
         return active.getRecoveryEndMillis();

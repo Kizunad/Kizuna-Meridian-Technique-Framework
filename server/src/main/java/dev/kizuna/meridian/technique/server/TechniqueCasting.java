@@ -150,7 +150,7 @@ public final class TechniqueCasting {
         }
         TechniqueDefinition definition = registry.find(request.getTechnique())
                 .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE));
-        if (progress.getKnownList().stream().noneMatch(known -> known.getTechnique().equals(request.getTechnique()))) {
+        if (!TechniqueKnowledge.contains(registry, progress, request.getTechnique())) {
             throw TechniqueErrors.rejected(NOT_KNOWN);
         }
         long cooldownEnd = progress.getCooldownsOrDefault(definition.getId(), 0);
@@ -349,7 +349,12 @@ public final class TechniqueCasting {
             if (body.vitality().dead() || !progress.hasActiveCast()) {
                 return false;
             }
-            AdvanceResult result = advanceActive(READ_ONLY, body, progress.getActiveCast(),
+            ActiveCast active = progress.getActiveCast();
+            if (active.hasSustained() && TechniqueScheduler.phase(active, previousMillis)
+                    != TechniqueScheduler.phase(active, nowMillis)) {
+                return false;
+            }
+            AdvanceResult result = advanceActive(READ_ONLY, body, active,
                     new Interval(previousMillis, nowMillis));
             return result.advancedMillis() == nowMillis && result.effects().isEmpty()
                     && result.recoveryCommit().isEmpty() && result.outcome().getRevision() == body.revision();
@@ -407,7 +412,8 @@ public final class TechniqueCasting {
             long modifierBoundary = TechniqueScheduledModifiers.boundary(active, previousMillis, nowMillis);
             long infusionBoundary = TechniqueScheduledInfusions.boundary(
                     currentDefinition, active, previousMillis, nowMillis);
-            boundaryMillis = Math.min(Math.min(workBoundary, modifierBoundary), infusionBoundary);
+            long effectBoundary = Math.min(Math.min(workBoundary, modifierBoundary), infusionBoundary);
+            boundaryMillis = TechniqueSustained.boundary(active, previousMillis, effectBoundary);
             BodySnapshot modifiedBody = TechniqueScheduledModifiers.applyDue(host, body, boundaryMillis);
             BodySnapshot workedBody = TechniqueScheduledWork.payDue(
                     host, currentDefinition, modifiedBody, boundaryMillis);
@@ -463,6 +469,11 @@ public final class TechniqueCasting {
     public AdvanceResult cancelOnUnload(TechniqueHost host, long previousMillis) {
         // 必须在冻结时间或撤销宿主访问权之前完成停止提交。
         return transition(host, Signal.UNLOAD, previousMillis);
+    }
+
+    AdvanceResult interruptSustained(TechniqueHost host, long previousMillis) {
+        // 硬控立即终止持续式，有限式仍按原起手可打断规则处理。
+        return transition(host, Signal.HARD_CONTROL, previousMillis);
     }
 
     public AdvanceResult cancelOnDisconnect(TechniqueHost host, long previousMillis) {
@@ -528,6 +539,9 @@ public final class TechniqueCasting {
 
     private static CastPhase ending(ActiveCast active, CastPhase current, Signal signal) {
         // 收势边界优先于取消；可打断标志不影响卸载或下线清理，出手与收势中的僵直不打断。
+        if (signal == Signal.HARD_CONTROL && active.hasSustained()) {
+            return CastPhase.INTERRUPTED;
+        }
         if (current == CastPhase.FINISHED) {
             return CastPhase.FINISHED;
         }
@@ -545,7 +559,7 @@ public final class TechniqueCasting {
         Optional<TechniqueDefinition> definition = registry.find(active.getRequest().getTechnique());
         if (definition.isEmpty()) {
             TechniqueScheduler.EndState endState = TechniqueScheduler.EndState.RUNNING;
-            if (currentMillis >= active.getRecoveryEndMillis()) {
+            if (!TechniqueSustained.unknownEnd(active) && currentMillis >= active.getRecoveryEndMillis()) {
                 endState = TechniqueScheduler.EndState.RECOVERY_DUE;
             }
             List<EffectIntent> cleanup = List.of();
@@ -604,5 +618,5 @@ public final class TechniqueCasting {
         }
     }
 
-    private enum Signal { CLOCK, STAGGER, UNLOAD, DISCONNECT }
+    private enum Signal { CLOCK, STAGGER, HARD_CONTROL, UNLOAD, DISCONNECT }
 }

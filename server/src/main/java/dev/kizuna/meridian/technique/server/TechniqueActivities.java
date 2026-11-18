@@ -90,11 +90,13 @@ final class TechniqueActivities {
                                                      List<BodyMessages.CapabilityModifier> modifiers) {
         // 承接保存前式原边界，新式独立记录正常冷却及起手登记曲线到期。
         TechniqueDefinition definition = start.definition();
-        long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
         var progress = start.progress().toBuilder()
                 .setActiveCast(active)
-                .putCooldowns(definition.getId(), cooldownEnd)
                 .putCurveEnds(definition.getId(), curveEnd(modifiers));
+        if (!TechniqueSustained.unknownEnd(active)) {
+            long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
+            progress.putCooldowns(definition.getId(), cooldownEnd);
+        }
         if (start.progress().hasActiveCast()) {
             progress.setLastCast(TechniqueFollowUps.history(start.progress().getActiveCast(), CastPhase.FINISHED));
         }
@@ -109,9 +111,10 @@ final class TechniqueActivities {
     static TechniqueProgress endedProgress(TechniqueProgress progress, long endedMillis, CastPhase ending) {
         // 提前终止从实际终止时刻计冷却；晚处理的正常收势仍从固定收势边界计时。
         ActiveCast active = progress.getActiveCast();
+        LastCast history = endedHistory(active, ending, endedMillis);
         var stopped = progress.toBuilder()
                 .clearActiveCast()
-                .setLastCast(TechniqueFollowUps.history(active, ending));
+                .setLastCast(history);
         if (active.hasCooldownMillis()) {
             long cooldownStart = endedMillis;
             if (ending == CastPhase.FINISHED) {
@@ -121,6 +124,18 @@ final class TechniqueActivities {
             stopped.putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd);
         }
         return stopped.build();
+    }
+
+    private static LastCast endedHistory(ActiveCast active, CastPhase ending, long endedMillis) {
+        // 持续式提前终止时只留下实际停止边界，不把未知的零时刻当作历史终点。
+        LastCast history = TechniqueFollowUps.history(active, ending);
+        if (active.hasSustained() && ending != CastPhase.FINISHED) {
+            return history.toBuilder()
+                    .setActiveEndMillis(endedMillis)
+                    .setRecoveryEndMillis(endedMillis)
+                    .build();
+        }
+        return history;
     }
 
     static BodyActivity stopAt(TechniqueProgress progress, long endedMillis) {
@@ -166,6 +181,9 @@ final class TechniqueActivities {
         double tempo = TechniqueTempo.multiplier(body, start.binding().getSlotsList());
         long warmupMillis = remainingWarmup(phases.getWarmupMillis(), clipStart);
         long warmupEnd = addTime(started, TechniqueTempo.scale(warmupMillis, tempo));
+        if (TechniqueSustained.enabled(start.definition())) {
+            return new CastTiming(started, clipStart, warmupEnd, 0, 0, tempo);
+        }
         long activeEnd = addTime(warmupEnd, TechniqueTempo.scale(phases.getActiveMillis(), tempo));
         long recoveryEnd = addTime(activeEnd, TechniqueTempo.scale(phases.getRecoveryMillis(), tempo));
         return new CastTiming(started, clipStart, warmupEnd, activeEnd, recoveryEnd, tempo);
@@ -209,6 +227,9 @@ final class TechniqueActivities {
         // 只有目录明确声明的附加规则才写入活动，缺省状态保持协议兼容。
         TechniqueDefinition definition = start.definition();
         Entry entry = start.selection().entry();
+        if (TechniqueSustained.enabled(definition)) {
+            active.setSustained(TechniqueSustained.freeze(definition, active.getTempoMultiplier()));
+        }
         if (TechniqueLimbStrikes.usesLegs(definition)) {
             active.setLegRules(entry.legRules());
         }

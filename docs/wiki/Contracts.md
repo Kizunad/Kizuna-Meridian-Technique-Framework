@@ -1,5 +1,33 @@
 # 数据契约与校验
 
+## 持续守式与天生式
+
+`CastPhases.active_duration` 缺省为 `ACTIVE_DURATION_FIXED`，旧三段有限时长保持原行为。
+`ACTIVE_DURATION_UNTIL_RELEASE` 必须省略 `active_millis`（显式 0 也拒绝），仍显式填写起手、收势、
+可打断规则和冷却；起手加收势须大于 0 且不超过一天，按住的时间不受此上限限制。
+
+持续式须为 `DEFENSE`，AI 角色为 `AI_ROLE_GUARD`，恰有一个 `Guard` 效果且时刻等于起手结束。
+`Guard.angle` 是 DEGREE 总角度 `(0, 360]`；`damage_multiplier` 是挡住后的剩余剂量 RATIO `[0, 1]`；
+`damage_tags` 是 1–16 个不重复的 `namespace:path` 标签，不带 `#`。伤害类型、来向和身体部位由伤害宿主解释。
+其余效果只允许起手内的表现和 CASTER 声音；持续伤害、周期做功、承接与普通辅助调度参数在加载目录时拒绝。
+`UNTIL_ACTIVE_END` 表现在收势开始时停止；`UNTIL_RECOVERY_END` 保持至收势结束，取消时两者都停止。
+普通打击选择器排除 GUARD，`TechniqueSelector.isOrdinarySupport` 也返回 false。
+
+`ActiveCast.sustained` 保存冻结的 Guard、收势长度及可缺省的首次收势时刻。未收时两个结束时刻为 0，
+表示未知；收势后生效末为 `max(起手末, 首次接收时刻)`，收势末为生效末加冻结收势长度。
+短按走完起手直接收势，没有守窗。未收不写假冷却；收势后从真实收势末计算，取消从实际终止时刻计算。
+持续式全程占用动作，不能通过通用收招或承接提前替换。
+
+`innate=true` 只替代学习检查，不绕过身体、境界、费用和宿主准入。天生式禁止入卷。
+`TechniqueKnowledge.references/contains` 按精确版本合并已学与天生式；已有学习顺序保留，新增天生引用按 ID/版本排序。
+`TechniqueService.known()` 返回 `List<KnownEntry>`，其中每项只有 `technique` 引用和 `name`。
+天生式和已学式在这个只读列表中具有相同形状；天生式没有学习时刻、没有来源，也不会伪造 `KnownTechnique`。
+查询或对天生式调用 `learn` 都不会写入学习存档；原 `TechniqueProgress.known` 仍只存真实学习记录。
+
+`GuardState` 是 Java record，字段为 `bodyId/castId/technique/guard`，不属于 proto、不上线、不存档。
+旧存档没有 `sustained`，旧状态消息没有 `end_times_unknown`，两者均保持有限式语义。
+新内容启用前客户端须支持未知边界；持续说明暂留 `technique.meridian_technique.sustained_details` 文案占位。
+
 ## 周期方块效果、巫药事实与动作速度
 
 - `BlockWork` 声明处理器 ID、非空且不重复的目标方块标签、正数米制距离、推进间隔与持续时间。

@@ -17,6 +17,7 @@
       "dev.kizuna.meridian.technique.server.TechniqueScrollGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueAdvancementGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueInputBufferGameTest",
+      "dev.kizuna.meridian.technique.server.TechniqueGuardGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldTargetsGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldBlockingGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeelGameTest",

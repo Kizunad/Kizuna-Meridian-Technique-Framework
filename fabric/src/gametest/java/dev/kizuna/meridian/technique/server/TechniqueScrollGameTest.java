@@ -77,7 +77,8 @@ public final class TechniqueScrollGameTest {
             long revision = host.current().revision();
             context.assertTrue(GameTestCommands.run(source,
                     "meridian technique learn @s sample_scrolls:book") == 1, "补全的书 ID 不能执行");
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == BOTH_VOLUMES_KNOWN,
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == BOTH_VOLUMES_KNOWN + GuardTechniqueFixtures.INNATE_COUNT,
                     "整书学习遗漏书内功法");
             context.assertTrue(host.current().revision() == revision + 1, "整书没有一次提交");
         } finally {
@@ -95,7 +96,8 @@ public final class TechniqueScrollGameTest {
         try {
             context.assertTrue(consumed(use(player, stack)), "生存玩家未成功使用卷轴");
             context.assertTrue(stack.getCount() == INITIAL_COUNT - 1, "生存学习没有只消耗一个卷轴");
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == 1,
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == 1 + GuardTechniqueFixtures.INNATE_COUNT,
                     "卷轴未写入可信已学记录");
             long revision = prepared.host().current().revision();
             context.assertTrue(use(player, stack) == InteractionResult.FAIL, "重复学习没有拒绝");
@@ -194,7 +196,8 @@ public final class TechniqueScrollGameTest {
         try {
             context.assertTrue(use(player, stack) == InteractionResult.FAIL, "缺少前置卷仍成功使用");
             context.assertTrue(stack.getCount() == INITIAL_COUNT, "前置拒绝消耗了卷轴");
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).isEmpty(), "前置拒绝写入了知识");
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == GuardTechniqueFixtures.INNATE_COUNT, "前置拒绝写入了知识");
             context.assertTrue(prepared.host().current().revision() == revision, "前置拒绝改写了身体");
         } finally {
             release(player);
@@ -214,7 +217,8 @@ public final class TechniqueScrollGameTest {
             context.assertTrue(consumed(use(player, advanced)), "满足前置后未学会进阶卷");
             context.assertTrue(basic.getCount() == INITIAL_COUNT && advanced.getCount() == INITIAL_COUNT,
                     "创造学习消耗了卷轴");
-            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size() == BOTH_VOLUMES_KNOWN,
+            context.assertTrue(TechniqueFabric.service().known(player.getUUID()).size()
+                    == BOTH_VOLUMES_KNOWN + GuardTechniqueFixtures.INNATE_COUNT,
                     "创造学习没有保留两卷的全部式");
         } finally {
             release(player);

@@ -38,6 +38,7 @@ final class TechniqueDefinitions {
             throw TechniqueErrors.invalid(definition.getId(), "版本、类别或最低境界非法");
         }
         validateTiming(definition);
+        TechniqueSustained.validateDefinition(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         validateOffHandUse(definition);
         TechniqueBrewEffects.validateDefinition(definition);
@@ -67,7 +68,8 @@ final class TechniqueDefinitions {
     private static void validateTiming(TechniqueDefinition definition) {
         // 显式零时长合法，缺字段不合法；这能区分瞬时生效与未填写。
         CastPhases phases = definition.getPhases();
-        if (!phases.hasWarmupMillis() || !phases.hasActiveMillis() || !phases.hasRecoveryMillis()
+        boolean sustained = TechniqueSustained.enabled(definition);
+        if (!phases.hasWarmupMillis() || (!sustained && !phases.hasActiveMillis()) || !phases.hasRecoveryMillis()
                 || !phases.hasInterruptibleByDamage() || !definition.hasCooldownMillis()) {
             throw TechniqueErrors.invalid("phases", "三段毫秒、打断规则和冷却必须显式提供");
         }
@@ -75,6 +77,10 @@ final class TechniqueDefinitions {
         millis(phases.getActiveMillis(), "active_millis");
         millis(phases.getRecoveryMillis(), "recovery_millis");
         millis(definition.getCooldownMillis(), "cooldown_millis");
+        if (phases.getActiveDuration() == ActiveDuration.UNRECOGNIZED
+                || (sustained && phases.hasActiveMillis())) {
+            throw TechniqueErrors.invalid("active_duration", "持续模式未知或持续式填写了有限生效时长");
+        }
         long durationMillis = durationMillis(phases);
         if (durationMillis == 0 || durationMillis > MAX_MILLIS) {
             throw TechniqueErrors.invalid("phases", "总施放毫秒必须大于 0 且不超过一天");
@@ -281,6 +287,7 @@ final class TechniqueDefinitions {
                 case LAUNCH_PROJECTILE -> TechniqueProjectiles.validate(effect.getLaunchProjectile());
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
                 case PRESENTATION -> validatePresentationEffect(effect.getPresentation());
+                case GUARD -> TechniqueSustained.validateGuard(effect.getGuard());
                 default -> throw TechniqueErrors.invalid("effects", "未知或缺少算子");
             }
         }

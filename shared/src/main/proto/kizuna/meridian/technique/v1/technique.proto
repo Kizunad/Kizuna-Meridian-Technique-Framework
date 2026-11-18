@@ -223,6 +223,11 @@ message CastPhases {
   optional int64 active_millis = 2;
   optional int64 recovery_millis = 3;
   optional bool interruptible_by_damage = 4;
+  ActiveDuration active_duration = 5; // 缺省为固定时长；持续模式必须省略 active_millis
+}
+enum ActiveDuration {
+  ACTIVE_DURATION_FIXED = 0;
+  ACTIVE_DURATION_UNTIL_RELEASE = 1; // 生效段持续到可信收势请求，不能同时声明有限生效时长
 }
 enum ModifierActivation {
   AT_CAST_START = 0; // 缺省保持起手登记；曲线可以延迟生效。
@@ -346,6 +351,7 @@ message CastStatus {
   string rejected_technique_id = 10; // 这条消息同时通报一次没放出来的按键；空表示没有
   TechniqueFailure rejected_failure = 11;
   int64 free_millis = 12; // 收招段从这一刻开始：效果都出完了，这以后按别的式直接起手，不用等收势走完
+  bool end_times_unknown = 13; // true 时 active_end、recovery_end、free 为 0 且无时间含义，客户端不得据此过期
 }
 message FollowUpHint {
   string technique_id = 1;
@@ -376,6 +382,7 @@ enum PresentationDuration {
   PRESENTATION_DURATION_UNSPECIFIED = 0;
   ONCE = 1;
   UNTIL_RECOVERY_END = 2;
+  UNTIL_ACTIVE_END = 3; // 生效段结束时停止；提前终止也停止，重复 STOP 使用同一效果身份
 }
 message PresentationEffect {
   string id = 1;
@@ -633,7 +640,14 @@ message TechniqueEffect {
     LimbStrike limb_strike = 25; // 同一式不能和 leg_strike 混用
     Grapple grapple = 26; // 附属处理器认领；所属书须声明拳掌规则
     Throw throw = 27; // 附属处理器认领；只摔同一施放擒住的目标
+    Guard guard = 28; // 持续守式恰有一个，at_millis 等于起手时长；仅 EFFECTIVE 阶段可查询到
   }
+}
+// 守的声明；只描述可接伤害，接伤部位、覆盖部位、排除类型与伤害结算由伤害附属负责。
+message Guard {
+  Quantity angle = 1; // DEGREE，水平总角 (0, 360]，边界包含在扇面内
+  Quantity damage_multiplier = 2; // RATIO，[0, 1]，挡住部分剩余的剂量比例
+  repeated string damage_tags = 3; // namespace:path，不带 #，任一匹配；1–16 项，不重复
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
 // 施放结束或被打断后不再下发新批；已开始的批次由宿主照常完成。
@@ -761,6 +775,7 @@ enum AiRole {
   AI_ROLE_PREPARE = 1;     // 接敌前准备；类别须为 BUFF
   AI_ROLE_RECOVER = 2;     // 远离威胁时恢复；类别须为 RECOVERY
   AI_ROLE_REPOSITION = 3;  // 取得机动状态，用于突击与拉扯
+  AI_ROLE_GUARD = 4;       // 持续守式；不进入打击或普通辅助选式，由可信宿主显式起收
 }
 message SupportAiHints {
   AiRole role = 1;
@@ -821,6 +836,7 @@ message TechniqueDefinition {
   optional bool allow_off_hand_use_while_casting = 20;
   repeated string off_hand_use_block_tags = 21;
   BrewItemRequirement brew_item = 22; // 主手必须满足，先于费用与起手校验
+  bool innate = 23; // 天生会的精确版本，不入卷、不写学习记录；其余起式检查照常执行
 }
 
 enum TechniqueFailure {
@@ -877,6 +893,11 @@ message CastRequest {
   string cast_id = 4; // 身体内唯一；[A-Za-z0-9_-]，1–64 字符
   HorizontalDirection direction = 5;
   CastEntry entry = 6; // AUTO 自动承接可用窗口，否则普通起手；FOLLOW_UP 强制要求窗口
+}
+// 可信服务端的收势请求；客户端按压身份先由接收端映射，不能直接采信客户端上报的身体或施放身份。
+message EndActiveRequest {
+  string body_id = 1; // 必须与当前宿主身体一致
+  string cast_id = 2; // 使用 CastRequest.cast_id 的格式；只结束匹配的持续施放，回执复用 CastOutcome
 }
 enum CastEntry {
   AUTO = 0;
@@ -1024,6 +1045,13 @@ message ActiveCast {
   optional bool allow_off_hand_use_while_casting = 22;
   repeated string off_hand_use_block_tags = 23;
   optional double tempo_multiplier = 24; // 起手冻结的最慢组织动作速度
+  SustainedCast sustained = 32; // 缺省保持有限施放；结束时刻未定时 active_end/recovery_end 固定为 0
+}
+// 持续施放的冻结参数与首次收势事实；仅保存在 ActiveCast，不另存一份可修改的守状态。
+message SustainedCast {
+  int64 recovery_millis = 1; // 已按起手速度缩放的收势时长；非负，不超过有限时长上限
+  optional int64 end_requested_millis = 2; // 首次接受请求的身体时刻；缺省表示尚未收，重复请求不改写
+  Guard guard = 3; // 起手冻结的守参数；当前是否生效仍由阶段和身体存活状态决定
 }
 message LastCast {
   TechniqueReference technique = 1;

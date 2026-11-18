@@ -148,6 +148,9 @@ final class TechniqueGroups {
             if (!definitions.containsKey(reference) || previous != null) {
                 throw TechniqueErrors.invalid("techniques[" + index + "]", "单式版本不存在、重复或同时属于多卷");
             }
+            if (definitions.get(reference).getInnate()) {
+                throw TechniqueErrors.invalid("techniques[" + index + "]", "天生式不能编入卷");
+            }
         }
     }
 

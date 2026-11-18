@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.fabric.world;
 
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveDuration;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastStatus;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUpHint;
@@ -115,6 +116,14 @@ public final class TechniqueInputBuffer {
         PENDING.remove(player);
     }
 
+    public static void clear(UUID player, String castId) {
+        // 松开只清理同一次按键，迟到包不能清掉另一式的输入。
+        Pending pending = PENDING.get(player);
+        if (pending != null && pending.request().getCastId().equals(castId)) {
+            PENDING.remove(player);
+        }
+    }
+
     /** 这名玩家记着的那一式，没有时为空串。 */
     public static String buffered(UUID player) {
         Pending pending = PENDING.get(player);
@@ -125,6 +134,11 @@ public final class TechniqueInputBuffer {
         // 还要等多久才能出手；等也没用（没学会、真元不够、没拿兵器）或者要等的比缓冲窗口长，就是空。
         // 要等的是：这一式自己的冷却，和上一式到能接它的时刻（接不了的式等上一式进收招段），取晚的。
         long window = settings.inputBufferMillis();
+        var definition = TechniqueFabric.service().registry().find(request.getTechnique());
+        if (definition.isPresent() && definition.get().getPhases().getActiveDuration()
+                == ActiveDuration.ACTIVE_DURATION_UNTIL_RELEASE) {
+            return OptionalLong.empty();
+        }
         var observation = TechniqueFabric.service().observe(player.getUUID()).orElse(null);
         if (window <= 0 || observation == null || !WAITABLE.contains(failure)) {
             return OptionalLong.empty();
@@ -137,6 +151,9 @@ public final class TechniqueInputBuffer {
         long wait = Math.max(0, cooldownEnd - now);
         CastStatus status = TechniqueCastTimelines.status(TechniqueFabric.service().registry(), progress, now)
                 .build();
+        if (status.getEndTimesUnknown()) {
+            return OptionalLong.empty();
+        }
         Optional<FollowUpHint> opening = status.getFollowUpsList().stream()
                 .filter(hint -> hint.getTechniqueId().equals(technique)).findFirst();
         boolean needsWindow = failure == TechniqueFailure.FOLLOW_UP_REQUIRED

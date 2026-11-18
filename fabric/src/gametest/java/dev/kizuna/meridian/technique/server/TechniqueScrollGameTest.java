@@ -132,6 +132,17 @@ public final class TechniqueScrollGameTest {
         context.succeed();
     }
 
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void scrollTooltipShowsTheVolumeNoteOnlyOnThatVolume(GameTestHelper context) {
+        // 测试语言文件只给第一卷配了一句卷的补充说明：第一卷的卷轴单独一行，另一卷的卷轴没有。
+        String key = "volume.sample_scrolls.basic.note";
+        long onBasic = tooltip(scroll(BASIC)).stream().filter(line -> translationKey(line).equals(key)).count();
+        long onAdvanced = tooltip(scroll(ADVANCED)).stream().filter(line -> translationKey(line).equals(key)).count();
+        context.assertTrue(onBasic == 1, "这一卷的补充说明没有单独一行");
+        context.assertTrue(onAdvanced == 0, "别的卷不该带上这一卷的补充说明");
+        context.succeed();
+    }
+
     private static List<Component> tooltip(ItemStack stack) {
         // 与客户端悬停时走同一个物品入口。
         List<Component> lines = new ArrayList<>();

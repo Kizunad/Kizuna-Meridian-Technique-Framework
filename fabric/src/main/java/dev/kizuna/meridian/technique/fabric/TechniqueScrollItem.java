@@ -64,6 +64,11 @@ public final class TechniqueScrollItem extends Item {
         if (Language.getInstance().has(bookNoteKey)) {
             tooltip.accept(Component.translatable(bookNoteKey));
         }
+        // 只属于这一卷的话（比如这一卷从哪儿得来）写在卷名键加 .note 里，缺键时不显示。
+        String volumeNoteKey = TechniqueScrollText.key("volume", scroll.volume().getId()) + ".note";
+        if (Language.getInstance().has(volumeNoteKey)) {
+            tooltip.accept(Component.translatable(volumeNoteKey));
+        }
         List<String> prerequisites = scroll.prerequisites();
         if (!prerequisites.isEmpty()) {
             tooltip.accept(Component.literal("前置卷：" + String.join("、", prerequisites)));

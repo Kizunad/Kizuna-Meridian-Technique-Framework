@@ -110,6 +110,8 @@ Fabric 在两端模组初始化时读取 `fabric.mod.json` 的 `custom["meridian
 物品语言键为 `item.<namespace>.<卷路径>_scroll`。tooltip 每式一行，写式短名、最低境界和真元费用，
 例如「金臂：游炁，金行真元 0.3」；没有费用写「不耗真元」，EACH 费用标「/脉」，未声明境界时只写费用。
 语言里有 `technique.<namespace>.<path>.note` 时用「，」接在该行后面，没有这条就不显示；末行列前置卷。
+整本书共通的话写在 `book.<namespace>.<path>.note`，只属于一卷的话（比如这一卷从哪儿得来）写在
+`volume.<namespace>.<path>.note`，各占一行，缺键不显示。
 式短名使用 `technique.<namespace>.<path>`，路径中的 `/` 转成 `.`；缺键时使用
 `presentation.display_name`（Protobuf 字段 5），旧目录缺省时显示「未命名招式」，不显示资源 ID。
 `presentation.description` 单独保存完整说明。内容包提供 zh_cn/en_us 的式、书、卷和卷轴物品名称；

@@ -39,6 +39,7 @@ public final class TechniqueErrors {
             case COOLING_DOWN -> "气息尚未平复";
             case ALREADY_CASTING -> "正运功中，无暇他顾";
             case BODY_UNAVAILABLE -> "你已无法运功";
+            case BODY_TEMPLATE_MISMATCH -> "这具身体用不了这一式";
             case REALM_TOO_LOW -> "境界不够，尚不能运功";
             case MISSING_MODULE -> "这具身体没有这一式要用的部位";
             case MODULE_UNAVAILABLE -> "身体尚未准备好";

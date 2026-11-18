@@ -33,6 +33,14 @@ public final class TechniqueAddonResources {
 
     public AddonRegistry registry(TechniqueCatalog catalog) {
         // 绑定模板按命名空间定位公共内容包，依赖包也交给 Framework 整批校验。
+        if (catalog.getBindingTemplateGroupsCount() > 0) {
+            var sources = TemplateGroupSource.classpath(loader);
+            var groupContext = TechniqueTemplateGroups.templateContext(sources);
+            var context = groupContext.toBuilder()
+                    .addAllBindingTemplates(catalog.getBindingTemplatesList())
+                    .build();
+            return registry(context);
+        }
         var pending = new TreeSet<String>();
         for (int index = 0; index < catalog.getBindingTemplatesCount(); index++) {
             var reference = catalog.getBindingTemplates(index);

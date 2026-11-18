@@ -1,8 +1,8 @@
 package dev.kizuna.meridian.technique.fabric;
 
 import com.google.protobuf.TextFormat;
-import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonHostProfile;
-import dev.kizuna.meridian.protocol.pb.AddonMessages.AddonRegistration;
+import dev.kizuna.meridian.protocol.pb.BodyMessages.TemplateReference;
+import dev.kizuna.meridian.technique.server.Fixtures;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCatalog;
@@ -118,6 +118,7 @@ public final class TechniqueCatalogDiscoveryTest {
         TechniqueCatalog content = TechniqueCatalogManifest.parseText("fixture", """
                 schema_version: 1
                 namespace: "sample"
+                binding_templates { id: "sample:paired" version: 1 }
                 definitions {
                   id: "sample:technique" version: 1 category: BUFF minimum_realm: TRUE_QI
                   cost {}
@@ -188,6 +189,7 @@ public final class TechniqueCatalogDiscoveryTest {
         return TechniqueCatalogManifest.parseText("fixture", """
                 schema_version: 1
                 namespace: "%1$s"
+                binding_templates { id: "sample:paired" version: 1 }
                 definitions {
                   id: "%1$s:technique" version: 1 category: BUFF minimum_realm: TRUE_QI
                   cost {}
@@ -204,7 +206,12 @@ public final class TechniqueCatalogDiscoveryTest {
 
     private static TechniqueCatalog catalog(String namespace) {
         // 无具体式的目录用于隔离发现顺序与运行规则。
-        return TechniqueCatalog.newBuilder().setSchemaVersion(1).setNamespace(namespace).build();
+        var template = TemplateReference.newBuilder().setId("sample:paired").setVersion(1).build();
+        return TechniqueCatalog.newBuilder()
+                .setSchemaVersion(1)
+                .setNamespace(namespace)
+                .addBindingTemplates(template)
+                .build();
     }
 
     private static TechniqueCatalog bookCatalog(String namespace) {
@@ -224,10 +231,8 @@ public final class TechniqueCatalogDiscoveryTest {
     }
 
     private static AddonRegistry addons() {
-        // 无绑定模板的测试目录仍使用真实 Framework 注册表。
-        AddonHostProfile host = AddonHostProfile.newBuilder().setHostId("test:server").setApiVersion(1).build();
-        AddonRegistration registration = AddonRegistration.newBuilder().setProtocolVersion(1).setHost(host).build();
-        return AddonRegistry.load(registration);
+        // 清单和 Java 入口共享已登记的测试模板。
+        return Fixtures.addons();
     }
 
     private static EntrypointContainer<Object> entrypoint(

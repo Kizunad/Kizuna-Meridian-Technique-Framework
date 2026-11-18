@@ -33,6 +33,21 @@ message TechniqueCatalog {
   repeated TechniqueDefinition definitions = 4;
   repeated TechniqueBook books = 5;
   repeated TechniqueVolume volumes = 6;
+  repeated string binding_template_groups = 7; // 与直绑模板取并集；两者至少声明一项。
+}
+message TemplateGroupManifest {
+  int32 schema_version = 1;
+  repeated TemplateGroup groups = 2;
+  repeated TemplateGroupMembers additions = 3;
+}
+message TemplateGroup {
+  string id = 1;
+  kizuna.meridian.v1.TemplateReference base = 2; // 校验式的标签词表和组成员的图纸。
+  repeated kizuna.meridian.v1.TemplateReference members = 3; // 显式成员，均按 ID 和版本匹配。
+}
+message TemplateGroupMembers {
+  string group_id = 1;
+  repeated kizuna.meridian.v1.TemplateReference members = 2;
 }
 message TechniqueBook {
   string id = 1;
@@ -874,6 +889,7 @@ enum TechniqueFailure {
   ANOINT_OFF_HAND_REQUIRED = 31;
   BREW_KIND_REQUIRED = 32;
   INSUFFICIENT_ATTRIBUTE_QI = 33; // 指定属性的真元不足或相态不够
+  BODY_TEMPLATE_MISMATCH = 34; // 当前身体模板不在该式所属目录的范围内。
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {

@@ -145,7 +145,7 @@ public final class TechniqueInputBufferGameTest {
         service.learn(presser.player.getUUID(),
                 TechniqueRegistry.reference(service.registry().findLatest(TECHNIQUE_ID).orElseThrow()));
         long started = presser.castFirst(context);
-        long free = TechniqueCastTimelines.status(service.registry(), presser.progress(), started).getFreeMillis();
+        long free = TechniqueCastTimelines.status(service.registry(), presser.host.current(), started).getFreeMillis();
         context.assertTrue(free > WIND_DOWN_LEAD_MILLIS && free < CAST_END, "前式的收招段不在施放中间：" + free);
         presser.host.nowMillis = started + free - WIND_DOWN_LEAD_MILLIS;
         var press = TechniqueInputBuffer.press(presser.player, presser.request(TECHNIQUE_ID));

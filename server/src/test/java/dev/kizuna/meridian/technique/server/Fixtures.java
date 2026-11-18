@@ -8,10 +8,13 @@ import dev.kizuna.meridian.protocol.pb.BodyMessages.*;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 /** 功法与身体样本只存在于整体回归测试中。 */
-final class Fixtures {
+public final class Fixtures {
     static final double HP = 100;
     static final double STRENGTH = 200;
     static final double POWER = 400;
@@ -46,6 +49,7 @@ final class Fixtures {
     static final String ORGAN_TAG = "sample:organ";
 
     enum Shape { PAIRED, TENDRIL }
+    private enum Training { NONE, ENABLED }
 
     private Fixtures() {
         // 所有样例都通过真实 Framework 编解码与注册校验。
@@ -88,10 +92,10 @@ final class Fixtures {
 
     private static BodyStructure structure(Shape shape) {
         // 默认样例不声明训练参数，普通功法不能意外进入训练路径。
-        return structure(shape, false);
+        return structure(shape, Training.NONE);
     }
 
-    private static BodyStructure structure(Shape shape, boolean training) {
+    private static BodyStructure structure(Shape shape, Training training) {
         // 对称样本有两个执行组织，触须样本只有一个，均带可独立做功的器官。
         PartDefinition part = PartDefinition.newBuilder()
                 .setId("body")
@@ -113,10 +117,10 @@ final class Fixtures {
 
     private static TissueDefinition tissue(String id) {
         // 普通样例保持无训练声明，专测按需使用带参数模板。
-        return tissue(id, false);
+        return tissue(id, Training.NONE);
     }
 
-    private static TissueDefinition tissue(String id, boolean training) {
+    private static TissueDefinition tissue(String id, Training training) {
         // 基础能力与恢复参数明确，便于验证起手做功和动作占用联动。
         TissueCapacity capacity = TissueCapacity.newBuilder()
                 .setStrengthNewtons(STRENGTH)
@@ -133,7 +137,7 @@ final class Fixtures {
                 .setCapacity(capacity)
                 .setRecoveryHalfLifeSeconds(HALF_LIFE)
                 .addTags(MUSCLE_TAG);
-        if (training) {
+        if (training == Training.ENABLED) {
             TissueTraining parameters = TissueTraining.newBuilder()
                     .setMaximumGrowth(TRAINING_MAXIMUM_GROWTH)
                     .setConsolidationHalfLifeSeconds(TRAINING_HALF_LIFE_SECONDS)
@@ -241,17 +245,22 @@ final class Fixtures {
                 .build();
     }
 
-    static AddonRegistry addons() {
+    public static AddonRegistry addons() {
         // 普通目录仅用于既有功法回归，训练目录由专测显式请求。
-        return addons(false);
+        return registryOf(bundle(Training.NONE, List.of()));
     }
 
     static AddonRegistry trainingAddons() {
         // 训练目录的所有可绑定组织都声明同一套训练参数。
-        return addons(true);
+        return registryOf(bundle(Training.ENABLED, List.of()));
     }
 
-    private static AddonRegistry addons(boolean training) {
+    static AddonRegistry addons(List<BodyTemplate> additional) {
+        // 附加模板与两个标准构型一起经过 Framework 的登记校验。
+        return registryOf(bundle(Training.NONE, additional));
+    }
+
+    private static AddonBundle bundle(Training training, List<BodyTemplate> additional) {
         // 同一个附属登记两种构型，使目录可以验证跨身体标签词汇。
         ContentVersionRange versions = ContentVersionRange.newBuilder()
                 .setMinimum(1)
@@ -262,6 +271,7 @@ final class Fixtures {
                 .setContentVersion(1)
                 .setApiVersions(versions)
                 .addSupportedHosts("test:server")
+                .addSupportedHosts("meridian:java_reference")
                 .build();
         var bundle = AddonBundle.newBuilder()
                 .setSchemaVersion(1)
@@ -275,6 +285,18 @@ final class Fixtures {
                     .build();
             bundle.addTemplates(template);
         }
+        return bundle.addAllTemplates(additional).build();
+    }
+
+    public static void main(String[] args) throws IOException {
+        // 把真实测试构型导出到 GameTest 类路径，与独立附属使用相同的资源发现入口。
+        var file = Path.of(args[0], TechniqueAddonResources.RESOURCE_PREFIX, "sample.pb");
+        Files.createDirectories(file.getParent());
+        Files.write(file, bundle(Training.NONE, List.of()).toByteArray());
+    }
+
+    private static AddonRegistry registryOf(AddonBundle bundle) {
+        // 单测直接登记同一份内容包。
         AddonHostProfile host = AddonHostProfile.newBuilder()
                 .setHostId("test:server")
                 .setApiVersion(1)
@@ -282,11 +304,10 @@ final class Fixtures {
                 .addCapabilities(AddonRegistry.ORGAN_ENDURANCE)
                 .addCapabilities(AddonRegistry.TISSUE_RECOVERY)
                 .build();
-        AddonBundle builtBundle = bundle.build();
         AddonRegistration registration = AddonRegistration.newBuilder()
                 .setProtocolVersion(1)
                 .setHost(host)
-                .addBundles(builtBundle)
+                .addBundles(bundle)
                 .build();
         return AddonRegistry.load(registration);
     }

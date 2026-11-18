@@ -381,8 +381,7 @@ public final class TechniqueService {
             return List.of();
         }
         BodySnapshot body = host.inspect().body();
-        TechniqueProgress progress = TechniqueState.read(body);
-        return entries(progress);
+        return entries(TechniqueKnowledge.references(registry, body));
     }
 
     public Optional<Observation> observe(UUID entityUuid) {
@@ -440,7 +439,6 @@ public final class TechniqueService {
         // 同次学习覆盖其中的前置卷；其余前置仍须已学，任一缺失都不提交部分知识。
         TechniqueHost host = requireHost(entityUuid);
         BodySnapshot body = host.inspect().body();
-        TechniqueProgress progress = TechniqueState.read(body);
         var included = volumes.stream()
                 .map(TechniqueVolume::getId)
                 .collect(Collectors.toSet());
@@ -449,35 +447,41 @@ public final class TechniqueService {
                 .filter(id -> !included.contains(id))
                 .distinct()
                 .toList();
-        for (String id : prerequisites) {
-            TechniqueVolume prerequisite = registry.findVolume(id).orElseThrow();
-            if (!prerequisite.getTechniquesList().stream().allMatch(reference -> isKnown(progress, reference))) {
-                throw new PrerequisiteVolumeException(id);
-            }
-        }
         var references = volumes.stream()
                 .flatMap(volume -> volume.getTechniquesList().stream())
                 .toList();
-        return commitLearn(entityUuid, host, body, references);
+        return commitLearn(entityUuid, host, body, references, prerequisites);
     }
 
     private List<KnownEntry> learnReferences(UUID entityUuid, List<TechniqueReference> references) {
         // 单式与整卷都通过同一种进度活动提交，不保存独立的卷学习状态。
         TechniqueHost host = requireHost(entityUuid);
         BodySnapshot body = host.inspect().body();
-        return commitLearn(entityUuid, host, body, references);
+        return commitLearn(entityUuid, host, body, references, List.of());
     }
 
     private List<KnownEntry> commitLearn(UUID entityUuid, TechniqueHost host, BodySnapshot body,
-                                        List<TechniqueReference> references) {
+                                        List<TechniqueReference> references, List<String> prerequisites) {
         // 只添加缺少的精确版本，一次活动和一次通知覆盖整组新学单式。
         TechniqueProgress progress = TechniqueState.read(body);
+        for (var reference : references) {
+            if (!registry.applies(reference, body.template())) {
+                throw new BodyTemplateMismatchException();
+            }
+        }
+        var knowledge = TechniqueKnowledge.references(registry, body, progress);
+        for (String id : prerequisites) {
+            TechniqueVolume prerequisite = registry.findVolume(id).orElseThrow();
+            if (!knowledge.containsAll(prerequisite.getTechniquesList())) {
+                throw new PrerequisiteVolumeException(id);
+            }
+        }
         List<KnownTechnique> additions = references.stream()
-                .filter(reference -> !isKnown(progress, reference))
+                .filter(reference -> !knowledge.contains(reference))
                 .map(reference -> knownRecord(reference, body.settledAt().elapsedMillis()))
                 .toList();
         if (additions.isEmpty()) {
-            return entries(progress);
+            return entries(knowledge);
         }
         BodyActivity activity = TechniqueActivities.learn(progress, additions);
         String requestId = learnRequestId(references);
@@ -485,7 +489,7 @@ public final class TechniqueService {
         TechniqueHost.Commit commit = host.submit(submission);
         validateCommit(body, activity, commit);
         TechniqueProgress learned = progress.toBuilder().addAllKnown(additions).build();
-        List<KnownEntry> result = entries(learned);
+        List<KnownEntry> result = entries(TechniqueKnowledge.references(registry, body, learned));
         publishKnownChanged(entityUuid, result);
         return result;
     }
@@ -1448,10 +1452,10 @@ public final class TechniqueService {
         }
     }
 
-    private List<KnownEntry> entries(TechniqueProgress progress) {
-        // 目录缺包时保留 ID，名称退回稳定的公开标识，不能丢失可信学会记录。
+    private List<KnownEntry> entries(List<TechniqueReference> references) {
+        // 只投影当前身体适用的精确版本，保留原有学习记录。
         List<KnownEntry> result = new ArrayList<>();
-        for (TechniqueReference reference : TechniqueKnowledge.references(registry, progress)) {
+        for (TechniqueReference reference : references) {
             String name = registry.find(reference)
                     .map(this::nameOf)
                     .orElse(reference.getId());
@@ -1483,11 +1487,6 @@ public final class TechniqueService {
                 .build();
     }
 
-    private boolean isKnown(TechniqueProgress progress, TechniqueReference reference) {
-        // 精确版本已存在时学习命令幂等返回，不产生第二条记录或通知。
-        return TechniqueKnowledge.contains(registry, progress, reference);
-    }
-
     private static String learnRequestId(List<TechniqueReference> references) {
         // UUID 名称哈希把任意内容 ID 压到有界且可重试的 Framework request_id。
         TechniqueVolume selection = TechniqueVolume.newBuilder().addAllTechniques(references).build();
@@ -1498,6 +1497,13 @@ public final class TechniqueService {
     private static String effectRequestId(EffectIntent effect) {
         // 同一施放中的各效果独立去重，停止表现和解锁也各有固定身份。
         return EFFECT_REQUEST_PREFIX + effect.getCastId() + "_" + effect.getEffectId();
+    }
+
+    public static final class BodyTemplateMismatchException extends IllegalArgumentException {
+        private BodyTemplateMismatchException() {
+            // 读卷和命令共享模板准入拒绝的具体原因。
+            super(TechniqueErrors.playerReason(TechniqueFailure.BODY_TEMPLATE_MISMATCH));
+        }
     }
 
     public static final class PrerequisiteVolumeException extends IllegalArgumentException {

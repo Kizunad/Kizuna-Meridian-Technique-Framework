@@ -143,13 +143,14 @@ public final class TechniqueInputBuffer {
         if (window <= 0 || observation == null || !WAITABLE.contains(failure)) {
             return OptionalLong.empty();
         }
-        long now = observation.body().settledAt().elapsedMillis();
-        TechniqueProgress progress = TechniqueState.read(observation.body());
+        var body = observation.body();
+        long now = body.settledAt().elapsedMillis();
+        TechniqueProgress progress = TechniqueState.read(body);
         String technique = request.getTechnique().getId();
         long cooldownEnd = Math.max(progress.getCooldownsOrDefault(technique, 0),
                 progress.getCurveEndsOrDefault(technique, 0));
         long wait = Math.max(0, cooldownEnd - now);
-        CastStatus status = TechniqueCastTimelines.status(TechniqueFabric.service().registry(), progress, now)
+        CastStatus status = TechniqueCastTimelines.status(TechniqueFabric.service().registry(), body, now)
                 .build();
         if (status.getEndTimesUnknown()) {
             return OptionalLong.empty();

@@ -9,6 +9,8 @@ import dev.kizuna.meridian.technique.server.TechniqueCatalogPhase;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogSource;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueRegistryEntrypoint;
+import dev.kizuna.meridian.technique.server.TechniqueTemplateGroups;
+import dev.kizuna.meridian.technique.server.TemplateGroupSource;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 import net.fabricmc.loader.api.entrypoint.EntrypointContainer;
@@ -63,23 +65,35 @@ public final class TechniqueCatalogDiscovery {
         List<ModContainer> mods = installed.stream()
                 .sorted(Comparator.comparing(mod -> mod.getMetadata().getId()))
                 .toList();
+        TechniqueTemplateGroups groups = templateGroups(addons);
         var contributions = new ArrayList<TechniqueCatalogPlan.Contribution>();
         for (ModContainer mod : mods) {
             String modId = mod.getMetadata().getId();
             for (String path : customPaths(mod)) {
                 String source = modId + ":" + path;
                 contributions.add(TechniqueCatalogPlan.Contribution.prepare(
-                        TechniqueCatalogPhase.MOD_INITIALIZATION, () -> manifest(mod, path, source, addons)));
+                        TechniqueCatalogPhase.MOD_INITIALIZATION,
+                        () -> manifest(mod, path, source, catalog -> addons.apply(groups.validationContext(catalog)))));
             }
             collectEntrypoints(modId, entrypoints, contributions);
         }
-        return new TechniqueCatalogPlan(contributions);
+        return new TechniqueCatalogPlan(contributions, groups);
+    }
+
+    private static TechniqueTemplateGroups templateGroups(Function<TechniqueCatalog, AddonRegistry> addons) {
+        // 即使没有目录引用该组，错误声明和追加项也会阻止启动。
+        var sources = TemplateGroupSource.classpath(TechniqueCatalogDiscovery.class.getClassLoader());
+        if (sources.isEmpty()) {
+            return TechniqueTemplateGroups.empty();
+        }
+        var context = TechniqueTemplateGroups.templateContext(sources);
+        return TechniqueTemplateGroups.load(addons.apply(context), sources);
     }
 
     private static List<TechniqueCatalogSource> manifest(ModContainer mod, String path, String source,
             Function<TechniqueCatalog, AddonRegistry> addons) {
         // 模板资源与目录一起固定，初始化后不重读文件。
-        TechniqueCatalog catalog = read(mod, path);
+        TechniqueCatalog catalog = TechniqueCatalogManifest.read(source, resource(mod, path));
         try {
             return List.of(new TechniqueCatalogSource(source, addons.apply(catalog), catalog));
         } catch (RuntimeException exception) {
@@ -159,7 +173,7 @@ public final class TechniqueCatalogDiscovery {
         return List.copyOf(paths);
     }
 
-    private static TechniqueCatalog read(ModContainer mod, String path) {
+    private static Path resource(ModContainer mod, String path) {
         // 路径仅指向所属模组资源；后缀明确决定解析格式。
         String source = mod.getMetadata().getId() + ":" + path;
         List<String> parts = Arrays.asList(path.split("/"));
@@ -170,8 +184,7 @@ public final class TechniqueCatalogDiscovery {
             throw new IllegalArgumentException(source + "：清单必须为模组内的 .txtpb 或 .binpb"
                     + " 相对路径");
         }
-        Path file = mod.findPath(path)
+        return mod.findPath(path)
                 .orElseThrow(() -> new IllegalArgumentException(source + "：模组内找不到清单文件"));
-        return TechniqueCatalogManifest.read(source, file);
     }
 }

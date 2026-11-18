@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastStatus;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUp;
@@ -16,8 +17,9 @@ public final class TechniqueCastTimelines {
         // 只有一个纯函数入口。
     }
 
-    public static CastStatus.Builder status(TechniqueRegistry registry, TechniqueProgress progress, long nowMillis) {
+    public static CastStatus.Builder status(TechniqueRegistry registry, BodySnapshot body, long nowMillis) {
         // 没有施放时返回空状态；时刻都换成相对起手的毫秒，和调度器发效果用的是同一套边界。
+        TechniqueProgress progress = TechniqueState.read(body);
         CastStatus.Builder status = CastStatus.newBuilder();
         if (!progress.hasActiveCast()) {
             return status;
@@ -42,7 +44,7 @@ public final class TechniqueCastTimelines {
         // 收招段从哪一刻开始；目录里没有这一式时写成收势结束，等于不能提前。
         status.setFreeMillis(TechniqueFollowUps.windDownStart(active, definition)
                 .orElse(active.getRecoveryEndMillis() - started));
-        for (TechniqueReference reference : TechniqueKnowledge.references(registry, progress)) {
+        for (TechniqueReference reference : TechniqueKnowledge.references(registry, body, progress)) {
             registry.find(reference).ifPresent(next -> followUp(next, active, status));
         }
         return status;

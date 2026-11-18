@@ -150,7 +150,11 @@ public final class TechniqueCasting {
         }
         TechniqueDefinition definition = registry.find(request.getTechnique())
                 .orElseThrow(() -> TechniqueErrors.rejected(UNKNOWN_TECHNIQUE));
-        if (!TechniqueKnowledge.contains(registry, progress, request.getTechnique())) {
+        var technique = request.getTechnique();
+        if (!registry.applies(technique, body.template())) {
+            throw TechniqueErrors.rejected(BODY_TEMPLATE_MISMATCH);
+        }
+        if (!TechniqueKnowledge.references(registry, body, progress).contains(technique)) {
             throw TechniqueErrors.rejected(NOT_KNOWN);
         }
         long cooldownEnd = progress.getCooldownsOrDefault(definition.getId(), 0);

@@ -143,7 +143,8 @@ public final class TechniqueScrollItem extends Item {
             }
             service.learn(entityId, volumeId);
             return null;
-        } catch (TechniqueService.PrerequisiteVolumeException exception) {
+        } catch (TechniqueService.PrerequisiteVolumeException | TechniqueService.BodyTemplateMismatchException
+                exception) {
             return Component.literal(exception.getMessage());
         } catch (TechniqueService.NoHostException exception) {
             return Component.literal("你还没有可用的身体，无法学习功法");

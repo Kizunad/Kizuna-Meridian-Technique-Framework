@@ -48,7 +48,7 @@ public final class TechniqueGuardTest {
         service.tick();
         assertTrue(service.activeGuard(ENTITY).isPresent());
         assertFalse(progress(host).getCooldownsMap().containsKey(ID));
-        assertTrue(TechniqueCastTimelines.status(service.registry(), progress(host), LONG_HOLD).getEndTimesUnknown());
+        assertTrue(TechniqueCastTimelines.status(service.registry(), host.current(), LONG_HOLD).getEndTimesUnknown());
         assertEquals(CastPhase.RECOVERING, service.endActive(ENTITY, release(press)).getPhase());
         assertTrue(service.activeGuard(ENTITY).isEmpty());
         host.nowMillis = LONG_HOLD + RECOVERY - 1;

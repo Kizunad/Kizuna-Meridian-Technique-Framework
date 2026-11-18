@@ -10,6 +10,8 @@ repositories {
     maven { url = 'https://maven.fabricmc.net/' }
 }
 
+def testServer = project(':server')
+
 dependencies {
     // 26.x 不混淆：直接用官方名编译，没有映射，模组依赖也不经重映射。
     minecraft libs.minecraft
@@ -30,9 +32,18 @@ dependencies {
     implementation libs.antlr.runtime
     include libs.antlr.runtime
     testImplementation libs.junit4
+    testImplementation files(testServer.sourceSets.test.output)
 }
 
 test { useJUnit() }
+
+def sampleBundles = layout.buildDirectory.dir('generated/sample-bundles')
+def exportSamples = tasks.register('exportSampleBundle', JavaExec) {
+    classpath = testServer.sourceSets.test.runtimeClasspath
+    mainClass = 'dev.kizuna.meridian.technique.server.Fixtures'
+    args sampleBundles.get().asFile
+    outputs.dir(sampleBundles)
+}
 
 // 独立验收可指定全新运行目录，避免并行工作区复用已有测试世界。
 def gametestRunDirectory = providers.gradleProperty('gametestRunDir').getOrElse('build/gametest')
@@ -63,6 +74,7 @@ sourceSets {
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
     gametest {
+        resources.srcDir(exportSamples)
         // 登录假玩家和记录发包的夹具与下游仓共用 testFixtures。
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output + project(':server').sourceSets.test.output +
                 sourceSets.testFixtures.output

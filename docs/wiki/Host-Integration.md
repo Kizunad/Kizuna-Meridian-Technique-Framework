@@ -152,7 +152,31 @@ TechniqueVolumeSources.register(Identifier.fromNamespaceAndPath("example", "volu
 - 玩家进服时整份发到 `meridian_technique:volume_sources`，客户端读 `TechniqueVolumeSourcesClient.current()`，断线清空。
   来源在运行中变了（例如重载配置）就调 `TechniqueVolumeSources.refresh(server)` 给在线玩家各发一份新的。
 
-清单校验需要 Framework 的模板和符号。启动器按 `binding_templates` 的命名空间读取已安装附属导出的
+附属在公共 JAR 的 `META-INF/kizuna_meridian/technique_template_groups.list` 中登记模板组清单。
+每行是本 JAR 内的资源路径，例如 `data/human/technique_template_groups.txtpb`。
+纯 Java 与 Fabric 共用这份索引。文本与二进制分别用 `.txtpb` 和 `.binpb`，每份清单写 `schema_version: 1`。
+可在同一清单声明若干组，也可给其他附属的组追加成员。例如两个附属分别提供以下条目。
+
+```protobuf
+groups {
+  id: "human:humanoid"
+  base { id: "human:adult" version: 1 }
+  members { id: "human:adult" version: 1 }
+}
+```
+
+```protobuf
+additions {
+  group_id: "human:humanoid"
+  members { id: "meridian_undead:corpse" version: 1 }
+}
+```
+
+加载器先收齐声明，再处理追加项。重复声明、未声明的组、重复成员、未登记的精确模板都会阻止启动。
+成员须有基准的部位 ID、同种组织上的所需标签和经脉标签。器官留给各式在实际身体上绑定。
+读取和校验错误带有来源包与清单路径。显式装配可将已校验的组传给 `TechniqueRegistry.loadSources`。
+
+清单校验需要 Framework 的模板和符号。启动器按直绑模板、组基准与成员引用的命名空间读取已安装附属导出的
 `META-INF/kizuna_meridian/addons/<namespace>.pb`，递归收集其声明依赖，以 `AddonRegistry.load` 校验完整内容包集合。
 采用 `meridian:java_reference` 校验画像及参考核心已实现的能力；这是只读目录校验，不替代实体宿主的实际运行能力。
 包必须支持该画像，模板精确版本必须存在；缺资源、依赖不兼容、循环或格式错误均中止启动。

@@ -6,7 +6,6 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastStatus;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.server.TechniqueCastTimelines;
 import dev.kizuna.meridian.technique.server.TechniqueService;
-import dev.kizuna.meridian.technique.server.TechniqueState;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -50,8 +49,9 @@ public final class TechniqueCastStatusSync {
             return;
         }
         CastStatus.Builder status = TechniqueFabric.service().observe(player.getUUID())
-                .map(observation -> TechniqueCastTimelines.status(TechniqueFabric.service().registry(),
-                        TechniqueState.read(observation.body()), observation.body().settledAt().elapsedMillis()))
+                .map(TechniqueService.Observation::body)
+                .map(body -> TechniqueCastTimelines.status(TechniqueFabric.service().registry(),
+                        body, body.settledAt().elapsedMillis()))
                 .orElseGet(CastStatus::newBuilder);
         status.setBufferedTechniqueId(TechniqueInputBuffer.buffered(player.getUUID()))
                 .setRejectedTechniqueId(rejected)

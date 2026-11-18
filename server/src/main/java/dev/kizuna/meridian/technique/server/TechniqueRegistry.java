@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.core.BodyTemplate;
+import dev.kizuna.meridian.core.DefinitionId;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
 import dev.kizuna.meridian.server.AddonRegistry;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
@@ -14,20 +16,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** 定义不可变，加载失败不会发布半份目录。 */
 public final class TechniqueRegistry {
     private static final int MAX_DEFINITIONS = 1024;
     private final Map<TechniqueReference, TechniqueDefinition> definitions;
     private final TechniqueGroups groups;
+    private final Map<TechniqueReference, Set<BodyTemplate.Reference>> scopes;
     private final List<TechniqueCatalogSource> sources;
 
     private TechniqueRegistry(Map<TechniqueReference, TechniqueDefinition> definitions, TechniqueGroups groups,
-                              List<TechniqueCatalogSource> sources) {
+                              List<TechniqueCatalogSource> sources,
+                              Map<TechniqueReference, Set<BodyTemplate.Reference>> scopes) {
         // 生成消息本身不可变，复制索引后无需额外包装定义。
         this.definitions = Collections.unmodifiableMap(new LinkedHashMap<>(definitions));
         this.groups = groups;
         this.sources = List.copyOf(sources);
+        this.scopes = Map.copyOf(scopes);
     }
 
     public static TechniqueRegistry load(AddonRegistry addons, List<TechniqueCatalog> catalogs) {
@@ -40,18 +46,44 @@ public final class TechniqueRegistry {
     }
 
     public static TechniqueRegistry loadSources(List<TechniqueCatalogSource> candidates) {
+        // 独立 Java 宿主从公共资源索引发现绑定组；显式装配可直接提供已校验的组。
+        var grouped = candidates.stream().filter(source -> source.catalog().getBindingTemplateGroupsCount() > 0)
+                .findFirst();
+        var templateGroups = grouped.map(source -> TechniqueTemplateGroups.load(source.addons(),
+                        TemplateGroupSource.classpath(TechniqueRegistry.class.getClassLoader())))
+                .orElseGet(TechniqueTemplateGroups::empty);
+        return loadSources(candidates, templateGroups);
+    }
+
+    public static TechniqueRegistry loadSources(List<TechniqueCatalogSource> candidates,
+                                                TechniqueTemplateGroups templateGroups) {
         // 全部定义收齐后再校验书卷和承接；任何失败都不发布半份目录。
+        var scopes = new HashMap<TechniqueReference, Set<BodyTemplate.Reference>>();
         List<TechniqueCatalogSource> sources = List.copyOf(candidates);
         var definitions = new LinkedHashMap<TechniqueReference, TechniqueDefinition>();
         var locations = new LinkedHashMap<TechniqueReference, String>();
         for (TechniqueCatalogSource source : sources) {
-            indexCatalog(source, definitions, locations);
+            try {
+                var binding = templateGroups.bind(source.catalog());
+                indexCatalog(source, binding.vocabulary(), definitions, locations);
+                var members = binding.members().stream()
+                        .map(ref -> new BodyTemplate.Reference(new DefinitionId(ref.getId()), ref.getVersion()))
+                        .collect(Collectors.toUnmodifiableSet());
+                source.catalog().getDefinitionsList().forEach(definition -> scopes.put(reference(definition), members));
+            } catch (IllegalArgumentException error) {
+                throw TechniqueErrors.at(source.source(), error);
+            }
         }
         TechniqueGroups groups = new TechniqueGroups(sources, definitions, locations);
-        TechniqueRegistry registry = new TechniqueRegistry(definitions, groups, sources);
+        TechniqueRegistry registry = new TechniqueRegistry(definitions, groups, sources, scopes);
         registry.validateCombatDefinitions(locations);
         registry.validateBenefitIdentities();
         return registry;
+    }
+
+    public boolean applies(TechniqueReference technique, BodyTemplate.Reference template) {
+        // 目录范围按式和模板的精确版本索引。
+        return scopes.getOrDefault(technique, Set.of()).contains(template);
     }
 
     private void validateBenefitIdentities() {
@@ -71,18 +103,18 @@ public final class TechniqueRegistry {
         return sources;
     }
 
-    private static void indexCatalog(TechniqueCatalogSource source,
+    private static void indexCatalog(TechniqueCatalogSource source, List<BodyMessages.TemplateReference> vocabulary,
                                      Map<TechniqueReference, TechniqueDefinition> definitions,
                                      Map<TechniqueReference, String> locations) {
         // 模板与标签按各目录自己的 Framework 注册表校验。
         TechniqueCatalog catalog = source.catalog();
-        Map<ModuleKind, Set<String>> tags = catalogTags(source);
+        Map<ModuleKind, Set<String>> tags = catalogTags(source, vocabulary);
         for (int index = 0; index < catalog.getDefinitionsCount(); index++) {
             TechniqueDefinition definition = catalog.getDefinitions(index);
             String id = definition.getId();
             String location = source.location("definitions[" + index + "]");
             try {
-                TechniqueDefinitions.validate(source.addons(), tags, catalog.getBindingTemplatesList(), definition);
+                TechniqueDefinitions.validate(source.addons(), tags, vocabulary, definition);
                 if (!id.startsWith(catalog.getNamespace() + ":")) {
                     throw TechniqueErrors.invalid(id, "功法 ID 不属于目录命名空间");
                 }
@@ -101,7 +133,8 @@ public final class TechniqueRegistry {
         }
     }
 
-    private static Map<ModuleKind, Set<String>> catalogTags(TechniqueCatalogSource source) {
+    private static Map<ModuleKind, Set<String>> catalogTags(TechniqueCatalogSource source,
+                                                             List<BodyMessages.TemplateReference> vocabulary) {
         // 目录头和外部模板引用先校验，单式错误另行附加定义下标。
         TechniqueCatalog catalog = source.catalog();
         try {
@@ -111,7 +144,7 @@ public final class TechniqueRegistry {
                     || catalog.getDefinitionsCount() > MAX_DEFINITIONS) {
                 throw TechniqueErrors.invalid("catalog", "版本不支持或功法数量超限");
             }
-            return registeredTags(source.addons(), catalog);
+            return registeredTags(source.addons(), vocabulary);
         } catch (IllegalArgumentException exception) {
             throw TechniqueErrors.at(source.source(), exception);
         }
@@ -216,23 +249,20 @@ public final class TechniqueRegistry {
                 .build();
     }
 
-    private static Map<ModuleKind, Set<String>> registeredTags(AddonRegistry addons, TechniqueCatalog catalog) {
+    private static Map<ModuleKind, Set<String>> registeredTags(AddonRegistry addons,
+                                                                List<BodyMessages.TemplateReference> vocabulary) {
         // Framework 标签是开放字符串；显式模板引用限定本目录允许使用的标签词汇。
         var tags = new HashMap<ModuleKind, Set<String>>();
         tags.put(ModuleKind.MERIDIAN, new HashSet<>());
         tags.put(ModuleKind.TISSUE, new HashSet<>());
         tags.put(ModuleKind.ORGAN, new HashSet<>());
-        var references = new HashSet<BodyMessages.TemplateReference>();
-        if (catalog.getBindingTemplatesCount() > MAX_DEFINITIONS) {
+        if (vocabulary.size() > MAX_DEFINITIONS) {
             throw TechniqueErrors.invalid("binding_templates", "模板数量超限");
         }
-        for (int index = 0; index < catalog.getBindingTemplatesCount(); index++) {
-            BodyMessages.TemplateReference reference = catalog.getBindingTemplates(index);
+        for (int index = 0; index < vocabulary.size(); index++) {
+            BodyMessages.TemplateReference reference = vocabulary.get(index);
             String id = reference.getId();
             String location = "binding_templates[" + index + "]";
-            if (!references.add(reference)) {
-                throw TechniqueErrors.invalid(location, "模板引用重复");
-            }
             BodyMessages.BodyTemplate template = addons.findTemplate(id, reference.getVersion())
                     .orElseThrow(() -> TechniqueErrors.invalid(location,
                             "绑定模板未登记或版本不存在：" + id));

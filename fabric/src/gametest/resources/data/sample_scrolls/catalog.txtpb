@@ -1,5 +1,7 @@
 schema_version: 1
 namespace: "sample_scrolls"
+binding_templates { id: "sample:tendril" version: 1 }
+binding_templates { id: "sample:paired" version: 1 }
 definitions {
   id: "sample_scrolls:first"
   version: 1

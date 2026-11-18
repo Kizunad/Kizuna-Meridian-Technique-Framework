@@ -142,9 +142,13 @@ ESC、合上按钮、纸面外点击、背包键、右键和使用键均可关�
 悬停/按下仅派生亮度。提示词与原稿记录在远程交接目录 `handoff/scroll-screen-work/`。
 
 Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
-每份目录必须通过 `binding_templates` 显式引用已登记模板的精确 ID/版本。
-加载时分别汇集经脉、组织、器官的标签；槽位的每个标签都必须在对应种类中出现。
-这只限定词汇，不把功法绑定到某一出生模板；实际施放按身体当前构型重新绑定。
+每份目录至少声明一个直绑模板（`binding_templates`，精确 ID 与版本）或模板组（`binding_template_groups`，组 ID）。
+组清单由公共 JAR 的 `META-INF/kizuna_meridian/technique_template_groups.list` 发现，每行填写本 JAR 内的一条资源路径。
+登记词表来自所有直绑模板和各组基准模板，分别汇集经脉、组织与器官的标签。
+学式、学卷、整书学习、起式和知识查询均使用直绑模板与各组成员的并集。起式先检查当前身体模板，
+越界返回 `BODY_TEMPLATE_MISMATCH`，再按实际构型绑定各槽。整卷或整书有一式越界即拒绝整批学习。
+换身后保留原始学习记录，知识列表、天生式与接续提示按当前身体过滤。
+`TechniqueKnowledge.references/contains` 和 `TechniqueCastTimelines.status` 接收当前身体快照。学习记录的存储格式沿用原协议。
 类型和真元属性用 `AddonRegistry.findSymbol` 检查身份与种类。
 
 | 数据 | 单位、范围与约束 |

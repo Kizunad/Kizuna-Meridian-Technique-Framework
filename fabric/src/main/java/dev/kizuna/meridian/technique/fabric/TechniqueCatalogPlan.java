@@ -4,6 +4,8 @@ import dev.kizuna.meridian.technique.server.TechniqueCatalogPhase;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogSource;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 
+import dev.kizuna.meridian.technique.server.TechniqueTemplateGroups;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -12,9 +14,12 @@ import java.util.function.Supplier;
 public final class TechniqueCatalogPlan {
     private final List<Contribution> contributions;
 
-    TechniqueCatalogPlan(List<Contribution> contributions) {
+    private final TechniqueTemplateGroups groups;
+
+    TechniqueCatalogPlan(List<Contribution> contributions, TechniqueTemplateGroups groups) {
         // 已排序的来源不会因两种生命周期的实际求值时间而换位。
         this.contributions = List.copyOf(contributions);
+        this.groups = groups;
     }
 
     public List<TechniqueCatalogSource> earlySources() {
@@ -34,7 +39,7 @@ public final class TechniqueCatalogPlan {
         if (sources.isEmpty()) {
             return null;
         }
-        return TechniqueRegistry.loadSources(sources);
+        return TechniqueRegistry.loadSources(sources, groups);
     }
 
     record Contribution(TechniqueCatalogPhase phase, Supplier<List<TechniqueCatalogSource>> catalogs) {

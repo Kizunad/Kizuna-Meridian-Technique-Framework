@@ -8,7 +8,7 @@
   "entrypoints": {
     "client": ["dev.kizuna.meridian.technique.fabric.client.TechniqueScrollClientTest",
       "dev.kizuna.meridian.technique.fabric.client.TechniqueLeapClientTest",
-      "dev.kizuna.meridian.technique.fabric.client.TechniqueStatusClientTest",
-      "dev.kizuna.meridian.technique.fabric.client.TechniqueStatusRestartClientTest"]
+      "dev.kizuna.meridian.technique.fabric.client.TechniqueStatusRestartClientTest"],
+    "fabric-client-gametest": ["dev.kizuna.meridian.technique.fabric.client.TechniqueStatusClientTest"]
   }
 }

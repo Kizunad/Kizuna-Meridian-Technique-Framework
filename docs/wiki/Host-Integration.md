@@ -562,8 +562,11 @@ Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作
 `TechniqueStatusTissues` 负责纯 Java 绑定、修正计划和归属校验。身体修改仍由现有宿主提交到
 Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、语言和 `textures/mob_effect/`。
 
-背包效果栏的悬停说明由功法库客户端提供（`TechniqueEffectTooltipMixin` 包住原版 `EffectsInInventory.extractText`），
-宿主不用接线；内容包为每条修正写部位语言 `effect.<namespace>.<状态路径>.<slot_id>`，例如「两臂」。
+功法库客户端用 `TechniqueEffectTooltips.lines(MobEffectInstance)` 提供组织状态的灰字说明，
+不包含效果名；非组织状态返回空列表。Meridian UI 客户端通过
+`StatusNotes.register(TechniqueEffectTooltips::lines)` 将说明接到统一状态图标的名字和时间下面，
+功法库正式源码不依赖界面框架。内容包为每条修正写部位语言
+`effect.<namespace>.<状态路径>.<slot_id>`，例如「两臂」。
 写法和总时长的取法见[数据契约](Contracts.md#状态提示)。
 
 `activeLeap` 明确筛选跃步能力，旧 `active` 是兼容宿主与 AI 的同义入口，不能把组织状态当轻身。

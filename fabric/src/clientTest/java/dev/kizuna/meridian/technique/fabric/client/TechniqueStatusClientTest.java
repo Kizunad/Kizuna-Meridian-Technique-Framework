@@ -1,13 +1,18 @@
 package dev.kizuna.meridian.technique.fabric.client;
 
+import dev.kizuna.inventoryui.client.status.StatusIcons;
+import dev.kizuna.inventoryui.client.status.StatusLayout;
+import dev.kizuna.inventoryui.status.StatusArrangement.Single;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.fabric.client.testmixin.StatusNotesAccess;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
+import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -21,9 +26,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec2;
 
-/** 真实整合客户端验收原版状态列表、HUD、语言与图标，产物不进入正式包。 */
-public final class TechniqueStatusClientTest implements ClientModInitializer {
+/** 真实整合客户端验收统一状态图标、悬停说明、语言与牛奶清除，产物不进入正式包。 */
+public final class TechniqueStatusClientTest implements FabricClientGameTest {
     private static final Path REPORT = Path.of("../status-client-results.txt");
     private static final List<String> IDS = List.of("meridian_basic_techniques:breath",
             "meridian_basic_techniques:charge", "meridian_basic_techniques:light_body");
@@ -48,19 +54,33 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
             new Scene("night-list-large", GUI_LARGE, View.INVENTORY, NIGHT));
     private enum View { HUD, INVENTORY }
     private record Scene(String name, int scale, View view, long time) { }
-    private enum Stage { PREPARE, RELOAD, SCENE, STABLE, CAPTURE, CLEAR, VERIFY_CLEAR, DONE }
+    private enum Stage { PREPARE, RELOAD, SCENE, STABLE, HOVER, CAPTURE, CLEAR, VERIFY_CLEAR, DONE }
     private Stage stage = Stage.PREPARE;
     private int ticks;
     private int stableUntil;
     private int sceneIndex;
     private CompletableFuture<Void> pending;
     private CompletableFuture<Void> screenshot;
+    private Vec2 hoverCursor;
+    private String failureMessage;
 
     @Override
-    public void onInitializeClient() {
-        // 验收只能由专用 Gradle 入口启用。
-        if (Boolean.getBoolean("meridian.statusClientTest")) {
-            ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+    public void runTest(ClientGameTestContext context) {
+        // 每次创建独立世界，不能依赖被入口清掉的旧存档；状态机仍在客户端线程推进。
+        try (TestSingleplayerContext world = context.worldBuilder().create()) {
+            world.getConnection().waitForChunksRender();
+            while (context.computeOnClient(client -> stage != Stage.DONE)) {
+                context.runOnClient(this::tick);
+                Vec2 cursor = context.computeOnClient(client -> hoverCursor);
+                if (cursor != null) {
+                    context.getInput().setCursorPos(cursor.x, cursor.y);
+                }
+                context.waitTick();
+            }
+            String failure = context.computeOnClient(client -> failureMessage);
+            if (failure != null) {
+                throw new AssertionError(failure);
+            }
         }
     }
 
@@ -79,7 +99,7 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
             }
             advance(client);
         } catch (Throwable failure) {
-            finish(client, failure.toString());
+            finish(failure.toString());
         }
     }
 
@@ -98,7 +118,13 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
                 if (pending.isDone() && ticks >= stableUntil) {
                     pending.join();
                     verifyEffects(client);
-                    capture(client, SCENES.get(sceneIndex).name());
+                    showScene(client);
+                }
+            }
+            case HOVER -> {
+                if (ticks >= stableUntil) {
+                    verifyNotes(client);
+                    capture(client, SCENES.get(sceneIndex).name() + "-effect-tooltip");
                     stage = Stage.CAPTURE;
                 }
             }
@@ -110,7 +136,7 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
     }
 
     private void prepare(Minecraft client) {
-        // 中文资源真实重载，测试场地只存在于复制的验收世界。
+        // 中文资源真实重载，测试场地只存在于独立的验收世界。
         client.options.pauseOnLostFocus = false;
         client.getTutorial().setStep(TutorialSteps.NONE);
         client.options.languageCode = "zh_cn";
@@ -120,8 +146,9 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
     }
 
     private void scene(Minecraft client) {
-        // 同一组三效果在两档 GUI scale 和昼夜场景中分别显示 HUD 与原版状态列表。
+        // 同一组三效果在两档 GUI scale 和昼夜场景中分别显示 HUD 与背包里的统一状态图标。
         Scene scene = SCENES.get(sceneIndex);
+        hoverCursor = null;
         client.options.guiScale().set(scene.scale());
         client.resizeGui();
         if (scene.view() == View.INVENTORY) {
@@ -145,6 +172,49 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
         }, server);
         stableUntil = ticks + STABLE_TICKS;
         stage = Stage.STABLE;
+    }
+
+    private void showScene(Minecraft client) {
+        // 背包先定位当前格位并移鼠标，等提示真正画出来再截图。
+        if (SCENES.get(sceneIndex).view() == View.INVENTORY) {
+            hoverCursor = hoverEffect(client, IDS.getFirst());
+            stableUntil = ticks + STABLE_TICKS;
+            stage = Stage.HOVER;
+        } else {
+            capture(client, SCENES.get(sceneIndex).name());
+            stage = Stage.CAPTURE;
+        }
+    }
+
+    private static Vec2 hoverEffect(Minecraft client, String id) {
+        // 此方法由客户端 tick 调用；读同一帧格位，底框中心乘界面缩放换成窗口坐标。
+        StatusIcons.Layout layout = StatusIcons.lastLayout();
+        var slots = layout.slots();
+        for (int index = 0; index < slots.size(); index++) {
+            if (slots.get(index) instanceof Single single && single.effect().id().equals(id)) {
+                StatusLayout.Area cell = layout.cells().get(index);
+                int half = StatusLayout.FRAME_PIXELS / 2;
+                float scale = (float) client.getWindow().getGuiScale();
+                return new Vec2((cell.left() + half) * scale, (cell.top() + half) * scale);
+            }
+        }
+        throw new AssertionError("没有找到状态的单个图标：" + id);
+    }
+
+    private static void verifyNotes(Minecraft client) {
+        // 从界面框架实际取说明，必须含功法库的灰字；不能把空来源或漏登记当作通过。
+        for (String id : IDS) {
+            var effect = client.player.getEffect(TechniqueStatusBenefits.get(id).effect());
+            var expected = TechniqueEffectTooltips.lines(effect);
+            if (TechniqueStatusBenefits.tissue(effect).isPresent()) {
+                var actual = StatusNotesAccess.notes(effect);
+                if (expected.isEmpty() || !actual.containsAll(expected)) {
+                    throw new AssertionError("功法状态图标缺少说明行：" + id);
+                }
+            } else if (!expected.isEmpty()) {
+                throw new AssertionError("非组织状态不应提供功法说明：" + id);
+            }
+        }
     }
 
     private static void buildPlatform(ServerLevel world, BlockPos position) {
@@ -226,12 +296,13 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
             capture(client, "cleared");
             sceneIndex++;
         } else if (screenshot.isDone()) {
-            finish(client, null);
+            finish(null);
         }
     }
 
-    private void finish(Minecraft client, String failure) {
-        // 保存可机器读取的验收结果，正常或失败都结束本次独立客户端。
+    private void finish(String failure) {
+        // 保存可机器读取的验收结果，世界和客户端的退出交给客户端测试框架。
+        failureMessage = failure;
         stage = Stage.DONE;
         try {
             Files.writeString(REPORT, "success=" + (failure == null) + "\nfailure=" + failure
@@ -239,6 +310,5 @@ public final class TechniqueStatusClientTest implements ClientModInitializer {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
-        client.stop();
     }
 }

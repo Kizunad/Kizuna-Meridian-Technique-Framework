@@ -6,9 +6,11 @@ Basic 的完整装配 `StatusBuffGameTest` 验证原版命令、牛奶、倒计�
 四肢恢复与同剑伤害继续由 `BasicTechniquesGameTest` 对照真实 Human 身体验证。
 
 `TechniqueStatusClientTest` 只在 `:fabric:runStatusClientTest -PscrollFullAssembly` 中加载。
-预置独立世界 `fabric/build/statusclienttest/saves/status-buffs-test` 后，记录昼夜、GUI scale 2/4 的
-原版 HUD/状态列表与牛奶清除截图；结果写入 `fabric/build/status-client-results.txt`。
-客户端读取真实资源、语言和网络状态，不以静态图标预览代替游戏内验证。
+通过 Fabric 客户端测试框架新建独立世界，记录昼夜、GUI scale 2/4 的
+统一状态图标与牛奶清除截图；背包场景按 `StatusIcons.lastLayout()` 找效果格位，悬停底框中央。
+客户端断言图标汇总说明含功法库提供的非空灰字，非组织状态不提供功法说明；
+结果写入 `fabric/build/status-client-results.txt`。客户端读取真实资源、语言和网络状态，
+不以静态图标预览代替游戏内验证。
 
 `TechniqueScheduledModifiersTest` 使用真实 Framework 事务覆盖到时登记曲线：登记前打断不产生能力变化、
 登记后取消保留完整曲线、迟到时保留当前插值及原到期、过期待办不登记、承接起播投影、

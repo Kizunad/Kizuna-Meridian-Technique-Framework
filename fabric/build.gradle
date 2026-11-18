@@ -71,6 +71,11 @@ sourceSets {
     }
 }
 
+dependencies {
+    // 验收只补编译 API，运行时由完整装配装入，避免两套源码集带进不同版本的传递库。
+    clientTestCompileOnly 'dev.kizuna.inventoryui:kizuna-inventory-ui-framework'
+}
+
 loom {
     mods {
         meridian_technique_test { sourceSet sourceSets.gametest }
@@ -94,7 +99,10 @@ loom {
             client()
             source sourceSets.clientTest
             runDir 'build/statusclienttest'
-            programArgs '--quickPlaySingleplayer', 'status-buffs-test', '--width', '1280', '--height', '960'
+            programArgs '--width', '1280', '--height', '960'
+            vmArg '-Dfabric.client.gametest'
+            vmArg '-Dfabric.client.gametest.modid=meridian_technique_client_test'
+            // 同源码集里的卷轴场景以此标记避开状态验收。
             vmArg '-Dmeridian.statusClientTest=true'
         }
         statusRestartClientTest {

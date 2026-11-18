@@ -3,6 +3,6 @@
   "package": "dev.kizuna.meridian.technique.fabric.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": ["TechniqueLeapMixin", "TechniqueQuietEffectMixin", "TechniqueLeapPlayerMixin", "TechniqueJumpInvoker", "TechniqueTissueEffectMixin", "TechniqueTissuePlayerMixin", "TechniqueEffectAccess", "TechniqueInfusionStatusMixin"],
-  "client": ["TechniqueLeapClientMixin", "TechniqueScrollModelsMixin", "TechniqueScrollItemsMixin", "TechniqueEffectTooltipMixin"],
+  "client": ["TechniqueLeapClientMixin", "TechniqueScrollModelsMixin", "TechniqueScrollItemsMixin"],
   "injectors": {"defaultRequire": 1}
 }

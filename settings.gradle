@@ -14,3 +14,6 @@ include 'shared', 'server', 'fabric'
 
 // 两端复用相邻框架的协议，服务端只链接其纯 Java 实现。
 kizunaWorkspace.includeSource('framework', [client: 'local.meridian:client', server: 'local.meridian:server'])
+// 客户端验收读取真实图标格位与说明；正式功法库不链接界面框架。
+kizunaWorkspace.includeSource('inventory-ui', ['': 'dev.kizuna.inventoryui:kizuna-inventory-ui-framework',
+        server: 'dev.kizuna.inventoryui:server'])

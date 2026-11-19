@@ -464,12 +464,15 @@ public final class TechniqueService {
                                         List<TechniqueReference> references, List<String> prerequisites) {
         // 只添加缺少的精确版本，一次活动和一次通知覆盖整组新学单式。
         TechniqueProgress progress = TechniqueState.read(body);
+        var knowledge = TechniqueKnowledge.references(registry, body, progress);
         for (var reference : references) {
             if (!registry.applies(reference, body.template())) {
                 throw new BodyTemplateMismatchException();
             }
+            if (!knowledge.contains(reference) && registry.find(reference).orElseThrow().getInnate()) {
+                throw new InnateLockedException();
+            }
         }
-        var knowledge = TechniqueKnowledge.references(registry, body, progress);
         for (String id : prerequisites) {
             TechniqueVolume prerequisite = registry.findVolume(id).orElseThrow();
             if (!knowledge.containsAll(prerequisite.getTechniquesList())) {
@@ -1497,6 +1500,13 @@ public final class TechniqueService {
     private static String effectRequestId(EffectIntent effect) {
         // 同一施放中的各效果独立去重，停止表现和解锁也各有固定身份。
         return EFFECT_REQUEST_PREFIX + effect.getCastId() + "_" + effect.getEffectId();
+    }
+
+    public static final class InnateLockedException extends IllegalArgumentException {
+        private InnateLockedException() {
+            // 尚未解锁的天生式不能写入学习进度。
+            super("这具身体尚未达到此式的境界或开脉要求");
+        }
     }
 
     public static final class BodyTemplateMismatchException extends IllegalArgumentException {

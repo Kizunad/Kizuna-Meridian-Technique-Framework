@@ -278,7 +278,7 @@ public final class TechniqueFabric implements ModInitializer {
                 service.learn(entity.getUUID(), id);
                 learned++;
             } catch (TechniqueService.PrerequisiteVolumeException | TechniqueService.BodyTemplateMismatchException
-                    exception) {
+                    | TechniqueService.InnateLockedException exception) {
                 source.sendFailure(Component.literal(exception.getMessage()));
             } catch (TechniqueService.NoHostException exception) {
                 source.sendFailure(Component.literal("目标没有可用的功法宿主"));

@@ -38,6 +38,7 @@ final class TechniqueDefinitions {
             throw TechniqueErrors.invalid(definition.getId(), "版本、类别或最低境界非法");
         }
         validateTiming(definition);
+        validateInnateUnlock(definition, tags.get(ModuleKind.MERIDIAN));
         TechniqueSustained.validateDefinition(definition);
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         validateOffHandUse(definition);
@@ -104,6 +105,18 @@ final class TechniqueDefinitions {
         return slots;
     }
 
+    private static void validateInnateUnlock(TechniqueDefinition definition, Set<String> meridianTags) {
+        // 解锁条件只引用已经登记的经脉标签，不能把学习式变为随身体变化的知识。
+        if (!definition.hasInnateUnlock()) {
+            return;
+        }
+        var required = definition.getInnateUnlock().getOpenedMeridianTagsList();
+        if (!definition.getInnate() || required.size() > MAX_MODULES
+                || new HashSet<>(required).size() != required.size() || !meridianTags.containsAll(required)) {
+            throw TechniqueErrors.invalid("innate_unlock", "仅天生式可声明解锁，所需经脉标签须已登记且不重复");
+        }
+    }
+
     private static void validateSlot(AddonRegistry addons, Map<ModuleKind, Set<String>> tags, TechniqueSlot slot) {
         // 按模块种类校验标签，组织标签不能误用在经脉上。
         Set<String> knownTags = tags.get(slot.getModule());
@@ -160,11 +173,9 @@ final class TechniqueDefinitions {
         if (!definition.hasCost() || cost.getQiCount() > MAX_COSTS || cost.getWorkCount() > MAX_COSTS) {
             throw TechniqueErrors.invalid("cost", "缺少费用声明或费用条数超限");
         }
+        var organPayers = new HashSet<String>();
         for (QiCost qi : cost.getQiList()) {
-            TechniqueSlot slot = requireSlot(slots, qi.getSlotId(), ModuleKind.MERIDIAN);
-            if (!slot.getRequireOpened() || slot.getMinimumCount() == 0) {
-                throw TechniqueErrors.invalid(qi.getSlotId(), "扣费经脉必须已开拓且不可缺省");
-            }
+            TechniqueSlot slot = requirePayer(slots, qi.getSlotId(), organPayers);
             validateQiMatching(addons, qi);
             if (qi.getPhaseValue() <= 0 || qi.getPhase() == BodyMessages.QiPhase.UNRECOGNIZED) {
                 throw TechniqueErrors.invalid("cost.qi.phase", "未知相态");
@@ -184,6 +195,24 @@ final class TechniqueDefinitions {
         for (WorkCost work : cost.getWorkList()) {
             validateWork(addons, templates, slots, work);
         }
+    }
+
+    private static TechniqueSlot requirePayer(Map<String, TechniqueSlot> slots, String id, Set<String> organPayers) {
+        // 同一器官槽可承担多项费用，每项费用都必须有且只有一个器官来源。
+        TechniqueSlot slot = slots.get(id);
+        if (slot != null && slot.getModule() == ModuleKind.ORGAN) {
+            organPayers.add(id);
+            if (organPayers.size() > 1 || slot.getKind().isEmpty()
+                    || slot.getMinimumCount() != 1 || slot.getMaximumCount() != 1) {
+                throw TechniqueErrors.invalid(id, "器官付款只能使用一个按种类绑定的单个必选槽");
+            }
+            return slot;
+        }
+        if (slot == null || slot.getModule() != ModuleKind.MERIDIAN
+                || !slot.getRequireOpened() || slot.getMinimumCount() == 0) {
+            throw TechniqueErrors.invalid(id, "付款须绑定已开拓的必选经脉或单个必选器官");
+        }
+        return slot;
     }
 
     private static void validateQiMatching(AddonRegistry addons, QiCost cost) {

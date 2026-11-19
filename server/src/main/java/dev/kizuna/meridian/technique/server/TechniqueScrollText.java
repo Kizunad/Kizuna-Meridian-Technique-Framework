@@ -1,6 +1,8 @@
 package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BrewUseMethod;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ModuleKind;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCost;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCostMatching;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiDistribution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -101,7 +103,7 @@ public final class TechniqueScrollText {
             if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
                 kind = TechniqueNames.elementQi(cost.getAttribute());
             }
-            String perMeridian = cost.getDistribution() == QiDistribution.EACH ? "/脉" : "";
+            String perMeridian = perMeridian(definition, cost);
             costs.add(kind + " " + decimal(cost.getAmount().getValue()) + perMeridian);
         }
         parts.add(costs.isEmpty() ? "不耗真元" : String.join(" + ", costs));
@@ -112,10 +114,7 @@ public final class TechniqueScrollText {
         // EACH 的实际总额取决于绑定数量，阅读页明确标记每脉费用而不伪造总量。
         var costs = new ArrayList<String>();
         for (var cost : definition.getCost().getQiList()) {
-            String suffix = " 元";
-            if (cost.getDistribution() == QiDistribution.EACH) {
-                suffix = " 元/脉";
-            }
+            String suffix = " 元" + perMeridian(definition, cost);
             String attribute = "";
             if (cost.getMatching() == QiCostMatching.ATTRIBUTE_AT_LEAST_PHASE) {
                 // 指定属性的费用标出行名；内置五行之外的属性没有可读名称，只写「指定属性」。
@@ -127,6 +126,13 @@ public final class TechniqueScrollText {
             return "0 元";
         }
         return String.join(" + ", costs);
+    }
+
+    private static String perMeridian(TechniqueDefinition definition, QiCost cost) {
+        // 器官费用总由一个器官支付，只有经脉的逐条收费才标记每脉。
+        boolean perChannel = cost.getDistribution() == QiDistribution.EACH && definition.getSlotsList().stream()
+                .noneMatch(slot -> slot.getId().equals(cost.getSlotId()) && slot.getModule() == ModuleKind.ORGAN);
+        return perChannel ? "/脉" : "";
     }
 
     private static String seconds(long millis) {

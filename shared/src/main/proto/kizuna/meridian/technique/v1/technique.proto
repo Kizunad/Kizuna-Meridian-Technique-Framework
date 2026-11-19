@@ -827,6 +827,9 @@ enum TargetDistanceBand {
   MEDIUM = 2;
   FAR = 3;
 }
+message InnateUnlock {
+  repeated string opened_meridian_tags = 1; // 每个标签都须有已开拓的经脉；境界下限取本式的 minimum_realm
+}
 message TechniqueDefinition {
   string id = 1;
   int32 version = 2;
@@ -852,6 +855,7 @@ message TechniqueDefinition {
   repeated string off_hand_use_block_tags = 21;
   BrewItemRequirement brew_item = 22; // 主手必须满足，先于费用与起手校验
   bool innate = 23; // 天生会的精确版本，不入卷、不写学习记录；其余起式检查照常执行
+  InnateUnlock innate_unlock = 24; // 仅天生式可填；缺省时不设知识门槛，空消息仅要求境界
 }
 
 enum TechniqueFailure {

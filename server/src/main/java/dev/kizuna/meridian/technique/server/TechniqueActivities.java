@@ -338,42 +338,57 @@ final class TechniqueActivities {
     }
 
     private static Accounts accounts(BodySnapshot body, List<QiCost> costs, Map<String, BoundSlot> slots) {
-        // 多项费用可命中同一经脉，先在临时余额中连续扣除，最终只提交一个账户变更。
-        Map<String, MeridianState> states = body.meridianStates().stream()
-                .collect(Collectors.toMap(state -> state.id().value(), Function.identity()));
-        var replacements = new LinkedHashMap<String, QiInventory>();
+        // 器官缓存与经脉内腔可有相同局部 ID，同种账户的多笔费用只提交一次余额替换。
+        var originals = new LinkedHashMap<AccountId, QiInventory>();
+        var replacements = new LinkedHashMap<AccountId, QiInventory>();
         var released = new ArrayList<QiInventory>();
-        Function<String, QiInventory> balance = moduleId -> replacements.getOrDefault(moduleId,
-                opened(states.get(moduleId)).lumenQi());
-        Map<String, String> names = meridianNames(body);
+        var namesByKind = new LinkedHashMap<ModuleKind, Map<String, String>>();
         for (QiCost cost : costs) {
             BoundSlot slot = slots.get(cost.getSlotId());
+            ModuleKind kind = slot.getModule();
+            Map<String, String> names = namesByKind.computeIfAbsent(kind, module -> accountNames(body, module));
+            Function<String, QiInventory> balance = id -> {
+                var account = new AccountId(kind, id);
+                var original = originals.computeIfAbsent(account, key -> key.inventory(body));
+                return replacements.getOrDefault(account, original);
+            };
             for (CostAllocation allocation : allocations(cost, slot, balance, names)) {
                 String moduleId = allocation.moduleId();
                 QiInventory previous = balance.apply(moduleId);
                 var payer = new TechniqueQiPayment.Payer(TechniqueNames.meridians(readable(List.of(moduleId), names)),
                         slot.getModuleIdsCount() > 1);
                 QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount(), payer);
-                replacements.put(moduleId, QiAccounting.debit(previous, debit));
+                replacements.put(new AccountId(kind, moduleId), QiAccounting.debit(previous, debit));
                 released.add(debit);
             }
         }
+        return new Accounts(accountChanges(originals, replacements), QiInventory.combine(released));
+    }
+
+    private static List<QiAccountChange> accountChanges(Map<AccountId, QiInventory> originals,
+                                                         Map<AccountId, QiInventory> replacements) {
+        // 全部费用可付后才按每个账户的原库存与最终余额生成活动。
         var changes = new ArrayList<QiAccountChange>();
         for (var replacement : replacements.entrySet()) {
-            String moduleId = replacement.getKey();
-            QiAccountChange change = QiAccountChange.newBuilder()
-                    .setLumenId(moduleId)
-                    .setExpected(BodyProtobuf.toInventory(states.get(moduleId).lumenQi()))
+            var account = replacement.getKey();
+            var change = account.change()
+                    .setExpected(BodyProtobuf.toInventory(originals.get(account)))
                     .setReplacement(BodyProtobuf.toInventory(replacement.getValue()))
                     .build();
             changes.add(change);
         }
-        return new Accounts(List.copyOf(changes), QiInventory.combine(released));
+        return List.copyOf(changes);
     }
 
-    private static Map<String, String> meridianNames(BodySnapshot body) {
-        // 付不起时要说出是哪条经脉；没有可读名字的经脉不出现在说明里。
+    private static Map<String, String> accountNames(BodySnapshot body, ModuleKind kind) {
+        // 余额不足时显示实际付款模块的名字。
         var names = new LinkedHashMap<String, String>();
+        if (kind == ModuleKind.ORGAN) {
+            for (var organ : body.structure().organs()) {
+                names.put(organ.id().value(), TechniqueScrollText.safeName(organ.displayName(), ""));
+            }
+            return names;
+        }
         for (Anatomy.MeridianDefinition meridian : body.structure().meridians()) {
             names.put(meridian.id().value(), TechniqueScrollText.safeName(meridian.displayName(), ""));
         }
@@ -557,6 +572,28 @@ final class TechniqueActivities {
             return Math.addExact(startMillis, durationMillis);
         } catch (ArithmeticException exception) {
             throw TechniqueErrors.rejected(INVALID_STATE);
+        }
+    }
+
+    private record AccountId(ModuleKind kind, String id) {
+        QiInventory inventory(BodySnapshot body) {
+            // 只从所绑定的器官缓存或已开经脉内腔支付。
+            if (kind == ModuleKind.ORGAN) {
+                return body.organStates().stream().filter(state -> state.id().value().equals(id))
+                        .findFirst().orElseThrow().buffer();
+            }
+            var channel = body.meridianStates().stream().filter(state -> state.id().value().equals(id))
+                    .findFirst().orElseThrow();
+            return opened(channel).lumenQi();
+        }
+
+        QiAccountChange.Builder change() {
+            // 活动写回与读余额相同的账户种类和模块。
+            var change = QiAccountChange.newBuilder();
+            if (kind == ModuleKind.ORGAN) {
+                return change.setOrganId(id);
+            }
+            return change.setLumenId(id);
         }
     }
 

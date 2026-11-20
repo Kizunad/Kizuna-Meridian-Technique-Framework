@@ -6,6 +6,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueSounds;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueCastStatusSync;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeel;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInfusionStatuses;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
@@ -124,6 +125,13 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
         TechniqueInfusionStatuses.register(catalogs.earlySources());
+        for (var source : catalogs.earlySources()) {
+            for (var definition : source.catalog().getDefinitionsList()) {
+                if (definition.hasMaintainedBreathing()) {
+                    TechniqueBreathingStatuses.register(definition.getMaintainedBreathing());
+                }
+            }
+        }
         TechniqueScrollDrops.register();
         VolumeLearnedTrigger.register();
         BookCompletedTrigger.register();

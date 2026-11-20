@@ -4,6 +4,7 @@ package kizuna.meridian.technique.v1;
 import "kizuna/meridian/v1/body.proto";
 import "kizuna/meridian/v1/protocol.proto";
 import "kizuna/meridian/v1/activity.proto";
+import "kizuna/meridian/technique/v1/maintained_breathing.proto";
 
 option java_package = "dev.kizuna.meridian.technique.protocol.pb";
 option java_outer_classname = "TechniqueMessages";
@@ -863,6 +864,7 @@ message TechniqueDefinition {
   BrewItemRequirement brew_item = 22; // 主手必须满足，先于费用与起手校验
   bool innate = 23; // 天生会的精确版本，不入卷、不写学习记录；其余起式检查照常执行
   InnateUnlock innate_unlock = 24; // 仅天生式可填；缺省时不设知识门槛，空消息仅要求境界
+  MaintainedBreathing maintained_breathing = 25; // 起手完成后释放前台，按身体时间维持吐纳效果
 }
 
 enum TechniqueFailure {

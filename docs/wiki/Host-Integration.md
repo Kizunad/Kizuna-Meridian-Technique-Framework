@@ -633,3 +633,12 @@ Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、�
   被拒为 `ORDINARY` 并带拒绝原因；落地间隔内的 `WAIT` 与客户端预测不回调。
 
 监听器抛出的运行时异常被吞掉（跃步另记一条警告），不改变回执、做功或飞行。
+
+### 吐纳运功
+
+目录的 `maintained_breathing` 声明 `effect_id`、`color_rgb`、`qi_per_second` 和两个呼吸因子。
+目录须在两端注册表冻结前提供。起式使用有限的起手时长，生效段和收势段均为零。
+玩家宿主在正常起式完结后将施放身份、冻结的目录值和身体付讫毫秒记入
+`meridian_technique:breathing_practice`，并挂上原版无限图标。另一式可随即使用前台。
+维持时按全身内腔的实际体积分摊费用，允许未开脉。已付时间、撤效和向环境释放的元随身体活动提交。
+外部清图标通过 `TechniqueBreathingStatuses.REMOVED` 通知身体宿主按当刻收功。

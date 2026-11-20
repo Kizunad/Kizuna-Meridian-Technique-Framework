@@ -40,6 +40,15 @@ final class TechniqueDefinitions {
         validateTiming(definition);
         validateInnateUnlock(definition, tags.get(ModuleKind.MERIDIAN));
         TechniqueSustained.validateDefinition(definition);
+        if (definition.hasMaintainedBreathing()) {
+            TechniqueBreathingPractice.validate(definition.getMaintainedBreathing());
+            var phases = definition.getPhases();
+            if (TechniqueSustained.enabled(definition) || phases.getWarmupMillis() == 0
+                    || phases.getActiveMillis() != 0 || phases.getRecoveryMillis() != 0) {
+                throw TechniqueErrors.invalid("maintained_breathing",
+                        "运功起式结束就释放前台，须仅声明有限起手");
+            }
+        }
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         validateOffHandUse(definition);
         TechniqueBrewEffects.validateDefinition(definition);

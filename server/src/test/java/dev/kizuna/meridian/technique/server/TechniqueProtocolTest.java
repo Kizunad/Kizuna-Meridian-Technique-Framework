@@ -19,6 +19,26 @@ public class TechniqueProtocolTest {
     private static final int OVERSIZE_KNOWN_COUNT = 400;
     private static final int LONG_SOURCE_LENGTH = 200;
     private static final int UNKNOWN_ENUM = 99;
+    private static final long SAVED_GUARD_MILLIS = 150;
+    private static final int BREATHING_DEFINITION_FIELD = 25;
+
+    @Test
+    public void savedGuardWireFieldsRemainIndependentOfMaintainedBreathing() throws Exception {
+        // 固定旧字节分别覆盖未登记体力和已经付款的持守。
+        // 不能用当前 builder 生成预期样本。
+        var hex = java.util.HexFormat.of();
+        var legacy = SustainedCast.parseFrom(hex.parseHex("0896011a00"));
+        assertEquals(SAVED_GUARD_MILLIS, legacy.getRecoveryMillis());
+        assertTrue(legacy.hasGuard());
+        assertFalse(legacy.hasStaminaPaidMillis());
+        byte[] staminaBytes = hex.parseHex("0896011a0020960128013001");
+        var stamina = SustainedCast.parseFrom(staminaBytes);
+        assertEquals(SAVED_GUARD_MILLIS, stamina.getStaminaPaidMillis());
+        assertTrue(stamina.getExhausted());
+        assertTrue(stamina.getWeaponContactOnBreak());
+        assertArrayEquals(staminaBytes, stamina.toByteArray());
+        assertEquals(BREATHING_DEFINITION_FIELD, TechniqueDefinition.MAINTAINED_BREATHING_FIELD_NUMBER);
+    }
 
     @Test
     public void inspectionRoundTripsBothHandsAndRejectsIncompleteItemFacts() {

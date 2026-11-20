@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.fabric.mixin;
 
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInfusionStatuses;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import java.util.Collection;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -26,7 +27,8 @@ public abstract class TechniqueInfusionStatusMixin {
     private void meridian$rejectInfusionStatus(MobEffectInstance effect, Entity source,
                                                CallbackInfoReturnable<Boolean> callback) {
         // 指令和药水直接给附行图标：身体上没有对应的附行，不收。
-        if (TechniqueInfusionStatuses.rejects((LivingEntity) (Object) this, effect)) {
+        LivingEntity entity = (LivingEntity) (Object) this;
+        if (TechniqueInfusionStatuses.rejects(entity, effect) || TechniqueBreathingStatuses.rejects(entity, effect)) {
             callback.setReturnValue(false);
         }
     }
@@ -34,7 +36,8 @@ public abstract class TechniqueInfusionStatusMixin {
     @Inject(method = "forceAddEffect", at = @At("HEAD"), cancellable = true)
     private void meridian$rejectForcedInfusionStatus(MobEffectInstance effect, Entity source, CallbackInfo callback) {
         // 强制替换走的是另一个入口，同样不收。
-        if (TechniqueInfusionStatuses.rejects((LivingEntity) (Object) this, effect)) {
+        LivingEntity entity = (LivingEntity) (Object) this;
+        if (TechniqueInfusionStatuses.rejects(entity, effect) || TechniqueBreathingStatuses.rejects(entity, effect)) {
             callback.cancel();
         }
     }
@@ -42,7 +45,9 @@ public abstract class TechniqueInfusionStatusMixin {
     @Inject(method = "onEffectsRemoved", at = @At("HEAD"))
     private void meridian$infusionStatusRemoved(Collection<MobEffectInstance> effects, CallbackInfo callback) {
         // 牛奶、指令、图腾清掉图标时，附行跟着结束。
-        TechniqueInfusionStatuses.removed((LivingEntity) (Object) this, effects);
+        LivingEntity entity = (LivingEntity) (Object) this;
+        TechniqueBreathingStatuses.removed(entity, effects);
+        TechniqueInfusionStatuses.removed(entity, effects);
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))

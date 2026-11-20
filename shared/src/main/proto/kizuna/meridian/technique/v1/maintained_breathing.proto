@@ -1,0 +1,23 @@
+syntax = "proto3";
+package kizuna.meridian.technique.v1;
+option java_package = "dev.kizuna.meridian.technique.protocol.pb";
+option java_outer_classname = "MaintainedBreathingMessages";
+
+import "kizuna/meridian/v1/breathing.proto";
+
+// 起式后释放前台，占用期间按身体时间从经脉内腔支付。
+message MaintainedBreathing {
+  string effect_id = 1;
+  uint32 color_rgb = 2;
+  double qi_per_second = 3;
+  kizuna.meridian.v1.BreathingFactors factors = 4;
+}
+
+// 与付款及呼吸因子在同一身体活动中保存。收功后保留最近启动的身份用于重放去重。
+message BreathingPractice {
+  string cast_id = 1;
+  string technique_id = 2;
+  MaintainedBreathing definition = 3;
+  int64 paid_millis = 4;
+  bool ended = 5;
+}

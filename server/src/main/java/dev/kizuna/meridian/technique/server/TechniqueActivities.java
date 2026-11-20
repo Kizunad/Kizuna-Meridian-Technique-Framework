@@ -92,6 +92,7 @@ final class TechniqueActivities {
         TechniqueDefinition definition = start.definition();
         var progress = start.progress().toBuilder()
                 .setActiveCast(active)
+                .removeGuardBreakEnds(definition.getId())
                 .putCurveEnds(definition.getId(), curveEnd(modifiers));
         if (!TechniqueSustained.unknownEnd(active)) {
             long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
@@ -147,10 +148,12 @@ final class TechniqueActivities {
         // 曲线保持原到期时间，只原子更新施放、动作和实际冷却。
         TechniqueProgress stopped = endedProgress(progress, endedMillis, ending);
         Any payload = TechniqueState.pack(stopped);
-        return BodyActivity.newBuilder()
-                .addStopActions(progress.getActiveCast().getActionInstanceId())
-                .putProgress(TechniqueState.KEY, payload)
-                .build();
+        ActiveCast active = progress.getActiveCast();
+        var plan = BodyActivity.newBuilder()
+                .addStopActions(active.getActionInstanceId())
+                .putProgress(TechniqueState.KEY, payload);
+        TechniqueGuardStamina.stopOccupancy(active, plan);
+        return plan.build();
     }
 
     static BodyActivity learn(TechniqueProgress progress, List<KnownTechnique> known) {

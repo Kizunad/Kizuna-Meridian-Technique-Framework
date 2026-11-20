@@ -132,6 +132,39 @@ public final class TechniqueGuardTest {
     }
 
     @Test
+    public void bodyClockConsumesAlreadyAcceptedReleaseBeforeChargingAgain() {
+        // 首次提交冲突后，身体推进可提交同一回执；库下次推进只确认原边界。
+        MemoryHost host = host();
+        var configured = guard().toBuilder();
+        var rules = GuardStamina.newBuilder()
+                .setJoulesPerSecond(1)
+                .setJoulesPerDamagePrevented(1)
+                .setBreakMillis(RECOVERY)
+                .setRestartRatio(1)
+                .build();
+        configured.getEffectsBuilder(0).getGuardBuilder().setStamina(rules);
+        var service = HeldTechniqueFixtures.service(host, load(catalog(configured.build())));
+        var cast = press(host, "paid_conflict");
+        service.cast(ENTITY, cast);
+        host.nowMillis = RELEASE_AT;
+        service.tick();
+        var body = host.current();
+        var hold = TechniqueGuardStamina.hold(body, TechniqueState.read(body), List.of());
+        host.submit(new TechniqueHost.Submission("guard_paid", body.revision(), hold));
+        host.conflictNextActivity();
+        service.endActive(ENTITY, release(cast));
+        var release = service.pendingGuardRelease(ENTITY, host.current()).orElseThrow();
+        host.submit(release);
+        assertTrue(service.pendingGuardRelease(ENTITY, host.current()).isEmpty());
+        host.nowMillis++;
+        service.tick();
+        var ended = progress(host).getActiveCast().getSustained();
+        assertEquals(RELEASE_AT, ended.getEndRequestedMillis());
+        assertEquals(RELEASE_AT, ended.getStaminaPaidMillis());
+        assertEquals(1, host.current().actions().size());
+    }
+
+    @Test
     public void conflictingReleaseRetainsFirstTimeAndRetriesWithoutTheCaller() {
         // 瞬时冲突返回接收回执，下一 tick 自动重试且不延长收势。
         MemoryHost host = host();

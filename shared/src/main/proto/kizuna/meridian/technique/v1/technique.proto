@@ -663,6 +663,13 @@ message Guard {
   Quantity angle = 1; // DEGREE，水平总角 (0, 360]，边界包含在扇面内
   Quantity damage_multiplier = 2; // RATIO，[0, 1]，挡住部分剩余的剂量比例
   repeated string damage_tags = 3; // namespace:path，不带 #，任一匹配；1–16 项，不重复
+  GuardStamina stamina = 4; // 缺省沿用原守式，起手时随 guard 冻结
+}
+message GuardStamina {
+  double joules_per_second = 1;
+  double joules_per_damage_prevented = 2;
+  int64 break_millis = 3;
+  double restart_ratio = 4;
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
 // 施放结束或被打断后不再下发新批；已开始的批次由宿主照常完成。
@@ -1072,6 +1079,9 @@ message SustainedCast {
   int64 recovery_millis = 1; // 已按起手速度缩放的收势时长；非负，不超过有限时长上限
   optional int64 end_requested_millis = 2; // 首次接受请求的身体时刻；缺省表示尚未收，重复请求不改写
   Guard guard = 3; // 起手冻结的守参数；当前是否生效仍由阶段和身体存活状态决定
+  optional int64 stamina_paid_millis = 4; // 从生效边界起，已结清到的身体毫秒
+  bool exhausted = 5; // 耗尽触发的收势，与普通松手区分
+  optional bool weapon_contact_on_break = 6; // 命中耗尽时固定本击承力样式；空守耗尽时缺省。
 }
 message LastCast {
   TechniqueReference technique = 1;
@@ -1095,4 +1105,5 @@ message TechniqueProgress {
   map<string, int64> curve_ends = 5; // 功法 ID → 已提交修正的最晚到期；提前终止也不撤销
   LastCast last_cast = 6;
   ActiveInfusion active_infusion = 7; // 收势不清除；身体死亡时由可信恢复入口清除
+  map<string, int64> guard_break_ends = 8; // 破防式 ID → 禁守截止；下次成功起该式后清除
 }

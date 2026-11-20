@@ -42,6 +42,7 @@ public final class TechniqueState {
             ActiveCast active = progress.getActiveCast();
             if (!active.getRequest().getBodyId().equals(body.id().value())
                     || active.getStartedMillis() > body.settledAt().elapsedMillis()
+                    || active.getSustained().getStaminaPaidMillis() > body.settledAt().elapsedMillis()
                     || (active.hasSustained() && active.getSustained().hasEndRequestedMillis()
                         && active.getSustained().getEndRequestedMillis() > body.settledAt().elapsedMillis())
                     || active.getBinding().getRevision() >= body.revision()) {
@@ -72,12 +73,14 @@ public final class TechniqueState {
         if (progress.getSchemaVersion() != TechniqueValues.SCHEMA_VERSION
                 || progress.getKnownCount() > MAX_KNOWN || progress.getCooldownsCount() > MAX_KNOWN
                 || progress.getCurveEndsCount() > MAX_KNOWN
+                || progress.getGuardBreakEndsCount() > MAX_KNOWN
                 || Any.pack(progress).getSerializedSize() > MAX_PROGRESS_BYTES) {
             throw TechniqueErrors.invalid(KEY, "进度版本不支持、记录数量或载荷大小超限");
         }
         validateKnown(progress.getKnownList());
         validateEndTimes(progress.getCooldownsMap(), "cooldowns");
         validateEndTimes(progress.getCurveEndsMap(), "curve_ends");
+        validateEndTimes(progress.getGuardBreakEndsMap(), "guard_break_ends");
         if (progress.hasActiveCast()) {
             validateActive(progress.getActiveCast());
         }

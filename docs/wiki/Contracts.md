@@ -18,6 +18,14 @@
 短按走完起手直接收势，没有守窗。未收不写假冷却；收势后从真实收势末计算，取消从实际终止时刻计算。
 持续式全程占用动作，不能通过通用收招或承接提前替换。
 
+`Guard.stamina` 可声明每秒维持费、每点守式减伤的命中费（单位为焦耳）、破防禁守毫秒和再起余力比。
+四项均为有限正数，比例至多为 1。未声明的冻结守式沿用原有行为。
+身体宿主在实际生效边界用 `TechniqueGuardStamina.hold` 生成游标和肌肉占用，将疲劳明细加入同一身体活动。
+耗尽时改用 `exhaust`，同笔确定收势、撤掉肌肉占用并保存按式区分的 `guard_break_ends`。
+收势原因可从 `SustainedCast.exhausted` 读取；游标更新不会重发阶段通知。
+若松手活动暂遇版本冲突，身体在前进到下一毫秒前用 `pendingGuardRelease(entity, body)`
+取得按首次松手时刻生成的同一请求，提交后再推进时间。服务仍负责确认收势并发布通知。
+
 `innate=true` 只替代学习检查，不绕过身体、境界、费用和宿主准入。天生式禁止入卷。
 `TechniqueKnowledge.references/contains` 按精确版本合并已学与天生式；已有学习顺序保留，新增天生引用按 ID/版本排序。
 `TechniqueService.known()` 返回 `List<KnownEntry>`，其中每项只有 `technique` 引用和 `name`。

@@ -354,6 +354,11 @@ public final class TechniqueCasting {
                 return false;
             }
             ActiveCast active = progress.getActiveCast();
+            var sustained = active.getSustained();
+            if (sustained.getGuard().hasStamina() && !sustained.hasEndRequestedMillis()
+                    && nowMillis >= active.getWarmupEndMillis()) {
+                return false;
+            }
             if (active.hasSustained() && TechniqueScheduler.phase(active, previousMillis)
                     != TechniqueScheduler.phase(active, nowMillis)) {
                 return false;

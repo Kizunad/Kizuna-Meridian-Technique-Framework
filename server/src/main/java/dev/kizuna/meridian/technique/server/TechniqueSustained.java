@@ -2,7 +2,6 @@ package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
-import dev.kizuna.meridian.server.BodyActivityExecution;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.*;
 
 import java.util.HashSet;
@@ -95,6 +94,13 @@ final class TechniqueSustained {
         // 标签只检查公共身份格式，实际伤害类型归伤害适配器解释。
         TechniqueValues.positive(guard.getAngle(), Unit.DEGREE, FULL_ANGLE, "guard.angle");
         TechniqueValues.quantity(guard.getDamageMultiplier(), Unit.RATIO, 0, 1, "guard.damage_multiplier");
+        if (guard.hasStamina()) {
+            var stamina = guard.getStamina();
+            validatePositive(stamina.getJoulesPerSecond(), TechniqueValues.MAX_QUANTITY);
+            validatePositive(stamina.getJoulesPerDamagePrevented(), TechniqueValues.MAX_QUANTITY);
+            validatePositive(stamina.getRestartRatio(), 1);
+            validatePositive(stamina.getBreakMillis(), TechniqueValues.MAX_MILLIS);
+        }
         var tags = new HashSet<String>();
         if (guard.getDamageTagsCount() == 0 || guard.getDamageTagsCount() > MAX_TAGS) {
             throw TechniqueErrors.invalid("guard.damage_tags", "伤害标签数量超限或为空");
@@ -104,6 +110,13 @@ final class TechniqueSustained {
             if (!tags.add(tag)) {
                 throw TechniqueErrors.invalid("guard.damage_tags", "伤害标签重复");
             }
+        }
+    }
+
+    private static void validatePositive(double value, double maximum) {
+        // 缺省为零的字段也在目录载入时拒绝。
+        if (!Double.isFinite(value) || value <= 0 || value > maximum) {
+            throw TechniqueErrors.invalid("guard.stamina", "守式体力参数须为范围内的有限正数");
         }
     }
 
@@ -126,6 +139,14 @@ final class TechniqueSustained {
         SustainedCast sustained = active.getSustained();
         TechniqueValues.millis(sustained.getRecoveryMillis(), "sustained.recovery_millis");
         validateGuard(sustained.getGuard());
+        if (sustained.hasStaminaPaidMillis() && (!sustained.getGuard().hasStamina()
+                || sustained.getStaminaPaidMillis() < active.getWarmupEndMillis()
+                || sustained.hasEndRequestedMillis() && sustained.getStaminaPaidMillis() > active.getActiveEndMillis())
+                || sustained.getExhausted() && (!sustained.hasEndRequestedMillis()
+                    || !sustained.getGuard().hasStamina())
+                || sustained.hasWeaponContactOnBreak() && !sustained.getExhausted()) {
+            throw TechniqueErrors.invalid("sustained.stamina", "守式结算时刻或破防原因与施放边界不符");
+        }
         long warmup = active.getWarmupEndMillis() - active.getStartedMillis();
         TechniqueValues.millis(warmup, "sustained.warmup_millis");
         long finiteDuration = warmup + sustained.getRecoveryMillis();
@@ -150,10 +171,15 @@ final class TechniqueSustained {
     }
 
     static BodyActivity release(BodySnapshot body, long requestedMillis) {
-        // 收势只更新进度及确定的冷却，不重新扣费或解除动作占用。
+        // 收势时解除守式的肌肉占用，施放动作本身仍留到收势结束。
         TechniqueProgress progress = TechniqueState.read(body);
+        return release(progress, requestedMillis, progress.getActiveCast().getSustained());
+    }
+
+    static BodyActivity release(TechniqueProgress progress, long requestedMillis, SustainedCast guard) {
+        // 松手和破防共用确定边界的事务，破防另外保存身体时钟截止。
         ActiveCast active = progress.getActiveCast();
-        SustainedCast sustained = active.getSustained().toBuilder()
+        SustainedCast sustained = guard.toBuilder()
                 .setEndRequestedMillis(requestedMillis)
                 .build();
         long activeEnd = Math.max(active.getWarmupEndMillis(), requestedMillis);
@@ -164,17 +190,16 @@ final class TechniqueSustained {
                 .setRecoveryEndMillis(recoveryEnd)
                 .build();
         long cooldownEnd = addTime(recoveryEnd, active.getCooldownMillis());
-        TechniqueProgress updated = progress.toBuilder()
+        var updated = progress.toBuilder()
                 .setActiveCast(released)
-                .putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd)
-                .build();
-        var payload = TechniqueState.pack(updated);
-        BodyActivity activity = BodyActivity.newBuilder()
-                .putProgress(TechniqueState.KEY, payload)
-                .build();
-        // 预检失败抛 Framework 校验异常，不写入候选状态。
-        BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
-        return activity;
+                .putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd);
+        if (guard.getExhausted()) {
+            long deadline = addTime(requestedMillis, guard.getGuard().getStamina().getBreakMillis());
+            updated.putGuardBreakEnds(active.getRequest().getTechnique().getId(), deadline);
+        }
+        var plan = BodyActivity.newBuilder().putProgress(TechniqueState.KEY, TechniqueState.pack(updated.build()));
+        TechniqueGuardStamina.stopOccupancy(active, plan);
+        return plan.build();
     }
 
     private static long addTime(long start, long duration) {

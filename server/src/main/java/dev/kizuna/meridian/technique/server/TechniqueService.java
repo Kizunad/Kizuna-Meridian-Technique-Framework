@@ -218,13 +218,11 @@ public final class TechniqueService {
             throw TechniqueErrors.invalid("end_active", "会话身体或施放身份已变化");
         }
         if (!active.getSustained().hasEndRequestedMillis()) {
-            BodyActivity activity = TechniqueSustained.release(body, requestedMillis);
-            String requestId = "technique_release_" + session.castId;
-            Optional<TechniqueHost.Commit> receipt = session.host.findActivity(requestId);
+            var submission = releaseSubmission(body, pending);
+            Optional<TechniqueHost.Commit> receipt = session.host.findActivity(submission.requestId());
             if (receipt.isEmpty()) {
-                TechniqueHost.Commit commit = session.host.submit(
-                        new TechniqueHost.Submission(requestId, body.revision(), activity));
-                validateCommit(body, activity, commit);
+                TechniqueHost.Commit commit = session.host.submit(submission);
+                validateCommit(body, submission.activity(), commit);
             }
         }
         BodySnapshot releasedBody = session.host.inspect().body();
@@ -235,6 +233,31 @@ public final class TechniqueService {
             throw TechniqueErrors.invalid("end_active", "收势回执没有对应的已保存收势事实");
         }
         publishState(entityUuid, session, released, requestedMillis);
+    }
+
+    public Optional<TechniqueHost.Submission> pendingGuardRelease(UUID entity, BodySnapshot body) {
+        // 宿主推进下一段身体时间前可认领同一收势回执，防止瞬时冲突后继续收费。
+        Session session = sessions.get(entity);
+        if (session == null || session.pendingRelease == null || session.terminating) {
+            return Optional.empty();
+        }
+        PendingRelease pending = session.pendingRelease;
+        EndActiveRequest request = pending.request();
+        ActiveCast active = TechniqueState.read(body).getActiveCast();
+        var guard = active.getSustained();
+        if (!request.getBodyId().equals(body.id().value())
+                || !active.getRequest().getCastId().equals(request.getCastId())
+                || !guard.getGuard().hasStamina() || guard.hasEndRequestedMillis()) {
+            return Optional.empty();
+        }
+        return Optional.of(releaseSubmission(body, pending));
+    }
+
+    private static TechniqueHost.Submission releaseSubmission(BodySnapshot body, PendingRelease pending) {
+        // 服务重试与身体时钟边界使用同一活动身份和首次接受时刻。
+        String id = "technique_release_" + pending.request().getCastId();
+        var activity = TechniqueSustained.release(body, pending.requestedMillis());
+        return new TechniqueHost.Submission(id, body.revision(), activity);
     }
 
     private void publishState(UUID entityUuid, Session session, ActiveCast active, long millis) {
@@ -248,7 +271,7 @@ public final class TechniqueService {
         }
         ActiveCast previous = session.publishedActive;
         if (previous != null && phase == session.publishedPhase
-                && previous.getSustained().equals(active.getSustained())) {
+                && previous.getSustained().hasEndRequestedMillis() == active.getSustained().hasEndRequestedMillis()) {
             return;
         }
         session.publishedActive = active;

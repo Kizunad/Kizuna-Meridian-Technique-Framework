@@ -12,6 +12,8 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -22,7 +24,8 @@ public final class TechniqueStatusBenefits {
     private static final long MILLIS_PER_TICK = 50;
     private static final Map<String, Registered> benefits = new LinkedHashMap<>();
 
-    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, Holder<MobEffect> effect) { }
+    public record Registered(StatusBenefit benefit, TechniqueDefinition technique, Holder<MobEffect> effect,
+                             Identifier movementSpeedModifier) { }
 
     private TechniqueStatusBenefits() {
         // 注册表在两个逻辑端以同一目录固定，不运行时制造新身份。
@@ -47,9 +50,11 @@ public final class TechniqueStatusBenefits {
         if (benefits.containsKey(benefit.getId())) {
             throw new IllegalArgumentException("状态增益身份重复：" + benefit.getId());
         }
-        Holder<MobEffect> effect = Registry.registerForHolder(BuiltInRegistries.MOB_EFFECT,
-                Identifier.parse(benefit.getId()), new QuietBenefit(benefit.getColorRgb()));
-        benefits.put(benefit.getId(), new Registered(benefit, technique, effect));
+        Identifier effectId = Identifier.parse(benefit.getId());
+        Holder<MobEffect> effect = Registry.registerForHolder(BuiltInRegistries.MOB_EFFECT, effectId,
+                new QuietBenefit(benefit.getColorRgb()));
+        Identifier movementModifier = effectId.withPath(path -> path + "/movement_speed");
+        benefits.put(benefit.getId(), new Registered(benefit, technique, effect, movementModifier));
     }
 
     public static Registered get(String id) {
@@ -72,6 +77,12 @@ public final class TechniqueStatusBenefits {
                 .filter(value -> value.benefit().hasLeap() && actor.hasEffect(value.effect())).findFirst();
     }
 
+    public static Optional<Registered> activePlain(LivingEntity actor) {
+        // 普通效果按其注册 profile 查询，供伤害策略读取当前铜皮状态。
+        return benefits.values().stream()
+                .filter(value -> value.benefit().hasPlain() && actor.hasEffect(value.effect())).findFirst();
+    }
+
     public static Optional<Registered> tissue(MobEffectInstance instance) {
         // 能力接线按目录描述查找，不识别内容包的具体状态 ID。
         return benefits.values().stream()
@@ -81,6 +92,61 @@ public final class TechniqueStatusBenefits {
     public static List<Registered> tissues() {
         // 重载只核对组织状态，不改变既有轻身的生命周期。
         return benefits.values().stream().filter(value -> value.benefit().hasTissue()).toList();
+    }
+
+    public static void addPlainMovementSpeed(LivingEntity actor, MobEffectInstance instance) {
+        // 原版效果到期和移除由效果集合管理，这里只建立实体类型对应的短时属性修饰。
+        Registered registered = plain(instance).orElse(null);
+        if (registered == null || !registered.benefit().getPlain().hasMovementSpeedMultiplier()) {
+            return;
+        }
+        AttributeInstance speed = actor.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed == null) {
+            return;
+        }
+        if (speed.getModifier(registered.movementSpeedModifier()) != null) {
+            return;
+        }
+        var modifier = TechniqueMovementSpeed.modifier(actor, registered.movementSpeedModifier(),
+                registered.benefit().getPlain().getMovementSpeedMultiplier());
+        speed.addTransientModifier(modifier);
+    }
+
+    public static void reconcilePlainMovementSpeed(LivingEntity actor) {
+        // 原版效果实例是持续时间唯一来源，属性修饰在每次实体 tick 对账恢复。
+        for (Registered registered : benefits.values()) {
+            if (!registered.benefit().hasPlain()) {
+                continue;
+            }
+            MobEffectInstance instance = actor.getEffect(registered.effect());
+            if (instance == null) {
+                removePlainMovementSpeed(actor, registered);
+            } else {
+                addPlainMovementSpeed(actor, instance);
+            }
+        }
+    }
+
+    public static void clearPlainMovementSpeed(LivingEntity actor) {
+        // 实体卸载或死亡时效果实例可能仍在集合中，直接撤销全部普通状态修饰。
+        for (Registered registered : benefits.values()) {
+            if (registered.benefit().hasPlain()) {
+                removePlainMovementSpeed(actor, registered);
+            }
+        }
+    }
+
+    private static void removePlainMovementSpeed(LivingEntity actor, Registered registered) {
+        AttributeInstance speed = actor.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed != null) {
+            speed.removeModifier(registered.movementSpeedModifier());
+        }
+    }
+
+    private static Optional<Registered> plain(MobEffectInstance instance) {
+        // 由效果 holder 查找数据，不解析或硬编码内容包身份。
+        return benefits.values().stream()
+                .filter(value -> value.benefit().hasPlain() && instance.is(value.effect())).findFirst();
     }
 
     public static boolean quiet(MobEffect effect) {
@@ -102,6 +168,7 @@ public final class TechniqueStatusBenefits {
         } else {
             actor.removeEffect(registered.effect());
             actor.addEffect(instance);
+            addPlainMovementSpeed(actor, instance);
         }
     }
 

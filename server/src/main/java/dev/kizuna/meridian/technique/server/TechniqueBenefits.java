@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LeapProfile;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.PlainBenefitProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundAnchor;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StatusBenefit;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ModifierActivation;
@@ -23,13 +24,40 @@ public final class TechniqueBenefits {
         TechniqueValues.id(benefit.getId(), "status_benefit.id");
         TechniqueValues.millis(benefit.getDurationMillis(), "status_benefit.duration_millis");
         if (benefit.getDurationMillis() == 0 || benefit.getColorRgb() < 0
-                || benefit.getColorRgb() > MAX_COLOR || benefit.hasLeap() == benefit.hasTissue()) {
+                || benefit.getColorRgb() > MAX_COLOR || abilityCount(benefit) != 1) {
             throw TechniqueErrors.invalid("status_benefit", "必须恰有一种能力，且持续时间、颜色合法");
         }
         if (benefit.hasLeap()) {
             validateLeap(benefit.getLeap());
-        } else {
+        } else if (benefit.hasTissue()) {
             validateTissue(benefit);
+        } else {
+            validatePlain(benefit.getPlain());
+        }
+    }
+
+    private static int abilityCount(StatusBenefit benefit) {
+        // 三种状态能力必须恰有一种，避免宿主对同一效果产生歧义。
+        int count = 0;
+        if (benefit.hasLeap()) {
+            count++;
+        }
+        if (benefit.hasTissue()) {
+            count++;
+        }
+        if (benefit.hasPlain()) {
+            count++;
+        }
+        return count;
+    }
+
+    private static void validatePlain(PlainBenefitProfile plain) {
+        // 普通状态只允许可选的移速倍率，缺省保持原版速度。
+        if (plain.hasMovementSpeedMultiplier()) {
+            double multiplier = plain.getMovementSpeedMultiplier();
+            if (!Double.isFinite(multiplier) || multiplier < 0 || multiplier > 1) {
+                throw TechniqueErrors.invalid("status_benefit.plain", "移动倍率必须在 [0, 1]");
+            }
         }
     }
 

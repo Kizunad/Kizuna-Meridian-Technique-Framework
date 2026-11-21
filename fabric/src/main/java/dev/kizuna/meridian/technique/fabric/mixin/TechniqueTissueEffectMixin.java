@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.fabric.mixin;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueAccess;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TissueBenefitLeases;
 import java.util.Base64;
@@ -43,6 +44,15 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
         }
     }
 
+    @Inject(method = "addEffect(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z",
+            at = @At("RETURN"))
+    private void meridian$plainAdded(MobEffectInstance effect, Entity source,
+                                     CallbackInfoReturnable<Boolean> callback) {
+        if (callback.getReturnValue()) {
+            TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
+        }
+    }
+
     @Inject(method = "forceAddEffect", at = @At("HEAD"), cancellable = true)
     private void meridian$force(MobEffectInstance effect, Entity source, CallbackInfo callback) {
         // 强制替换仍必须经过能力事务，内部原版同步调用由控制器排除递归。
@@ -60,12 +70,14 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
         if (reapply && tissues.handles(effect)) {
             tissues.apply(effect);
         }
+        TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
     }
 
     @Inject(method = "onEffectsRemoved", at = @At("HEAD"))
     private void meridian$removed(Collection<MobEffectInstance> effects, CallbackInfo callback) {
         // 到期、牛奶和命令清除都在本次身体后续事件前撤销自有修正。
         meridian$tissueEffects().removed(effects);
+        TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
     }
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -74,6 +86,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
         if (meridian$tissues != null) {
             meridian$tissues.tick();
         }
+        TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
     }
 
     @Inject(method = "remove", at = @At("HEAD"))
@@ -82,6 +95,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
         if (meridian$tissues != null) {
             meridian$tissues.suspend();
         }
+        TechniqueStatusBenefits.clearPlainMovementSpeed((LivingEntity) (Object) this);
     }
 
     @Inject(method = "die", at = @At("HEAD"))
@@ -91,6 +105,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
             LivingEntity actor = (LivingEntity) (Object) this;
             meridian$tissues.removed(actor.getActiveEffects());
         }
+        TechniqueStatusBenefits.clearPlainMovementSpeed((LivingEntity) (Object) this);
     }
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))

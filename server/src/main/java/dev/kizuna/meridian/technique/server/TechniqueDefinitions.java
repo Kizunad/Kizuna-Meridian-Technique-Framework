@@ -392,7 +392,7 @@ final class TechniqueDefinitions {
             WorkCost work = benefit.getLeap().getWork();
             validateWork(addons, templates, slots, work);
             requireSlot(slots, work.getSlotId(), ModuleKind.TISSUE);
-        } else {
+        } else if (benefit.hasTissue()) {
             for (TissueModifier modifier : benefit.getTissue().getModifiersList()) {
                 TechniqueSlot slot = requireSlot(slots, modifier.getSlotId(), ModuleKind.TISSUE);
                 if (slot.hasRelativeArm()) {

@@ -281,6 +281,10 @@ message StatusBenefit {
   int32 color_rgb = 3;
   LeapProfile leap = 4;
   TissueBenefitProfile tissue = 5; // 与 leap 恰有一种；状态撤销时仅清理本状态拥有的修正。
+  PlainBenefitProfile plain = 6; // 原版效果属性由宿主生命周期管理。
+}
+message PlainBenefitProfile {
+  optional double movement_speed_multiplier = 1; // [0, 1]，缺省为 1。
 }
 message TissueBenefitProfile {
   repeated TissueModifier modifiers = 1; // 同一状态可覆盖多个组织槽；曲线末点等于状态默认时长。

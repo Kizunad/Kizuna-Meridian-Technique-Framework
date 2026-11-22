@@ -107,7 +107,8 @@ public final class TechniqueCasting {
         TechniqueFollowUps.EntryPlan entry = TechniqueFollowUps.plan(definition, progress, request,
                 body.settledAt().elapsedMillis(), windDownStart);
         TechniqueActivities.CastBinding selection = bindCast(definition, inspection, entry);
-        var start = new TechniqueActivities.Start(body, definition, request, progress, selection);
+        var start = new TechniqueActivities.Start(body, definition, request, progress, selection,
+                registry.addonCostPayers());
         BodyActivity activity = TechniqueActivities.start(start);
         return submitStart(host, start, activity);
     }
@@ -604,6 +605,7 @@ public final class TechniqueCasting {
         // 拒绝已带具体说明时原样交给玩家，失败码仍供宿主区分。
         return failure(castId, rejected.code).toBuilder()
                 .setReason(rejected.reason)
+                .setTranslationKey(rejected.translationKey)
                 .build();
     }
 

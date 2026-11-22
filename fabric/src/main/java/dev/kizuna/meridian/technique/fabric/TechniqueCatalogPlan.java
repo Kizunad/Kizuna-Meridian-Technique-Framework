@@ -2,6 +2,7 @@ package dev.kizuna.meridian.technique.fabric;
 
 import dev.kizuna.meridian.technique.server.TechniqueCatalogPhase;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogSource;
+import dev.kizuna.meridian.technique.server.TechniqueAddonCostPayers;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 
 import dev.kizuna.meridian.technique.server.TechniqueTemplateGroups;
@@ -15,11 +16,14 @@ public final class TechniqueCatalogPlan {
     private final List<Contribution> contributions;
 
     private final TechniqueTemplateGroups groups;
+    private final TechniqueAddonCostPayers addonCostPayers;
 
-    TechniqueCatalogPlan(List<Contribution> contributions, TechniqueTemplateGroups groups) {
+    TechniqueCatalogPlan(List<Contribution> contributions, TechniqueTemplateGroups groups,
+                         TechniqueAddonCostPayers addonCostPayers) {
         // 已排序的来源不会因两种生命周期的实际求值时间而换位。
         this.contributions = List.copyOf(contributions);
         this.groups = groups;
+        this.addonCostPayers = addonCostPayers.frozen();
     }
 
     public List<TechniqueCatalogSource> earlySources() {
@@ -39,7 +43,7 @@ public final class TechniqueCatalogPlan {
         if (sources.isEmpty()) {
             return null;
         }
-        return TechniqueRegistry.loadSources(sources, groups);
+        return TechniqueRegistry.loadSources(sources, groups, addonCostPayers);
     }
 
     record Contribution(TechniqueCatalogPhase phase, Supplier<List<TechniqueCatalogSource>> catalogs) {

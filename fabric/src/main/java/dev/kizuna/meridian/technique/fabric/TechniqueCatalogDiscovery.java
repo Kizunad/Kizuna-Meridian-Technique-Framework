@@ -7,6 +7,8 @@ import dev.kizuna.meridian.technique.server.TechniqueCatalogEntrypoint;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogs;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogPhase;
 import dev.kizuna.meridian.technique.server.TechniqueCatalogSource;
+import dev.kizuna.meridian.technique.server.TechniqueAddonCostEntrypoint;
+import dev.kizuna.meridian.technique.server.TechniqueAddonCostPayers;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueRegistryEntrypoint;
 import dev.kizuna.meridian.technique.server.TechniqueTemplateGroups;
@@ -48,7 +50,9 @@ public final class TechniqueCatalogDiscovery {
         FabricLoader loader = FabricLoader.getInstance();
         var entrypoints = loader.getEntrypointContainers(
                 TechniqueFabric.REGISTRY_ENTRYPOINT, Object.class);
-        return prepare(loader.getAllMods(), entrypoints, addons);
+        var addonCostEntrypoints = loader.getEntrypointContainers(
+                TechniqueAddonCostEntrypoint.ENTRYPOINT_ID, Object.class);
+        return prepare(loader.getAllMods(), entrypoints, addonCostEntrypoints, addons);
     }
 
     static TechniqueRegistry discover(Collection<ModContainer> installed,
@@ -61,11 +65,20 @@ public final class TechniqueCatalogDiscovery {
     static TechniqueCatalogPlan prepare(Collection<ModContainer> installed,
             List<EntrypointContainer<Object>> entrypoints,
             Function<TechniqueCatalog, AddonRegistry> addons) {
+        // 旧发现测试不声明支付方，仍使用空索引校验不含附属费用的目录。
+        return prepare(installed, entrypoints, List.of(), addons);
+    }
+
+    static TechniqueCatalogPlan prepare(Collection<ModContainer> installed,
+            List<EntrypointContainer<Object>> entrypoints,
+            List<EntrypointContainer<Object>> addonCostEntrypoints,
+            Function<TechniqueCatalog, AddonRegistry> addons) {
         // 按来源排序后固定每个贡献者的位置，不按初始化回调完成顺序登记。
         List<ModContainer> mods = installed.stream()
                 .sorted(Comparator.comparing(mod -> mod.getMetadata().getId()))
                 .toList();
         TechniqueTemplateGroups groups = templateGroups(addons);
+        TechniqueAddonCostPayers payers = addonCostPayers(mods, addonCostEntrypoints);
         var contributions = new ArrayList<TechniqueCatalogPlan.Contribution>();
         for (ModContainer mod : mods) {
             String modId = mod.getMetadata().getId();
@@ -77,7 +90,35 @@ public final class TechniqueCatalogDiscovery {
             }
             collectEntrypoints(modId, entrypoints, contributions);
         }
-        return new TechniqueCatalogPlan(contributions, groups);
+        return new TechniqueCatalogPlan(contributions, groups, payers);
+    }
+
+    private static TechniqueAddonCostPayers addonCostPayers(List<ModContainer> mods,
+            List<EntrypointContainer<Object>> entrypoints) {
+        // 所有附属支付方在任何目录加载前登记，缺失键会由完整目录校验明确拒绝。
+        var payers = new TechniqueAddonCostPayers();
+        for (ModContainer mod : mods) {
+            String modId = mod.getMetadata().getId();
+            int index = 0;
+            for (EntrypointContainer<Object> container : entrypoints) {
+                if (!container.getProvider().getMetadata().getId().equals(modId)) {
+                    continue;
+                }
+                String source = modId + ":entrypoint/" + TechniqueAddonCostEntrypoint.ENTRYPOINT_ID
+                        + "[" + index + "]";
+                Object entrypoint = container.getEntrypoint();
+                if (!(entrypoint instanceof TechniqueAddonCostEntrypoint provider)) {
+                    throw new IllegalArgumentException(source + "：费用入口必须实现 TechniqueAddonCostEntrypoint");
+                }
+                try {
+                    provider.registerPayers(payers);
+                } catch (RuntimeException failure) {
+                    throw new IllegalArgumentException(source + "：" + failure.getMessage(), failure);
+                }
+                index++;
+            }
+        }
+        return payers.frozen();
     }
 
     private static TechniqueTemplateGroups templateGroups(Function<TechniqueCatalog, AddonRegistry> addons) {

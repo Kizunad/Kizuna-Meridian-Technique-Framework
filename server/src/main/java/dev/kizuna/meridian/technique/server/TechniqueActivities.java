@@ -30,7 +30,14 @@ final class TechniqueActivities {
     }
 
     record Start(BodySnapshot body, TechniqueDefinition definition, CastRequest request,
-                 TechniqueProgress progress, CastBinding selection) {
+                 TechniqueProgress progress, CastBinding selection,
+                 TechniqueAddonCostPayers addonCostPayers) {
+        Start(BodySnapshot body, TechniqueDefinition definition, CastRequest request,
+              TechniqueProgress progress, CastBinding selection) {
+            // 既有直接活动测试不含附属费用，使用空支付方索引。
+            this(body, definition, request, progress, selection, TechniqueAddonCostPayers.empty());
+        }
+
         TechniqueBinding binding() {
             // 身体绑定与选手结果使用同一份起手事实。
             return selection.binding();
@@ -74,6 +81,7 @@ final class TechniqueActivities {
         TechniqueScheduledWork.validateStart(start, slots, modifiers);
         TechniqueProgress progress = startedProgress(start, active, startingModifiers);
         Any payload = TechniqueState.pack(progress);
+        Map<String, Any> addonProgress = addonProgress(start);
         ActivityAction action = action(definition, active, slots.values().stream().toList());
         var plan = BodyActivity.newBuilder()
                 .addAllAccounts(accounts.changes())
@@ -81,7 +89,8 @@ final class TechniqueActivities {
                 .addAllEfforts(efforts)
                 .addStartActions(action)
                 .addAllAddModifiers(startingModifiers)
-                .putProgress(TechniqueState.KEY, payload);
+                .putProgress(TechniqueState.KEY, payload)
+                .putAllProgress(addonProgress);
         if (start.progress().hasActiveCast()) {
             plan.addStopActions(start.progress().getActiveCast().getActionInstanceId());
         }
@@ -90,6 +99,26 @@ final class TechniqueActivities {
         // 预检使用 Framework 的纯计算器，失败抛异常；候选结果不写入任何存储。
         BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
         return activity;
+    }
+
+    private static Map<String, Any> addonProgress(Start start) {
+        // 按声明顺序计算附属候选状态，拒绝时尚未构造或提交最终活动。
+        BodySnapshot candidate = start.body();
+        Map<String, Any> updates = new LinkedHashMap<>();
+        for (AddonCost cost : start.definition().getCost().getAddonCostsList()) {
+            String key = cost.getKey();
+            TechniqueAddonCostPayer payer = start.addonCostPayers().find(key)
+                    .orElseThrow(() -> new IllegalStateException("目录未固定附属费用支付方：" + key));
+            TechniqueAddonCostPayer.Payment payment = payer.pay(candidate, cost);
+            if (!payment.accepted()) {
+                throw TechniqueErrors.rejected(INSUFFICIENT_ADDON_COST, payment.reason(),
+                        payment.failureTranslationKey());
+            }
+            Any progress = payment.progress();
+            candidate = AddonProgress.replace(candidate, key, progress);
+            updates.put(key, progress);
+        }
+        return Map.copyOf(updates);
     }
 
     private static TechniqueProgress startedProgress(Start start, ActiveCast active,

@@ -28,7 +28,8 @@ final class TechniqueDefinitions {
     }
 
     static void validate(AddonRegistry addons, Map<ModuleKind, Set<String>> tags,
-                         List<BodyMessages.TemplateReference> templates, TechniqueDefinition definition) {
+                         List<BodyMessages.TemplateReference> templates, TechniqueDefinition definition,
+                         TechniqueAddonCostPayers addonCostPayers) {
         // 身份、时间、槽位、费用、效果依次检查，错误直接定位原始字段。
         id(definition.getId(), "id");
         if (definition.getVersion() <= 0 || definition.getCategoryValue() <= 0
@@ -57,7 +58,7 @@ final class TechniqueDefinitions {
         }
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
         TechniqueRelativeArms.validate(addons, templates, definition);
-        validateCosts(addons, templates, slots, definition);
+        validateCosts(addons, templates, slots, definition, addonCostPayers);
         validateProjectileDefinition(definition);
         validateEffects(addons, templates, slots, definition);
         TechniqueProjectiles.validateConvergence(definition);
@@ -179,10 +180,12 @@ final class TechniqueDefinitions {
 
     private static void validateCosts(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
                                       Map<String, TechniqueSlot> slots,
-                                      TechniqueDefinition definition) {
+                                      TechniqueDefinition definition,
+                                      TechniqueAddonCostPayers addonCostPayers) {
         // 声明空费用必须显式保留 cost 消息，未知费用字段由递归检查拒绝。
         TechniqueCost cost = definition.getCost();
-        if (!definition.hasCost() || cost.getQiCount() > MAX_COSTS || cost.getWorkCount() > MAX_COSTS) {
+        if (!definition.hasCost() || cost.getQiCount() > MAX_COSTS || cost.getWorkCount() > MAX_COSTS
+                || cost.getAddonCostsCount() > MAX_COSTS) {
             throw TechniqueErrors.invalid("cost", "缺少费用声明或费用条数超限");
         }
         var organPayers = new HashSet<String>();
@@ -206,6 +209,45 @@ final class TechniqueDefinitions {
         }
         for (WorkCost work : cost.getWorkList()) {
             validateWork(addons, templates, slots, work);
+        }
+        for (int index = 0; index < cost.getAddonCostsCount(); index++) {
+            validateAddonCost(addonCostPayers, cost.getAddonCosts(index), index);
+        }
+    }
+
+    private static void validateAddonCost(TechniqueAddonCostPayers addonCostPayers, AddonCost cost, int index) {
+        // 附属声明只能由已登记的硬依赖支付方解释，数量和参数都必须带单位且为有限值。
+        String path = "cost.addon_costs[" + index + "]";
+        String key = cost.getKey();
+        id(key, path + ".key");
+        if (addonCostPayers.find(key).isEmpty()) {
+            throw TechniqueErrors.invalid(path + ".key", "附属费用支付方未登记：" + key);
+        }
+        validatePositiveAddonQuantity(cost.getAmount(), path + ".amount");
+        if (cost.getParametersCount() > MAX_MODULES) {
+            throw TechniqueErrors.invalid(path + ".parameters", "公式参数数量超限");
+        }
+        for (int parameter = 0; parameter < cost.getParametersCount(); parameter++) {
+            validateAddonParameter(cost.getParameters(parameter), path + ".parameters[" + parameter + "]");
+        }
+    }
+
+    private static void validatePositiveAddonQuantity(Quantity quantity, String path) {
+        // 附属定义单位语义；功法库只要求显式单位、有限值和正费用数量。
+        double value = quantity.getValue();
+        if (!quantity.hasValue() || quantity.getUnit() == Unit.UNIT_UNSPECIFIED
+                || quantity.getUnit() == Unit.UNRECOGNIZED || !Double.isFinite(value)
+                || value <= 0) {
+            throw TechniqueErrors.invalid(path, "附属费用数量或参数无效");
+        }
+    }
+
+    private static void validateAddonParameter(Quantity quantity, String path) {
+        // 公式参数允许零和负值，但仍必须携带明确单位且为有限数。
+        double value = quantity.getValue();
+        if (!quantity.hasValue() || quantity.getUnit() == Unit.UNIT_UNSPECIFIED
+                || quantity.getUnit() == Unit.UNRECOGNIZED || !Double.isFinite(value)) {
+            throw TechniqueErrors.invalid(path, "附属费用数量或参数无效");
         }
     }
 

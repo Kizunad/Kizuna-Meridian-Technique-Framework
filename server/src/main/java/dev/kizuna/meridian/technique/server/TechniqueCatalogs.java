@@ -9,6 +9,7 @@ import java.util.List;
 /** 收集清单与编程式目录，直到全部收齐才进行整体校验。 */
 public final class TechniqueCatalogs {
     private final List<TechniqueCatalogSource> sources = new ArrayList<>();
+    private final TechniqueAddonCostPayers addonCostPayers = new TechniqueAddonCostPayers();
 
     public void register(String source, AddonRegistry addons, TechniqueCatalog catalog) {
         // 登记只保存不可变候选，允许引用尚未收集的书、卷和式。
@@ -22,6 +23,12 @@ public final class TechniqueCatalogs {
             TechniqueCatalogSource original = originals.get(index);
             register(source + " catalogs[" + index + "]", original.addons(), original.catalog());
         }
+        registry.addonCostPayers().all().forEach(addonCostPayers::register);
+    }
+
+    public void register(TechniqueAddonCostPayer payer) {
+        // 编程式目录入口须先登记其费用解释器，和 Fabric 入口遵守同一硬依赖规则。
+        addonCostPayers.register(payer);
     }
 
     public boolean isEmpty() {
@@ -36,6 +43,6 @@ public final class TechniqueCatalogs {
 
     public TechniqueRegistry build() {
         // 任一错误都会抛出，调用方拿不到部分成功的注册表。
-        return TechniqueRegistry.loadSources(sources);
+        return TechniqueRegistry.loadSources(sources, addonCostPayers);
     }
 }

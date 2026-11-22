@@ -32,6 +32,11 @@ public final class TechniqueErrors {
         return new Rejected(code, reason);
     }
 
+    static Rejected rejected(TechniqueFailure code, String reason, String translationKey) {
+        // 附属费用失败同时保留其本地化键和诊断原因。
+        return new Rejected(code, reason, translationKey);
+    }
+
     static String playerReason(TechniqueFailure code) {
         // 玩家只看到身体感受，失败码仍由结构化字段提供给宿主和测试。
         return switch (code) {
@@ -46,6 +51,7 @@ public final class TechniqueErrors {
             case MERIDIAN_NOT_OPENED -> "经脉未通";
             case INSUFFICIENT_CAPABILITY -> "你过于疲惫";
             case INSUFFICIENT_QI -> "真元不济";
+            case INSUFFICIENT_ADDON_COST -> "附属资源不足";
             case CAST_ID_CONFLICT -> "这次施放已另有安排";
             case INVALID_STATE -> "心神未定，暂时无法运功";
             case FRAMEWORK_REJECTED -> "身体暂不听使唤";
@@ -85,12 +91,19 @@ public final class TechniqueErrors {
     static final class Rejected extends RuntimeException {
         final TechniqueFailure code;
         final String reason;
+        final String translationKey;
 
         Rejected(TechniqueFailure code, String reason) {
             // 校验拒绝不产生任何候选状态的持久写入；说明随拒绝一起交给回执。
+            this(code, reason, "");
+        }
+
+        Rejected(TechniqueFailure code, String reason, String translationKey) {
+            // 翻译键只由提供该拒绝语义的附属给出。
             super(code.name());
             this.code = code;
             this.reason = reason;
+            this.translationKey = translationKey;
         }
     }
 

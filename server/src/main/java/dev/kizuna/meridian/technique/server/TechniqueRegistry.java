@@ -25,15 +25,18 @@ public final class TechniqueRegistry {
     private final TechniqueGroups groups;
     private final Map<TechniqueReference, Set<BodyTemplate.Reference>> scopes;
     private final List<TechniqueCatalogSource> sources;
+    private final TechniqueAddonCostPayers addonCostPayers;
 
     private TechniqueRegistry(Map<TechniqueReference, TechniqueDefinition> definitions, TechniqueGroups groups,
                               List<TechniqueCatalogSource> sources,
-                              Map<TechniqueReference, Set<BodyTemplate.Reference>> scopes) {
+                              Map<TechniqueReference, Set<BodyTemplate.Reference>> scopes,
+                              TechniqueAddonCostPayers addonCostPayers) {
         // 生成消息本身不可变，复制索引后无需额外包装定义。
         this.definitions = Collections.unmodifiableMap(new LinkedHashMap<>(definitions));
         this.groups = groups;
         this.sources = List.copyOf(sources);
         this.scopes = Map.copyOf(scopes);
+        this.addonCostPayers = addonCostPayers.frozen();
     }
 
     public static TechniqueRegistry load(AddonRegistry addons, List<TechniqueCatalog> catalogs) {
@@ -52,12 +55,31 @@ public final class TechniqueRegistry {
         var templateGroups = grouped.map(source -> TechniqueTemplateGroups.load(source.addons(),
                         TemplateGroupSource.classpath(TechniqueRegistry.class.getClassLoader())))
                 .orElseGet(TechniqueTemplateGroups::empty);
-        return loadSources(candidates, templateGroups);
+        return loadSources(candidates, templateGroups, TechniqueAddonCostPayers.empty());
+    }
+
+    public static TechniqueRegistry loadSources(List<TechniqueCatalogSource> candidates,
+                                                TechniqueAddonCostPayers addonCostPayers) {
+        // 编程式宿主显式提供硬依赖支付方，再与目录一起完成整体校验。
+        var grouped = candidates.stream().filter(source -> source.catalog().getBindingTemplateGroupsCount() > 0)
+                .findFirst();
+        var templateGroups = grouped.map(source -> TechniqueTemplateGroups.load(source.addons(),
+                        TemplateGroupSource.classpath(TechniqueRegistry.class.getClassLoader())))
+                .orElseGet(TechniqueTemplateGroups::empty);
+        return loadSources(candidates, templateGroups, addonCostPayers);
     }
 
     public static TechniqueRegistry loadSources(List<TechniqueCatalogSource> candidates,
                                                 TechniqueTemplateGroups templateGroups) {
+        // 无附属费用的既有调用仍走空支付方索引和硬依赖校验。
+        return loadSources(candidates, templateGroups, TechniqueAddonCostPayers.empty());
+    }
+
+    public static TechniqueRegistry loadSources(List<TechniqueCatalogSource> candidates,
+                                                TechniqueTemplateGroups templateGroups,
+                                                TechniqueAddonCostPayers addonCostPayers) {
         // 全部定义收齐后再校验书卷和承接；任何失败都不发布半份目录。
+        TechniqueAddonCostPayers payers = addonCostPayers.frozen();
         var scopes = new HashMap<TechniqueReference, Set<BodyTemplate.Reference>>();
         List<TechniqueCatalogSource> sources = List.copyOf(candidates);
         var definitions = new LinkedHashMap<TechniqueReference, TechniqueDefinition>();
@@ -65,7 +87,7 @@ public final class TechniqueRegistry {
         for (TechniqueCatalogSource source : sources) {
             try {
                 var binding = templateGroups.bind(source.catalog());
-                indexCatalog(source, binding.vocabulary(), definitions, locations);
+                indexCatalog(source, binding.vocabulary(), definitions, locations, payers);
                 var members = binding.members().stream()
                         .map(ref -> new BodyTemplate.Reference(new DefinitionId(ref.getId()), ref.getVersion()))
                         .collect(Collectors.toUnmodifiableSet());
@@ -75,7 +97,7 @@ public final class TechniqueRegistry {
             }
         }
         TechniqueGroups groups = new TechniqueGroups(sources, definitions, locations);
-        TechniqueRegistry registry = new TechniqueRegistry(definitions, groups, sources, scopes);
+        TechniqueRegistry registry = new TechniqueRegistry(definitions, groups, sources, scopes, payers);
         registry.validateCombatDefinitions(locations);
         registry.validateBenefitIdentities();
         return registry;
@@ -103,9 +125,15 @@ public final class TechniqueRegistry {
         return sources;
     }
 
+    public TechniqueAddonCostPayers addonCostPayers() {
+        // 返回冻结索引，调用方不能在目录加载后替换支付语义。
+        return addonCostPayers;
+    }
+
     private static void indexCatalog(TechniqueCatalogSource source, List<BodyMessages.TemplateReference> vocabulary,
                                      Map<TechniqueReference, TechniqueDefinition> definitions,
-                                     Map<TechniqueReference, String> locations) {
+                                     Map<TechniqueReference, String> locations,
+                                     TechniqueAddonCostPayers addonCostPayers) {
         // 模板与标签按各目录自己的 Framework 注册表校验。
         TechniqueCatalog catalog = source.catalog();
         Map<ModuleKind, Set<String>> tags = catalogTags(source, vocabulary);
@@ -114,7 +142,7 @@ public final class TechniqueRegistry {
             String id = definition.getId();
             String location = source.location("definitions[" + index + "]");
             try {
-                TechniqueDefinitions.validate(source.addons(), tags, vocabulary, definition);
+                TechniqueDefinitions.validate(source.addons(), tags, vocabulary, definition, addonCostPayers);
                 if (!id.startsWith(catalog.getNamespace() + ":")) {
                     throw TechniqueErrors.invalid(id, "功法 ID 不属于目录命名空间");
                 }

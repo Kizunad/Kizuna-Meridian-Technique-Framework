@@ -22,6 +22,7 @@ enum Unit {
   METER = 7;
   DAMAGE_POINT = 8;
   DEGREE = 9;
+  GOLD = 10;
 }
 message Quantity { optional double value = 1; Unit unit = 2; }
 message TechniqueReference { string id = 1; int32 version = 2; }
@@ -239,7 +240,16 @@ message WorkCost {
   Quantity duration = 4; // s
   bool training = 5; // 训练做功；只允许用于声明 TissueTraining 的组织
 }
-message TechniqueCost { repeated QiCost qi = 1; repeated WorkCost work = 2; }
+message AddonCost {
+  string key = 1; // 附属支付方身份，例如 meridian_piglin:gold
+  Quantity amount = 2; // 附属费用的声明数量
+  repeated Quantity parameters = 3; // 附属支付方解释的公式参数
+}
+message TechniqueCost {
+  repeated QiCost qi = 1;
+  repeated WorkCost work = 2;
+  repeated AddonCost addon_costs = 22;
+}
 message CastPhases {
   optional int64 warmup_millis = 1;
   optional int64 active_millis = 2;
@@ -929,6 +939,7 @@ enum TechniqueFailure {
   BREW_KIND_REQUIRED = 32;
   INSUFFICIENT_ATTRIBUTE_QI = 33; // 指定属性的真元不足或相态不够
   BODY_TEMPLATE_MISMATCH = 34; // 当前身体模板不在该式所属目录的范围内。
+  INSUFFICIENT_ADDON_COST = 35;
 }
 message BoundSlot { string slot_id = 1; ModuleKind module = 2; repeated string module_ids = 3; }
 message TechniqueBinding {
@@ -1069,6 +1080,7 @@ message CastOutcome {
   TechniqueBinding binding = 6;
   kizuna.meridian.v1.FailureCode framework_failure = 7;
   bool replayed = 8;
+  string translation_key = 28; // 附属拒绝时提供给界面的翻译键
 }
 message KnownTechnique {
   TechniqueReference technique = 1;

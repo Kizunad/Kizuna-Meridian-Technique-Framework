@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.technique.server;
 
 import dev.kizuna.meridian.core.BodySnapshot;
+import com.google.protobuf.Any;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.ActivityEffort;
 import dev.kizuna.meridian.protocol.pb.ActivityMessages.BodyActivity;
 import dev.kizuna.meridian.server.BodyActivityExecution;
@@ -9,6 +10,8 @@ import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.SetAddonProgress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveInfusion;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttack;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttackSource;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
@@ -48,14 +51,18 @@ public final class TechniqueService {
     private static final String LEARN_REQUEST_PREFIX = "technique_learn_";
     private static final String EFFECT_REQUEST_PREFIX = "technique_effect_";
     private static final String END_INFUSION_PREFIX = "technique_end_infusion_";
+    private static final String BLOCKED_ATTACK_PREFIX = "technique_blocked_attack_";
+    private static final String CLEAR_BLOCKED_ATTACK_PREFIX = "technique_clear_blocked_attack_";
     private static final long BEFORE_START_MILLIS = Long.MIN_VALUE;
     private static final long NOT_STAGGERED_MILLIS = Long.MIN_VALUE;
     private static final long MAX_STAGGER_MILLIS = 60_000;
+    private static final int MAX_BLOCKED_ATTACK_SUBMISSIONS = 3;
 
     private final TechniqueRegistry registry;
     private final TechniqueHostDirectory hosts;
     private final TechniqueCasting casting;
     private final Map<UUID, Session> sessions = new LinkedHashMap<>();
+    private final Map<UUID, LifecycleCleanup> lifecycleCleanups = new LinkedHashMap<>();
     private final List<Consumer<KnownChanged>> knownChangedListeners = new ArrayList<>();
     private final Map<StaggerKey, Long> staggerEnds = new LinkedHashMap<>();
     private final List<Consumer<StaggerChanged>> staggerListeners = new ArrayList<>();
@@ -533,6 +540,7 @@ public final class TechniqueService {
     public void tick() {
         // 每 tick 只推进已成功施放的实体，不按毫秒轮询世界；僵直按各自身体时钟到期。
         hosts.tick();
+        processLifecycleCleanups();
         for (UUID entityUuid : List.copyOf(sessions.keySet())) {
             Session session = sessions.get(entityUuid);
             if (session != null) {
@@ -542,6 +550,30 @@ public final class TechniqueService {
         for (StaggerKey key : List.copyOf(staggerEnds.keySet())) {
             if (staggerRemainingMillis(key.entityUuid(), key.kind()) == 0) {
                 endStagger(key);
+            }
+        }
+    }
+
+    private void processLifecycleCleanups() {
+        // 生命周期回调可能发生在原版实体和区块集合更新中，宿主访问统一延后到服务 tick。
+        Map<UUID, LifecycleCleanup> pending = new LinkedHashMap<>(lifecycleCleanups);
+        lifecycleCleanups.clear();
+        for (Map.Entry<UUID, LifecycleCleanup> entry : pending.entrySet()) {
+            UUID entityUuid = entry.getKey();
+            TechniqueHost host = hosts.resolve(entityUuid).orElse(null);
+            if (host == null) {
+                if (entry.getValue() == LifecycleCleanup.CLEAR_AND_FORGET_HOST) {
+                    hosts.forget(entityUuid);
+                }
+                continue;
+            }
+            boolean cleared = clearBlockedAttack(host);
+            if (!cleared) {
+                lifecycleCleanups.put(entityUuid, entry.getValue());
+                continue;
+            }
+            if (entry.getValue() == LifecycleCleanup.CLEAR_AND_FORGET_HOST) {
+                hosts.forget(entityUuid);
             }
         }
     }
@@ -767,6 +799,176 @@ public final class TechniqueService {
         strikeListeners.remove(listener);
     }
 
+    public boolean recordBlockedAttack(BlockedAttackObservation observation) {
+        // Damage 只提交可信事件事实，攻击者身体进度负责隔离、去重和承接窗口。
+        Objects.requireNonNull(observation);
+        TechniqueHost host = hosts.resolve(observation.attackerUuid()).orElse(null);
+        if (host == null) {
+            return false;
+        }
+        String requestId = BLOCKED_ATTACK_PREFIX + observation.eventId();
+        for (int attempt = 0; attempt < MAX_BLOCKED_ATTACK_SUBMISSIONS; attempt++) {
+            Optional<BodySnapshot> inspected = inspectBlockedAttack(host, observation);
+            if (inspected.isEmpty()) {
+                return false;
+            }
+            BodySnapshot body = inspected.orElseThrow();
+            TechniqueProgress progress = TechniqueState.read(body);
+            if (!canRecordBlockedAttack(host, requestId, progress, observation)) {
+                return false;
+            }
+            TechniqueProgress updated = progress.toBuilder()
+                    .setBlockedAttack(blockedAttack(observation))
+                    .build();
+            BodyActivity activity = blockedAttackActivity(updated);
+            BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
+            try {
+                TechniqueHost.Submission submission = new TechniqueHost.Submission(
+                        requestId, body.revision(), activity);
+                TechniqueHost.Commit commit = host.submit(submission);
+                validateCommit(body, activity, commit);
+                return true;
+            } catch (TechniqueErrors.HostRejected rejected) {
+                if (rejected.failure() != FailureCode.REVISION_CONFLICT) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static Optional<BodySnapshot> inspectBlockedAttack(TechniqueHost host,
+                                                                BlockedAttackObservation observation) {
+        // 阻挡时刻必须已经落在宿主结清的身体时钟内，死体不再接收新事实。
+        try {
+            BodySnapshot body = host.inspect().body();
+            if (body.vitality().dead() || observation.blockedMillis() > body.settledAt().elapsedMillis()) {
+                return Optional.empty();
+            }
+            return Optional.of(body);
+        } catch (TechniqueErrors.HostRejected rejected) {
+            return Optional.empty();
+        }
+    }
+
+    private static boolean canRecordBlockedAttack(TechniqueHost host, String requestId,
+                                                   TechniqueProgress progress,
+                                                   BlockedAttackObservation observation) {
+        // 当前事实或已保存回执都表示同一事件已经完成，旧事件不能覆盖更新的事实。
+        if (matchesBlockedEvent(progress, observation) || hasBlockedReceipt(host, requestId, observation)) {
+            return false;
+        }
+        if (!progress.hasBlockedAttack()) {
+            return true;
+        }
+        BlockedAttack previous = progress.getBlockedAttack();
+        if (previous.getEventId().equals(observation.eventId())) {
+            throw new IllegalArgumentException("同一阻挡事件 ID 携带了不同事实");
+        }
+        return previous.getBlockedMillis() <= observation.blockedMillis();
+    }
+
+    private static BodyActivity blockedAttackActivity(TechniqueProgress progress) {
+        // 进度先编码成 Any，再装入活动，保证活动构造没有嵌套 builder。
+        Any packedProgress = TechniqueState.pack(progress);
+        return BodyActivity.newBuilder()
+                .putProgress(TechniqueState.KEY, packedProgress)
+                .build();
+    }
+
+    private static BlockedAttack blockedAttack(BlockedAttackObservation observation) {
+        // 事实只保存事件来源和身体时钟，不保存目标或客户端提供的状态。
+        return BlockedAttack.newBuilder()
+                .setEventId(observation.eventId())
+                .setSource(observation.source())
+                .setBlockedMillis(observation.blockedMillis())
+                .build();
+    }
+
+    private static boolean matchesBlockedEvent(TechniqueProgress progress,
+                                               BlockedAttackObservation observation) {
+        // 完全相同的当前事实是幂等重试，不能再次改写身体 revision。
+        if (!progress.hasBlockedAttack()) {
+            return false;
+        }
+        return progress.getBlockedAttack().equals(blockedAttack(observation));
+    }
+
+    private static boolean hasBlockedReceipt(TechniqueHost host, String requestId,
+                                              BlockedAttackObservation observation) {
+        // 事件事实即使已被较新事件覆盖，宿主回执仍能识别迟到的重试。
+        Optional<TechniqueHost.Commit> receipt = host.findActivity(requestId);
+        if (receipt.isEmpty()) {
+            return false;
+        }
+        Any payload = receipt.get().activity().getProgressMap().get(TechniqueState.KEY);
+        if (payload == null || !payload.is(TechniqueProgress.class)) {
+            throw new IllegalStateException("阻挡事件回执缺少功法进度");
+        }
+        TechniqueProgress recorded = TechniqueState.decode(payload.getValue().toByteArray());
+        if (!recorded.hasBlockedAttack() || !recorded.getBlockedAttack().equals(blockedAttack(observation))) {
+            throw new IllegalArgumentException("同一阻挡事件 ID 携带了不同事实");
+        }
+        return true;
+    }
+
+    private boolean clearBlockedAttack(TechniqueHost host) {
+        // 生命周期清理以事件身份去重，revision 冲突后重读再试。
+        for (int attempt = 0; attempt < MAX_BLOCKED_ATTACK_SUBMISSIONS; attempt++) {
+            TechniqueHost.Inspection inspection;
+            try {
+                inspection = host.inspect();
+            } catch (TechniqueErrors.HostRejected rejected) {
+                return rejected.failure() != FailureCode.REVISION_CONFLICT;
+            }
+            BodySnapshot body = inspection.body();
+            TechniqueProgress progress = TechniqueState.read(body);
+            if (!progress.hasBlockedAttack()) {
+                return true;
+            }
+            if (body.vitality().dead()) {
+                if (host instanceof TechniqueRecoveryHost recoveryHost) {
+                    return clearBlockedAttack(recoveryHost, body, progress);
+                }
+                return true;
+            }
+            String eventId = progress.getBlockedAttack().getEventId();
+            TechniqueProgress cleared = progress.toBuilder().clearBlockedAttack().build();
+            BodyActivity activity = blockedAttackActivity(cleared);
+            BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
+            String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
+            try {
+                TechniqueHost.Submission submission = new TechniqueHost.Submission(
+                        requestId, body.revision(), activity);
+                TechniqueHost.Commit commit = host.submit(submission);
+                validateCommit(body, activity, commit);
+                return true;
+            } catch (TechniqueErrors.HostRejected rejected) {
+                if (rejected.failure() != FailureCode.REVISION_CONFLICT) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean clearBlockedAttack(TechniqueRecoveryHost host, BodySnapshot body,
+                                               TechniqueProgress progress) {
+        // 死体不能执行普通活动，清理通过可信恢复命令保存相同的进度变更。
+        String eventId = progress.getBlockedAttack().getEventId();
+        TechniqueProgress updated = progress.toBuilder().clearBlockedAttack().build();
+        String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
+        try {
+            long revision = host.submitRecovery(requestId, progressCommand(body, updated));
+            if (revision != body.revision() + 1) {
+                throw new IllegalStateException("宿主返回的阻挡事实清除版本不一致");
+            }
+            return true;
+        } catch (TechniqueErrors.HostRejected rejected) {
+            return rejected.failure() != FailureCode.REVISION_CONFLICT;
+        }
+    }
+
     public void reportStrike(StrikeReport report) {
         // 打击执行器和接招提供方结算后各报一次；引用未登记功法的报告不发布。
         Objects.requireNonNull(report);
@@ -846,7 +1048,7 @@ public final class TechniqueService {
         // 实体卸载前清除动作和当前施放，费用与冷却由已保存进度保留；僵直随实体离场结束。
         endStagger(Objects.requireNonNull(entityUuid));
         Optional<CastOutcome> outcome = transition(entityUuid, Transition.UNLOAD);
-        hosts.forget(entityUuid);
+        queueLifecycleCleanup(entityUuid, LifecycleCleanup.CLEAR_AND_FORGET_HOST);
         return outcome;
     }
 
@@ -854,14 +1056,25 @@ public final class TechniqueService {
         // 玩家下线沿用卸载语义；调用方应在撤销宿主访问前调用此入口。
         endStagger(Objects.requireNonNull(entityUuid));
         Optional<CastOutcome> outcome = transition(entityUuid, Transition.DISCONNECT);
-        hosts.forget(entityUuid);
+        queueLifecycleCleanup(entityUuid, LifecycleCleanup.CLEAR_AND_FORGET_HOST);
         return outcome;
     }
 
     public Optional<CastOutcome> cancelOnDeath(UUID entityUuid) {
         // 原版实体死亡也要释放附属世界占用，不依赖后续身体 tick 或卸载。
         endStagger(Objects.requireNonNull(entityUuid));
-        return transition(entityUuid, Transition.DEATH);
+        Optional<CastOutcome> outcome = transition(entityUuid, Transition.DEATH);
+        queueLifecycleCleanup(entityUuid, LifecycleCleanup.CLEAR_ONLY);
+        return outcome;
+    }
+
+    private void queueLifecycleCleanup(UUID entityUuid, LifecycleCleanup cleanup) {
+        LifecycleCleanup previous = lifecycleCleanups.get(entityUuid);
+        if (previous == LifecycleCleanup.CLEAR_AND_FORGET_HOST
+                || cleanup == LifecycleCleanup.CLEAR_ONLY && previous != null) {
+            return;
+        }
+        lifecycleCleanups.put(entityUuid, cleanup);
     }
 
     public void recoverOnLoad(UUID entityUuid, TechniqueRecoveryHost host) {
@@ -870,8 +1083,9 @@ public final class TechniqueService {
         Objects.requireNonNull(entityUuid);
         BodySnapshot body = host.snapshot();
         TechniqueProgress progress = TechniqueState.read(body);
-        if (!progress.hasActiveCast() && body.vitality().dead() && progress.hasActiveInfusion()) {
-            clearDeadInfusion(host, body, progress);
+        if (!progress.hasActiveCast()
+                && (progress.hasBlockedAttack() || body.vitality().dead() && progress.hasActiveInfusion())) {
+            clearRecoveredProgress(host, body, progress);
         }
         if (progress.hasActiveCast()) {
             ActiveCast active = progress.getActiveCast();
@@ -923,14 +1137,25 @@ public final class TechniqueService {
                 .build();
     }
 
-    private static void clearDeadInfusion(TechniqueRecoveryHost host, BodySnapshot body,
-                                          TechniqueProgress progress) {
-        // 死体时钟停住，附行不会自己到期；复活后不能带着死前的附行。
-        TechniqueProgress cleared = progress.toBuilder().clearActiveInfusion().build();
-        String requestId = "technique_recover_infusion_" + progress.getActiveInfusion().getCastId();
-        long revision = host.submitRecovery(requestId, progressCommand(body, cleared));
+    private static void clearRecoveredProgress(TechniqueRecoveryHost host, BodySnapshot body,
+                                               TechniqueProgress progress) {
+        // 装载时清除离场前的阻挡窗口和死体上不会自行到期的附行。
+        TechniqueProgress.Builder cleared = progress.toBuilder();
+        String requestId = "technique_recover_progress_";
+        if (progress.hasBlockedAttack()) {
+            String eventId = progress.getBlockedAttack().getEventId();
+            cleared.clearBlockedAttack();
+            requestId += eventId;
+        }
+        if (body.vitality().dead() && progress.hasActiveInfusion()) {
+            String castId = progress.getActiveInfusion().getCastId();
+            cleared.clearActiveInfusion();
+            requestId += "_" + castId;
+        }
+        TechniqueProgress updated = cleared.build();
+        long revision = host.submitRecovery(requestId, progressCommand(body, updated));
         if (revision != body.revision() + 1) {
-            throw new IllegalStateException("宿主返回的附行清除版本不一致");
+            throw new IllegalStateException("宿主返回的进度恢复版本不一致");
         }
     }
 
@@ -1645,6 +1870,21 @@ public final class TechniqueService {
         }
     }
 
+    public record BlockedAttackObservation(UUID attackerUuid, String eventId,
+                                           BlockedAttackSource source, long blockedMillis) {
+        public BlockedAttackObservation {
+            // Damage 提供稳定事件身份和可信身体时刻，服务不接受空值或未知来源。
+            Objects.requireNonNull(attackerUuid);
+            Objects.requireNonNull(source);
+            TechniqueValues.localId(eventId, "blocked_attack.event_id");
+            if (eventId.length() > TechniqueValues.MAX_BLOCKED_ATTACK_EVENT_ID
+                    || source == BlockedAttackSource.BLOCKED_ATTACK_SOURCE_UNSPECIFIED
+                    || source == BlockedAttackSource.UNRECOGNIZED || blockedMillis < 0) {
+                throw new IllegalArgumentException("阻挡事实来源、事件身份或时刻非法");
+            }
+        }
+    }
+
     /** HIT 造成了伤害，BLOCKED 被盾挡下，CAUGHT 被对方的接招接住。 */
     public enum StrikeOutcome { HIT, BLOCKED, CAUGHT }
 
@@ -1784,5 +2024,10 @@ public final class TechniqueService {
         UNLOAD,
         DISCONNECT,
         DEATH
+    }
+
+    private enum LifecycleCleanup {
+        CLEAR_ONLY,
+        CLEAR_AND_FORGET_HOST
     }
 }

@@ -17,7 +17,11 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
     static final String COMBAT_ID = "sample:combat";
     static final String COMBAT_NEXT_ID = "sample:combat_next";
     static final String COMBAT_VOLUME_ID = "sample:combat_volume";
+    static final String BLOCKED_COMBAT_ID = "sample:blocked_combat";
+    static final String BLOCKED_COMBAT_NEXT_ID = "sample:blocked_combat_next";
+    static final String BLOCKED_COMBAT_VOLUME_ID = "sample:blocked_combat_volume";
     private static final String COMBAT_BOOK_ID = "sample:combat_book";
+    private static final String BLOCKED_COMBAT_BOOK_ID = "sample:blocked_combat_book";
     private static final String PRESENTATION_ID = "sample:stance";
     private static final Map<UUID, MemoryHost> HOSTS = new HashMap<>();
 
@@ -30,6 +34,7 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
         return TechniqueRegistry.load(addons(), List.of(catalog(definitionWithEffects()),
                 catalog(GuardTechniqueFixtures.guard()),
                 HeldTechniqueFixtures.groupedCatalog(held), combatCatalog(),
+                blockedCombatCatalog(),
                 ProjectileTechniqueFixtures.archery(TechniqueProjectileGameTest.definition())));
     }
 
@@ -52,6 +57,46 @@ public final class TechniqueGameTestHost implements TechniqueHostEntrypoint, Tec
         TechniqueVolume volume = TechniqueVolume.newBuilder()
                 .setId(COMBAT_VOLUME_ID)
                 .setBookId(COMBAT_BOOK_ID)
+                .addTechniques(TechniqueRegistry.reference(first))
+                .addTechniques(TechniqueRegistry.reference(next))
+                .build();
+        return catalog(first).toBuilder()
+                .addDefinitions(next)
+                .addBooks(book)
+                .addVolumes(volume)
+                .build();
+    }
+
+    private static TechniqueCatalog blockedCombatCatalog() {
+        // 独立目录声明可信阻挡来源，测试取消承接后的事实恢复和再次消费。
+        TechniqueDefinition first = CombatTechniqueFixtures.first().toBuilder()
+                .setId(BLOCKED_COMBAT_ID)
+                .build();
+        TechniqueDefinition originalNext = CombatTechniqueFixtures.next();
+        FollowUp transition = originalNext.getFollowUp().getTransitions(0).toBuilder()
+                .setPrevious(TechniqueRegistry.reference(first))
+                .addBlockedAttackSources(BlockedAttackSource.SHIELD)
+                .build();
+        FollowUpRules rules = originalNext.getFollowUp().toBuilder()
+                .setTransitions(0, transition)
+                .build();
+        List<TechniqueEffect> effects = originalNext.getEffectsList().stream()
+                .filter(effect -> !effect.hasTissueModifier())
+                .toList();
+        TechniqueDefinition next = originalNext.toBuilder()
+                .setId(BLOCKED_COMBAT_NEXT_ID)
+                .setCooldownMillis(0)
+                .setFollowUp(rules)
+                .clearEffects()
+                .addAllEffects(effects)
+                .build();
+        TechniqueBook book = TechniqueBook.newBuilder()
+                .setId(BLOCKED_COMBAT_BOOK_ID)
+                .setHeldItemRules(HeldTechniqueFixtures.rules())
+                .build();
+        TechniqueVolume volume = TechniqueVolume.newBuilder()
+                .setId(BLOCKED_COMBAT_VOLUME_ID)
+                .setBookId(BLOCKED_COMBAT_BOOK_ID)
                 .addTechniques(TechniqueRegistry.reference(first))
                 .addTechniques(TechniqueRegistry.reference(next))
                 .build();

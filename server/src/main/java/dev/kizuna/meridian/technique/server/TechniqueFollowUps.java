@@ -4,6 +4,8 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveCast;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastEntry;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttack;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttackSource;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUp;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUpRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LastCast;
@@ -27,6 +29,8 @@ import static dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Techni
  * 按早了的按键可以由服务端替玩家记一小会儿（输入缓冲），到窗口打开时由服务端按自己的时钟再试，判定仍在这里。
  */
 final class TechniqueFollowUps {
+    static final long BLOCKED_ATTACK_WINDOW_MILLIS = 600;
+
     private TechniqueFollowUps() {
         // 玩家施放和 AI 共用同一窗口判定，避免两套承接规则漂移。
     }
@@ -56,7 +60,19 @@ final class TechniqueFollowUps {
             }
             TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
             TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
+            validateBlockedAttackSources(transition);
             validateWeaponGroup(transition, previousDefinition, definition);
+        }
+    }
+
+    private static void validateBlockedAttackSources(FollowUp transition) {
+        // 来源列表只接受不同的可信阻挡类别，空列表保留普通承接语义。
+        var sources = new HashSet<BlockedAttackSource>();
+        for (BlockedAttackSource source : transition.getBlockedAttackSourcesList()) {
+            if (source == BlockedAttackSource.BLOCKED_ATTACK_SOURCE_UNSPECIFIED
+                    || source == BlockedAttackSource.UNRECOGNIZED || !sources.add(source)) {
+                throw TechniqueErrors.invalid("follow_up.blocked_attack_sources", "阻挡来源非法或重复");
+            }
         }
     }
 
@@ -95,6 +111,33 @@ final class TechniqueFollowUps {
     }
 
     static Optional<FollowUp> available(TechniqueDefinition definition, TechniqueProgress progress, long now) {
+        // 目录展示和 AI 查询与正式起手读取同一承接计划。
+        return availableTransition(definition, progress, now).map(AvailableTransition::transition);
+    }
+
+    static EntryPlan plan(TechniqueDefinition definition, TechniqueProgress progress, CastRequest request, long now,
+                          OptionalLong windDownStart) {
+        // 成功承接记录唯一被消费的阻挡事件，普通起手不触碰该事实。
+        Optional<AvailableTransition> transition = availableTransition(definition, progress, now);
+        if (transition.isPresent()) {
+            AvailableTransition available = transition.orElseThrow();
+            return new EntryPlan(available.transition().getStartMillis(), available.blockedEventId());
+        }
+        if (request.getEntry() == CastEntry.FOLLOW_UP) {
+            throw TechniqueErrors.rejected(FOLLOW_UP_UNAVAILABLE);
+        }
+        if (definition.getFollowUp().getOnlyFollowUp()) {
+            throw TechniqueErrors.rejected(FOLLOW_UP_REQUIRED);
+        }
+        if (progress.hasActiveCast() && (windDownStart.isEmpty()
+                || now - progress.getActiveCast().getStartedMillis() < windDownStart.getAsLong())) {
+            throw TechniqueErrors.rejected(ALREADY_CASTING);
+        }
+        return new EntryPlan(0, "");
+    }
+
+    private static Optional<AvailableTransition> availableTransition(TechniqueDefinition definition,
+                                                                      TechniqueProgress progress, long now) {
         // 当前施放优先；存在当前施放时不能退回更早的历史制造承接窗口。
         LastCast previous;
         if (progress.hasActiveCast()) {
@@ -115,13 +158,38 @@ final class TechniqueFollowUps {
             previous = last;
         }
         for (FollowUp transition : definition.getFollowUp().getTransitionsList()) {
-            if (transition.getPrevious().equals(previous.getTechnique())
-                    && inWindow(previous, transition, now)) {
-                return Optional.of(transition);
+            if (!transition.getPrevious().equals(previous.getTechnique())
+                    || !inWindow(previous, transition, now)) {
+                continue;
+            }
+            Optional<String> blockedEventId = blockedEventId(transition, progress, now);
+            if (blockedEventId.isPresent()) {
+                return Optional.of(new AvailableTransition(transition, blockedEventId.orElseThrow()));
             }
         }
         return Optional.empty();
     }
+
+    private static Optional<String> blockedEventId(FollowUp transition, TechniqueProgress progress, long now) {
+        // 有来源约束的承接必须命中攻击者自己的可信事实，600 ms 边界包含在窗口内。
+        if (transition.getBlockedAttackSourcesCount() == 0) {
+            return Optional.of("");
+        }
+        if (!progress.hasBlockedAttack()) {
+            return Optional.empty();
+        }
+        BlockedAttack blocked = progress.getBlockedAttack();
+        if (now < blocked.getBlockedMillis()
+                || now - blocked.getBlockedMillis() > BLOCKED_ATTACK_WINDOW_MILLIS
+                || !transition.getBlockedAttackSourcesList().contains(blocked.getSource())) {
+            return Optional.empty();
+        }
+        return Optional.of(blocked.getEventId());
+    }
+
+    record EntryPlan(long clipStartMillis, String blockedEventId) { }
+
+    private record AvailableTransition(FollowUp transition, String blockedEventId) { }
 
     /** 收招段：最后一次出效果以后再过这么久，前式剩下的收招才可以被下一式顶掉（留两 tick，保证那次效果已经发出去）。 */
     static final long WIND_DOWN_MARGIN_MILLIS = 100;
@@ -143,21 +211,7 @@ final class TechniqueFollowUps {
                           OptionalLong windDownStart) {
         // AUTO 在合法窗口内自动承接；显式承接在窗外失败，普通式仍可单独起手。
         // 前式已经在收招段时，别的式也可以直接起手：前式的收招到此为止，它的冷却照原计划算。
-        Optional<FollowUp> transition = available(definition, progress, now);
-        if (transition.isPresent()) {
-            return transition.get().getStartMillis();
-        }
-        if (request.getEntry() == CastEntry.FOLLOW_UP) {
-            throw TechniqueErrors.rejected(FOLLOW_UP_UNAVAILABLE);
-        }
-        if (definition.getFollowUp().getOnlyFollowUp()) {
-            throw TechniqueErrors.rejected(FOLLOW_UP_REQUIRED);
-        }
-        if (progress.hasActiveCast() && (windDownStart.isEmpty()
-                || now - progress.getActiveCast().getStartedMillis() < windDownStart.getAsLong())) {
-            throw TechniqueErrors.rejected(ALREADY_CASTING);
-        }
-        return 0;
+        return plan(definition, progress, request, now, windDownStart).clipStartMillis();
     }
 
     static LastCast history(ActiveCast active, CastPhase ending) {

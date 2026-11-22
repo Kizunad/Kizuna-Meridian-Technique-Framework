@@ -44,10 +44,16 @@ final class TechniqueActivities {
         }
     }
 
-    record Entry(long clipStart, HeldItemRules heldRules, LegRules legRules, ArmRules armRules) {
+    record Entry(long clipStart, String blockedAttackEventId, HeldItemRules heldRules,
+                 LegRules legRules, ArmRules armRules) {
         Entry(long clipStart, HeldItemRules heldRules) {
             // 不含肢体打击的起手不带腿法和拳掌规则。
-            this(clipStart, heldRules, LegRules.getDefaultInstance(), ArmRules.getDefaultInstance());
+            this(clipStart, "", heldRules, LegRules.getDefaultInstance(), ArmRules.getDefaultInstance());
+        }
+
+        Entry(long clipStart, HeldItemRules heldRules, LegRules legRules, ArmRules armRules) {
+            // 兼容不消费阻挡事实的普通起手。
+            this(clipStart, "", heldRules, legRules, armRules);
         }
     }
 
@@ -101,11 +107,14 @@ final class TechniqueActivities {
         if (start.progress().hasActiveCast()) {
             progress.setLastCast(TechniqueFollowUps.history(start.progress().getActiveCast(), CastPhase.FINISHED));
         }
+        if (consumesBlockedAttack(start)) {
+            progress.clearBlockedAttack();
+        }
         return progress.build();
     }
 
     static TechniqueProgress endedProgress(TechniqueProgress progress, long endedMillis) {
-        // 装载清理不赋予新的承接机会，取消事实仍保留以供诊断。
+        // 装载清理不赋予新的承接机会，取消承接起手仍保留阻挡窗口以便重试。
         return endedProgress(progress, endedMillis, CastPhase.CANCELLED);
     }
 
@@ -113,9 +122,11 @@ final class TechniqueActivities {
         // 提前终止从实际终止时刻计冷却；晚处理的正常收势仍从固定收势边界计时。
         ActiveCast active = progress.getActiveCast();
         LastCast history = endedHistory(active, ending, endedMillis);
-        var stopped = progress.toBuilder()
-                .clearActiveCast()
-                .setLastCast(history);
+        var stopped = progress.toBuilder().clearActiveCast();
+        boolean cancelledFollowUp = ending != CastPhase.FINISHED && active.hasConsumedBlockedAttack();
+        if (ending == CastPhase.FINISHED || !cancelledFollowUp) {
+            stopped.setLastCast(history);
+        }
         if (active.hasCooldownMillis()) {
             long cooldownStart = endedMillis;
             if (ending == CastPhase.FINISHED) {
@@ -123,6 +134,9 @@ final class TechniqueActivities {
             }
             long cooldownEnd = addTime(cooldownStart, active.getCooldownMillis());
             stopped.putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd);
+        }
+        if (cancelledFollowUp && !progress.hasBlockedAttack()) {
+            stopped.setBlockedAttack(active.getConsumedBlockedAttack());
         }
         return stopped.build();
     }
@@ -203,7 +217,7 @@ final class TechniqueActivities {
         long clipStartMillis = timing.clipStartMillis();
         double tempo = timing.tempo();
         String encodedCastId = TechniqueValues.encodeCastId(request.getCastId());
-        return ActiveCast.newBuilder()
+        ActiveCast.Builder active = ActiveCast.newBuilder()
                 .setRequest(request)
                 .setStartedMillis(startedMillis)
                 .setWarmupEndMillis(timing.warmupEndMillis())
@@ -224,6 +238,19 @@ final class TechniqueActivities {
                 .setHeldItemRules(entry.heldRules())
                 .addAllPresentations(TechniqueScheduler.presentations(definition, clipStartMillis, tempo))
                 .addAllPredecessorCleanup(predecessorCleanup(start.progress(), startedMillis));
+        if (consumesBlockedAttack(start)) {
+            active.setConsumedBlockedAttack(start.progress().getBlockedAttack());
+        }
+        return active;
+    }
+
+    private static boolean consumesBlockedAttack(Start start) {
+        // 承接只暂存与本次计划匹配的事实，普通起手不触碰阻挡状态。
+        String eventId = start.selection().entry().blockedAttackEventId();
+        if (eventId.isEmpty() || !start.progress().hasBlockedAttack()) {
+            return false;
+        }
+        return start.progress().getBlockedAttack().getEventId().equals(eventId);
     }
 
     private static void addOptionalCastRules(ActiveCast.Builder active, Start start) {

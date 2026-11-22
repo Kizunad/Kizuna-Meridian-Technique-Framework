@@ -236,7 +236,7 @@ Threatening 对这三种都停生物大脑，保留重力和击退。
 | `inspect()` | 先按旧动作结算至可信当前身体时刻，再返回 `Inspection(body, heldItems, facts)`；身体、双手、移动状态与鞋事实同时采集 |
 | `findActivity(requestId)` | 重新验证授权，查同一身体、`TechniqueHost.CALLER_ID` 下 Framework 持久活动回执 |
 | `submit(Submission)` | 检查 `expectedRevision`，走 `handleActivity`，原子保存身体、回执及释放账户；返回实际活动和 revision |
-| `submitEffect(EffectSubmission)` | 校验 `EffectIntent`，幂等执行冲量、表现、移动限速、持物打击、劈门或状态增益；本库不直接改世界 |
+| `submitEffect(EffectSubmission)` | 校验 `EffectIntent`，幂等执行冲量、表现、移动限速、持物打击、劈门、整叠消耗或状态增益；本库不直接改世界 |
 
 公开的两参数 `Inspection(body, heldItems)` 保留旧宿主兼容。它不认定宿主已着地，腿法和拳掌返回
 `NOT_GROUNDED` 且不扣费；普通功法仍可施放。接入腿法或拳掌须使用三参数构造器提供同次采集的移动事实。
@@ -313,6 +313,16 @@ ID 补全取当前服务器目录中的书、卷、式身份，去重排序，�
 效果请求 ID 固定为 `technique_effect_<cast_id>_<effect_id>`，与事件游标和批次无关。
 服务保留整份待确认结果，全部效果收到回执才更新到 `advancedMillis`。收势活动可能已经提交，效果暂时拒绝时
 仍重试原批次，不重新读取空施放后丢掉意图；部分已成功的效果由回执去重。重复 `cast` 不重置现有游标。
+
+`BlockedAttack` 由伤害宿主在确认盾、通用格挡或硬物阻挡后调用 `recordBlockedAttack` 写入攻击者身体。
+宿主必须提供稳定事件 ID、可信来源和已经结清的身体时刻，不能用客户端时间或 `StrikeReport` 代替。
+功法服务按攻击者 UUID 路由到其身体，回执按事件 ID 去重，版本冲突重试同一提交；承接成功时和活动提交一起清掉匹配事实。
+卸载、断线、死亡和恢复清理由对应生命周期入口调用，避免旧事实跨会话存留。
+
+`ConsumeHeldItemIntent` 只携带起手冻结的 `CONSUME_SELECTED_STACK` 策略和稳定效果身份。
+宿主按 `selected_hand` 读取当前物品，执行整叠清空并以 `technique_effect_<cast_id>_<effect_id>` 持久去重。
+耐久组件、附魔、无法破坏、物品耗尽和创造模式规则均由宿主按原版处理；Framework 不自行 shrink、扣耐久或修改库存。
+同一效果的重试必须返回原执行回执，不能重复消费。
 
 `REVISION_CONFLICT`、`TIME_REQUIRES_SETTLEMENT`、`PENDING_TIME_EVENT`、`ENVIRONMENT_UNAVAILABLE`、
 `ENVIRONMENT_REVISION_CONFLICT` 和 `INTERNAL_ERROR` 保留会话供下一 tick 重试。

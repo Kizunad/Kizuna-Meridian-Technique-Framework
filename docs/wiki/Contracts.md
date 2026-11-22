@@ -212,6 +212,17 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 这里只保存伤害、耐久、破盾和劈门声明并选手，不计算实际伤害、不扣耐久、不消耗物品、不执行打击或劈门。
 首版没有受保护物品标签。切割工具和钝击工具可拆成不同标签类别并使用相同选手优先级。
 
+`TechniqueDefinition.held_item_rules` 存在时完整覆盖所属书的 `HeldItemRules`，包括类别、耐久、选手顺序、
+弹药和整把消耗策略。单式可以用 `required_item_tags` 进一步限制最终选中的物品标签，空列表表示不增加限制。
+`TechniqueEffect.consume_held_item` 只能与 `CONSUME_SELECTED_STACK` 配对。起手冻结选定手和策略，
+调度器只生成 `ConsumeHeldItemIntent`，不在功法库内直接改物品栏。
+
+承接式的 `FollowUp.blocked_attack_sources` 非空时，只接受攻击者自己身体进度里的 `BlockedAttack`。
+事实只能由可信伤害解析通过 `recordBlockedAttack` 写入，来源为盾、通用格挡或硬物之一，事件 ID 用于回执去重，
+时间必须不晚于已结清的身体时钟。窗口是阻挡时刻起 600 ms，包含第 600 ms，超过 1 ms 即失效；`StrikeReport` 只能统计结果，
+不能创建或替代该事实。承接成功与活动提交原子清除匹配事件，普通起手不清除。卸载、断线、死亡和恢复入口都会清理事实。
+不同攻击者的事实分别保存在各自 `TechniqueProgress`，不能跨身体承接。
+
 `TechniqueEffect` 增加 `weapon_strike=5` 和 `break_blocks=6`；有这两类效果的式必须归属于声明持物规则的书。
 本库校验参数、选定手位并调度，意图携带起手保存的 `held_item_rules`，宿主在每击时匹配当前物品。
 

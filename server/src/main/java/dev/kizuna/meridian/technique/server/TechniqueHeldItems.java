@@ -8,10 +8,12 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItem;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemConsumptionStrategy;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InjuryKind;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ProjectileWeaponCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ShieldInteraction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
@@ -45,6 +47,30 @@ public final class TechniqueHeldItems {
         validateDurability(rules.getDurabilityList());
         validateSelectionOrder(rules.getSelectionOrderList());
         validateAmmunition(rules);
+        validateRequiredItemTags(rules);
+        validateConsumptionStrategy(rules.getConsumptionStrategy());
+    }
+
+    static HeldItemRules rulesFor(TechniqueRegistry registry, TechniqueDefinition definition) {
+        // 单式规则完整覆盖书级默认，目录预检与正式起手共用该解析。
+        if (definition.hasHeldItemRules()) {
+            return definition.getHeldItemRules();
+        }
+        return registry.bookOf(TechniqueRegistry.reference(definition))
+                .map(TechniqueBook::getHeldItemRules)
+                .orElse(HeldItemRules.getDefaultInstance());
+    }
+
+    private static void validateRequiredItemTags(HeldItemRules rules) {
+        // 单式限制只需命中任一声明标签，具体标签由内容目录提供。
+        validateTags(rules.getRequiredItemTagsList());
+    }
+
+    private static void validateConsumptionStrategy(HeldItemConsumptionStrategy strategy) {
+        // 缺省策略不允许生成整件消耗效果。
+        if (strategy == HeldItemConsumptionStrategy.UNRECOGNIZED) {
+            throw TechniqueErrors.invalid("consumption_strategy", "未知整件消耗策略");
+        }
     }
 
     private static void validateCategories(List<HeldItemCategory> categories) {
@@ -213,7 +239,7 @@ public final class TechniqueHeldItems {
     }
 
     static void validateDefinition(HeldItemRules rules, TechniqueDefinition definition) {
-        // 远程式不能引用书中不存在的武器类别，式级弹药覆盖也必须有可解释的标签。
+        // 远程式不能引用规则中不存在的武器类别，式级弹药覆盖须有可解释的标签。
         if (definition.getProjectileWeapon() == ProjectileWeaponCategory.HELD_SPLASH_BREW
                 && definition.hasBrewItem()) {
             return;
@@ -225,6 +251,21 @@ public final class TechniqueHeldItems {
         if (ammunitionRequirement(definition, rules) == AmmunitionRequirement.REQUIRED
                 && rules.getAmmunitionTagsCount() == 0 && category.getAmmunitionTagsCount() == 0) {
             throw TechniqueErrors.invalid("require_ammunition", "弹药要求没有对应标签");
+        }
+    }
+
+    static void validateConsumption(HeldItemRules rules, TechniqueDefinition definition) {
+        // 整把消耗必须由 Framework 声明策略，内容定义不能自行决定扣除方式。
+        boolean consumesHeldItem = definition.getEffectsList().stream()
+                .anyMatch(effect -> effect.hasConsumeHeldItem());
+        if (!consumesHeldItem) {
+            return;
+        }
+        if (rules.getConsumptionStrategy() != HeldItemConsumptionStrategy.CONSUME_SELECTED_STACK) {
+            throw TechniqueErrors.invalid("consumption_strategy", "整把消耗效果须声明选定手整叠策略");
+        }
+        if (rules.getCategoriesCount() == 0) {
+            throw TechniqueErrors.invalid("held_item_rules", "整把消耗效果必须声明持物规则");
         }
     }
 
@@ -300,7 +341,7 @@ public final class TechniqueHeldItems {
     private static Candidate candidate(HeldItemRules rules, HeldItems items, HeldItem item, Hand hand,
                                       ProjectileWeaponCategory requiredWeapon) {
         // 类别和耐久表各取首次命中，无耐久物品用无穷排序值表示一次性消耗。
-        if (item.getItemId().isEmpty() || item.getContainsItems()) {
+        if (item.getItemId().isEmpty() || item.getContainsItems() || !matchesRequiredItem(rules, item)) {
             return null;
         }
         Optional<HeldItemCategory> categoryResult = rules.getCategoriesList().stream()
@@ -317,6 +358,12 @@ public final class TechniqueHeldItems {
                     .findFirst().orElseThrow().getMultiplier().getValue();
         }
         return new Candidate(hand, category.getSelectionPriority(), durability);
+    }
+
+    private static boolean matchesRequiredItem(HeldItemRules rules, HeldItem item) {
+        // 空标签集合沿用书级规则，非空时要求所选物品命中任一标签。
+        return rules.getRequiredItemTagsCount() == 0
+                || rules.getRequiredItemTagsList().stream().anyMatch(item.getTagsList()::contains);
     }
 
     private static boolean matchesWeapon(HeldItemCategory category, HeldItems items, Hand hand,

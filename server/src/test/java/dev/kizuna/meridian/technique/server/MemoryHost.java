@@ -28,7 +28,9 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     final BodyId bodyId;
     private final BodyCommandHandler<String> commands;
     long nowMillis;
+    int inspectCalls;
     int activitySubmissions;
+    int recoverySubmissions;
     final List<EffectIntent> effects = new ArrayList<>();
     final Map<String, EffectIntent> effectReceipts = new LinkedHashMap<>();
     HeldItems heldItems = HeldItems.newBuilder()
@@ -41,6 +43,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
             .setGrounded(true /* grounded */)
             .build();
     private FailureCode nextFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+    private FailureCode nextInspectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     private FailureCode nextEffectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
     Consumer<EffectSubmission> effectObserver = submission -> { /* 默认不注入世界回调。 */ };
 
@@ -74,6 +77,7 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     @Override
     public long submitRecovery(String requestId, BodyCommand command) {
         // 与生产宿主相同，死体清进度使用独立可信入口而非普通活动。
+        recoverySubmissions++;
         Route route = Route.ACTIVITY;
         if (command.hasSetAddonProgress()) {
             route = Route.PROGRESS;
@@ -102,6 +106,12 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     @Override
     public Inspection inspect() {
         // 先按旧动作结时；TIME_NOT_ADVANCED 表示身体已经在同一时刻。
+        inspectCalls++;
+        if (nextInspectFailure != FailureCode.FAILURE_CODE_UNSPECIFIED) {
+            FailureCode failure = nextInspectFailure;
+            nextInspectFailure = FailureCode.FAILURE_CODE_UNSPECIFIED;
+            throw new TechniqueErrors.HostRejected(failure);
+        }
         BodySnapshot body = current();
         if (body.vitality().dead()) {
             return new Inspection(body, heldItems, inspectFacts);
@@ -171,6 +181,11 @@ final class MemoryHost implements TechniqueHost, TechniqueRecoveryHost {
     void rejectNextActivity() {
         // 权限失败证明计划已生成也不能先落本库的冷却或动作状态。
         nextFailure = FailureCode.ACCESS_DENIED;
+    }
+
+    void rejectNextInspection(FailureCode failure) {
+        // 生命周期清理中的读拒绝应被服务吞掉，不把宿主状态暴露成异常。
+        nextInspectFailure = failure;
     }
 
     void rejectNextEffect() {

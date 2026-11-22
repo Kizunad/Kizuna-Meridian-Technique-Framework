@@ -81,6 +81,9 @@ public final class TechniqueState {
         validateEndTimes(progress.getCooldownsMap(), "cooldowns");
         validateEndTimes(progress.getCurveEndsMap(), "curve_ends");
         validateEndTimes(progress.getGuardBreakEndsMap(), "guard_break_ends");
+        if (progress.hasBlockedAttack()) {
+            validateBlockedAttack(progress.getBlockedAttack());
+        }
         if (progress.hasActiveCast()) {
             validateActive(progress.getActiveCast());
         }
@@ -89,6 +92,17 @@ public final class TechniqueState {
         }
         if (progress.hasActiveInfusion()) {
             TechniqueInfusions.validateActive(progress.getActiveInfusion());
+        }
+    }
+
+    private static void validateBlockedAttack(BlockedAttack blocked) {
+        // 阻挡事件 ID 可进入宿主回执，限制其长度以保证稳定请求身份有界。
+        TechniqueValues.localId(blocked.getEventId(), "blocked_attack.event_id");
+        if (blocked.getEventId().length() > TechniqueValues.MAX_BLOCKED_ATTACK_EVENT_ID
+                || blocked.getSourceValue() <= 0
+                || blocked.getSource() == BlockedAttackSource.UNRECOGNIZED
+                || blocked.getBlockedMillis() < 0) {
+            throw TechniqueErrors.invalid("blocked_attack", "阻挡事实来源、事件身份或时刻非法");
         }
     }
 

@@ -103,6 +103,7 @@ public class TechniqueHostRoutingTest {
         assertEquals(1, bystander.exchanges);
 
         service.cancelOnUnload(ENTITY);
+        service.tick();
         assertFalse(service.known(ENTITY).isEmpty());
         assertEquals(2, bystander.exchanges);
     }

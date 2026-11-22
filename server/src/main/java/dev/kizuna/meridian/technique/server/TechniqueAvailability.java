@@ -4,7 +4,6 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBinding;
-import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBook;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 
 /** AI 和界面使用与起手一致的只读预检：真元费用付不付得起、组织和器官做不做得了这一式的功、手里的东西对不对；实际施放仍执行原子验证。 */
@@ -33,9 +32,7 @@ public final class TechniqueAvailability {
                 return false;
             }
         }
-        HeldItemRules rules = registry.bookOf(TechniqueRegistry.reference(definition))
-                .map(TechniqueBook::getHeldItemRules)
-                .orElse(HeldItemRules.getDefaultInstance());
+        HeldItemRules rules = TechniqueHeldItems.rulesFor(registry, definition);
         if (!definition.hasProjectileWeapon() && rules.equals(HeldItemRules.getDefaultInstance())) {
             // 没有持物声明的式空手也能放。
             return true;

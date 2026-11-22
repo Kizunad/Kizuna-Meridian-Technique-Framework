@@ -273,7 +273,18 @@ public final class TechniqueProtocol {
             case ORGAN_REFINE -> TechniqueOrganRefines.validateIntent(intent.getOrganRefine());
             case GRAPPLE -> TechniqueGrapples.validateIntent(intent.getGrapple());
             case THROW -> TechniqueGrapples.validateIntent(intent.getThrow());
+            case CONSUME_HELD_ITEM -> validateConsumeHeldItem(intent);
             default -> throw TechniqueErrors.invalid("effect", "缺少或未知世界效果");
+        }
+    }
+
+    private static void validateConsumeHeldItem(EffectIntent intent) {
+        // 消耗意图必须绑定选定手、稳定效果身份和起手冻结的整叠策略。
+        validateHeldEffect(intent);
+        if (intent.getEffectId().isEmpty()
+                || intent.getConsumeHeldItem().getStrategy()
+                        != HeldItemConsumptionStrategy.CONSUME_SELECTED_STACK) {
+            throw TechniqueErrors.invalid("consume_held_item", "整叠消耗缺少身份或有效策略");
         }
     }
 

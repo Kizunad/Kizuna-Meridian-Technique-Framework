@@ -5,6 +5,7 @@ import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastEntry;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttackSource;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
@@ -221,6 +222,59 @@ public final class TechniqueServiceGameTest {
                 "前式未开始");
         host.nowMillis = WINDOW_START;
         context.runAfterDelay(EVENT_WAIT_TICKS, () -> startCombatFollowUp(context, prepared));
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void cancelledBlockedFollowUpKeepsFactAndCanRetry(GameTestHelper context) {
+        // 承接起手被僵直取消后恢复阻挡事实，窗口内再次承接才消费同一事件。
+        Prepared prepared = prepare(context, TechniqueGameTestHost.BLOCKED_COMBAT_ID);
+        TechniqueService service = TechniqueFabric.service();
+        UUID entityUuid = prepared.entity().getUUID();
+        service.learn(entityUuid, TechniqueGameTestHost.BLOCKED_COMBAT_VOLUME_ID);
+        MemoryHost host = prepared.host();
+        host.heldItems = HeldTechniqueFixtures.hands(
+                HeldTechniqueFixtures.durableItem("minecraft:iron_axe", HeldTechniqueFixtures.AXES),
+                HeldItem.getDefaultInstance());
+        TechniqueDefinition first = service.registry()
+                .findLatest(TechniqueGameTestHost.BLOCKED_COMBAT_ID)
+                .orElseThrow();
+        TechniqueDefinition next = service.registry()
+                .findLatest(TechniqueGameTestHost.BLOCKED_COMBAT_NEXT_ID).orElseThrow();
+        CastOutcome firstCast = service.cast(entityUuid, request(host.current(), "blocked_first")
+                .toBuilder()
+                .setTechnique(TechniqueRegistry.reference(first))
+                .build());
+        context.assertTrue(firstCast.getPhase() == CastPhase.WARMUP, "阻挡前式未开始");
+        host.nowMillis = WINDOW_START;
+        TechniqueService.BlockedAttackObservation blocked = new TechniqueService.BlockedAttackObservation(
+                entityUuid, "blocked_follow_up", BlockedAttackSource.SHIELD, host.nowMillis);
+        context.assertTrue(service.recordBlockedAttack(blocked), "阻挡事实未写入");
+        CastOutcome followUp = service.cast(entityUuid, request(host.current(), "blocked_follow_up_cast")
+                .toBuilder()
+                .setTechnique(TechniqueRegistry.reference(next))
+                .setEntry(CastEntry.FOLLOW_UP)
+                .build());
+        context.assertTrue(followUp.getPhase() == CastPhase.WARMUP, "阻挡承接未开始");
+        context.assertTrue(!TechniqueState.read(host.current()).hasBlockedAttack(),
+                "承接起手未消费阻挡事实");
+        CastOutcome interrupted = service.stagger(entityUuid, HIT_STAGGER).orElseThrow();
+        TechniqueProgress cancelled = TechniqueState.read(host.current());
+        context.assertTrue(interrupted.getPhase() == CastPhase.INTERRUPTED, "承接起手未被僵直取消");
+        context.assertTrue(cancelled.hasBlockedAttack()
+                && cancelled.getBlockedAttack().getEventId().equals("blocked_follow_up"),
+                "取消没有恢复阻挡事实");
+        context.assertTrue(cancelled.getLastCast().getEnding() == CastPhase.FINISHED,
+                "取消覆盖了前式收势历史");
+        host.nowMillis = WINDOW_START + HIT_STAGGER.durationMillis();
+        CastOutcome retry = service.cast(entityUuid, request(host.current(), "blocked_retry")
+                .toBuilder()
+                .setTechnique(TechniqueRegistry.reference(next))
+                .setEntry(CastEntry.FOLLOW_UP)
+                .build());
+        context.assertTrue(retry.getPhase() == CastPhase.WARMUP, "窗口内无法再次承接");
+        context.assertTrue(!TechniqueState.read(host.current()).hasBlockedAttack(), "重试没有消费阻挡事实");
+        release(prepared);
+        context.succeed();
     }
 
     private static void startCombatFollowUp(GameTestHelper context, Prepared prepared) {

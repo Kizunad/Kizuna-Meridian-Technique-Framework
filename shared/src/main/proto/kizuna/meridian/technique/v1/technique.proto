@@ -133,6 +133,12 @@ message HeldItemRules {
   repeated string ammunition_tags = 4; // 任一标签命中；用于另一只手和弹药查询
   optional bool require_ammunition = 5;
   optional bool other_hand_empty_or_ammunition = 6;
+  repeated string required_item_tags = 7; // 非空时，选中的物品还须命中任一标签
+  HeldItemConsumptionStrategy consumption_strategy = 8; // 整件消耗效果必须显式启用
+}
+enum HeldItemConsumptionStrategy {
+  HELD_ITEM_CONSUMPTION_UNSPECIFIED = 0;
+  CONSUME_SELECTED_STACK = 1; // 效果时清空起手选定手上的整叠物品
 }
 enum Hand {
   HAND_UNSPECIFIED = 0;
@@ -635,6 +641,7 @@ message FollowUp {
   optional int64 start_millis = 4; // 后式跳过的预备剪辑毫秒，必须小于起手时长
   optional ProjectileWeaponCategory previous_projectile_weapon = 5;
   optional ProjectileWeaponCategory next_projectile_weapon = 6;
+  repeated BlockedAttackSource blocked_attack_sources = 7; // 非空时须在最近一次被挡后的 600 ms 内承接
 }
 message FollowUpRules {
   repeated FollowUp transitions = 1;
@@ -661,7 +668,21 @@ message TechniqueEffect {
     Grapple grapple = 26; // 附属处理器认领；所属书须声明拳掌规则
     Throw throw = 27; // 附属处理器认领；只摔同一施放擒住的目标
     Guard guard = 28; // 持续守式恰有一个，at_millis 等于起手时长；仅 EFFECTIVE 阶段可查询到
+    ConsumeHeldItem consume_held_item = 29; // 整件消耗起手选定手上的整叠物品
   }
+}
+message ConsumeHeldItem {}
+enum BlockedAttackSource {
+  BLOCKED_ATTACK_SOURCE_UNSPECIFIED = 0;
+  SHIELD = 1;
+  GUARD = 2;
+  HARD_OBJECT = 3;
+}
+// 可信伤害解析生成的阻挡事实，保存在攻击者自己的 TechniqueProgress 中。
+message BlockedAttack {
+  string event_id = 1; // 来源事件的稳定 ID，用于提交重试去重
+  BlockedAttackSource source = 2;
+  int64 blocked_millis = 3; // 攻击者身体时钟
 }
 // 守的声明；只描述可接伤害，接伤部位、覆盖部位、排除类型与伤害结算由伤害附属负责。
 message Guard {
@@ -869,6 +890,7 @@ message TechniqueDefinition {
   bool innate = 23; // 天生会的精确版本，不入卷、不写学习记录；其余起式检查照常执行
   InnateUnlock innate_unlock = 24; // 仅天生式可填；缺省时不设知识门槛，空消息仅要求境界
   MaintainedBreathing maintained_breathing = 25; // 起手完成后释放前台，按身体时间维持吐纳效果
+  HeldItemRules held_item_rules = 26; // 单式完整覆盖书级规则
 }
 
 enum TechniqueFailure {
@@ -989,7 +1011,11 @@ message EffectIntent {
     LimbStrikeIntent limb_strike = 24;
     GrappleIntent grapple = 25;
     ThrowIntent throw = 26;
+    ConsumeHeldItemIntent consume_held_item = 27;
   }
+}
+message ConsumeHeldItemIntent {
+  HeldItemConsumptionStrategy strategy = 1;
 }
 message OrganRefineIntent {
   repeated string organ_ids = 1; // 起手绑定的器官
@@ -1079,6 +1105,7 @@ message ActiveCast {
   repeated string off_hand_use_block_tags = 23;
   optional double tempo_multiplier = 24; // 起手冻结的最慢组织动作速度
   SustainedCast sustained = 32; // 缺省保持有限施放；结束时刻未定时 active_end/recovery_end 固定为 0
+  BlockedAttack consumed_blocked_attack = 33; // 承接起手暂存的事实；取消时恢复
 }
 // 持续施放的冻结参数与首次收势事实；仅保存在 ActiveCast，不另存一份可修改的守状态。
 message SustainedCast {
@@ -1112,4 +1139,5 @@ message TechniqueProgress {
   LastCast last_cast = 6;
   ActiveInfusion active_infusion = 7; // 收势不清除；身体死亡时由可信恢复入口清除
   map<string, int64> guard_break_ends = 8; // 破防式 ID → 禁守截止；下次成功起该式后清除
+  BlockedAttack blocked_attack = 9; // 最近一次可信阻挡；承接成功起手时原子消费
 }

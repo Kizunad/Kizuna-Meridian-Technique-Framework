@@ -156,19 +156,21 @@ public final class TechniqueRegistry {
             TechniqueReference reference = reference(definition);
             try {
                 TechniqueFollowUps.validate(definition, definitions);
+                HeldItemRules heldRules = TechniqueHeldItems.rulesFor(this, definition);
                 boolean heldEffects = definition.hasProjectileWeapon()
                         || definition.getEffectsList().stream()
                         .anyMatch(effect -> effect.hasWeaponStrike()
                                 || effect.hasBreakBlocks()
-                                || effect.hasLaunchProjectile());
+                                || effect.hasLaunchProjectile()
+                                || effect.hasConsumeHeldItem());
                 if (heldEffects && !definition.hasBrewItem()
-                        && bookOf(reference).filter(TechniqueBook::hasHeldItemRules).isEmpty()) {
+                        && heldRules.getCategoriesCount() == 0) {
                     throw TechniqueErrors.invalid(definition.getId(), "持物效果必须归属于声明持物规则的书");
                 }
                 if (definition.hasProjectileWeapon()) {
-                    TechniqueBook book = bookOf(reference).orElseThrow();
-                    TechniqueHeldItems.validateDefinition(book.getHeldItemRules(), definition);
+                    TechniqueHeldItems.validateDefinition(heldRules, definition);
                 }
+                TechniqueHeldItems.validateConsumption(heldRules, definition);
                 validateLimbBook(definition, reference);
             } catch (IllegalArgumentException exception) {
                 throw TechniqueErrors.at(locations.get(reference), exception);

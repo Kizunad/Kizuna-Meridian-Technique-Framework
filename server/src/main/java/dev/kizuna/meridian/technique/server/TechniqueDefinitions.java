@@ -52,6 +52,9 @@ final class TechniqueDefinitions {
         TechniqueMovement.validateMultiplier(TechniqueMovement.multiplier(definition));
         validateOffHandUse(definition);
         TechniqueBrewEffects.validateDefinition(definition);
+        if (definition.hasHeldItemRules()) {
+            TechniqueHeldItems.validateRules(definition.getHeldItemRules());
+        }
         Map<String, TechniqueSlot> slots = validateSlots(addons, tags, definition);
         TechniqueRelativeArms.validate(addons, templates, definition);
         validateCosts(addons, templates, slots, definition);
@@ -326,9 +329,15 @@ final class TechniqueDefinitions {
                 case SOUND -> TechniqueSoundCues.validate(effect.getSound(), "effect.sound");
                 case PRESENTATION -> validatePresentationEffect(effect.getPresentation());
                 case GUARD -> TechniqueSustained.validateGuard(effect.getGuard());
+                case CONSUME_HELD_ITEM -> validateConsumeHeldItem(effect.getConsumeHeldItem());
                 default -> throw TechniqueErrors.invalid("effects", "未知或缺少算子");
             }
         }
+    }
+
+    private static void validateConsumeHeldItem(ConsumeHeldItem consumeHeldItem) {
+        // 空消息本身没有参数，递归检查仍拒绝未知字段，保持目录解析有界。
+        TechniqueValues.knownFields(consumeHeldItem);
     }
 
     private static void validateBlockWork(TechniqueEffect effect, long durationMillis) {

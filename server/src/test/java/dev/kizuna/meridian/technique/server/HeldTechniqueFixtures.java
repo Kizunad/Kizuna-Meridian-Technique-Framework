@@ -191,16 +191,24 @@ final class HeldTechniqueFixtures {
 
     static TechniqueService service(MemoryHost host, TechniqueRegistry registry) {
         // 服务发现、inspect 和效果提交全部经过字节协议。
-        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(endpoint(host)));
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(endpoint(ENTITY, host)));
         return new TechniqueService(registry, directory);
     }
 
-    private static TechniqueHostEntrypoint endpoint(MemoryHost host) {
+    static TechniqueService service(TechniqueRegistry registry, UUID firstEntity, MemoryHost firstHost,
+                                    UUID secondEntity, MemoryHost secondHost) {
+        // 多宿主测试确认阻挡事实按攻击者身份分别路由。
+        TechniqueHostDirectory directory = new TechniqueHostDirectory(List.of(
+                endpoint(firstEntity, firstHost), endpoint(secondEntity, secondHost)));
+        return new TechniqueService(registry, directory);
+    }
+
+    private static TechniqueHostEntrypoint endpoint(UUID entity, MemoryHost host) {
         // 仅认领测试 UUID，Framework 拒绝保留结构化失败码。
         return payload -> {
             TechniqueHostRequest request = TechniqueProtocol.decodeHost(payload);
             var response = TechniqueHostResponse.newBuilder().setRequestId(request.getRequestId());
-            if (!ENTITY.toString().equals(request.getEntityUuid())) {
+            if (!entity.toString().equals(request.getEntityUuid())) {
                 return TechniqueProtocol.encodeHostResponse(response.setUnbound(true /* unbound */).build());
             }
             try {

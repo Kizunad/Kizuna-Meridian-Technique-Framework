@@ -372,6 +372,7 @@ public final class TechniqueScheduler {
             case GRAPPLE -> intent.setGrapple(TechniqueGrapples.intent(effect.getGrapple(), active.getArmRules()));
             case THROW -> intent.setThrow(TechniqueGrapples.intent(effect.getThrow(), active.getArmRules()));
             case USE_BREW -> intent.setUseBrew(effect.getUseBrew());
+            case CONSUME_HELD_ITEM -> intent.setConsumeHeldItem(consumeHeldItem(active));
             case ORGAN_REFINE -> intent.setOrganRefine(
                     TechniqueOrganRefines.intent(active, definition.getEffects(index), context.tempo()));
             case SOUND -> intent.setSound(effect.getSound());
@@ -379,6 +380,13 @@ public final class TechniqueScheduler {
             default -> throw new IllegalArgumentException("组织修正与目标声音不产生独立的世界效果意图");
         }
         return intent.build();
+    }
+
+    private static ConsumeHeldItemIntent consumeHeldItem(ActiveCast active) {
+        // 整叠物品由宿主处理，策略冻结在起手时的有效持物规则中。
+        return ConsumeHeldItemIntent.newBuilder()
+                .setStrategy(active.getHeldItemRules().getConsumptionStrategy())
+                .build();
     }
 
     private static PresentationIntent presentationIntent(PresentationEffect presentation, double tempo) {

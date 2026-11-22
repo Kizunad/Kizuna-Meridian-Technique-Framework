@@ -100,6 +100,7 @@ public final class TechniqueScheduledWorkTest {
         service.tick();
         service.cancelOnDisconnect(ENTITY);
         double paid = fatigue(host);
+        service.tick();
         host.nowMillis = SECOND;
         service.tick();
         assertEquals(paid, fatigue(host), 0);

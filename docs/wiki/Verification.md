@@ -332,6 +332,19 @@ GameTest 使用真实 Minecraft 1.20.1 服务端生命周期、命令和 tick，
 承接由玩家与 AI 共用一个窗口判定，动作替换、支付和后式进度仍复用 Framework 单次原子活动。
 命中预算是无状态 helper，最近施放写入既有附属进度，不增加世界依赖或独立身体状态。
 
+P1 通用承接与持物消费契约由 `TechniqueP1ContractTest` 覆盖，所有用例在服务端 JUnit 中实际执行：
+
+| 交接要求 | 测试名及验证内容 |
+|---|---|
+| 可信阻挡事实与去重 | `recordsBlockedAttackOnceAndRejectsUnknownOrFutureSources`、`retriesBlockedAttackAfterRevisionConflictWithoutChangingEvent`、`newerBlockedEventReplacesOlderEventAndRetryUsesReceipt` |
+| StrikeReport 不能伪造承接事实 | `strikeReportDoesNotCreateBlockedAttackFact` |
+| 按攻击者身体隔离 | `registeredAttackersKeepBlockedFactsOnTheirOwnBodies` |
+| 600 ms 包含边界和三类来源 | `blockedAttackWindowIncludes600MillisecondsAndRejectsTheNextMillisecond` |
+| 普通起手与承接原子消费 | `ordinaryCastPreservesBlockedFactAndFollowUpConsumesIt` |
+| 卸载、断线、死亡和恢复清理 | `lifecycleCleanupClearsBlockedFactOnUnloadDisconnectDeathAndLoad` |
+| 单式覆盖书级持物规则 | `definitionHeldItemRulesOverrideBookRulesAndLimitSelectionTags` |
+| 整叠消耗策略和冻结意图 | `consumeHeldItemRequiresStrategyAndEmitsOneFrozenStackIntent` |
+
 下表中未写类名的测试均属于 `TechniqueStage6bTest`：
 
 | 交接要求 | 测试名及验证内容 |

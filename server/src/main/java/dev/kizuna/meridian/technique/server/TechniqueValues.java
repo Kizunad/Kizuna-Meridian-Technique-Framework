@@ -30,6 +30,7 @@ final class TechniqueValues {
     static final int MAX_TEXT = 256;
     static final int MAX_DESCRIPTION = 4096;
     static final int MAX_CAST_ID = 64;
+    static final int MAX_BLOCKED_ATTACK_EVENT_ID = MAX_CAST_ID;
     private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
     private static final Pattern LOCAL_ID = Pattern.compile("[a-z0-9_.-]+");
     private static final Pattern CAST_ID = Pattern.compile("[A-Za-z0-9_-]+");

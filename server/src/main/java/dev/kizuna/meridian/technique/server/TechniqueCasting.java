@@ -104,20 +104,20 @@ public final class TechniqueCasting {
             ActiveCast active = progress.getActiveCast();
             windDownStart = TechniqueFollowUps.windDownStart(active, registry.find(active.getRequest().getTechnique()));
         }
-        long clipStart = TechniqueFollowUps.clipStart(definition, progress, request,
+        TechniqueFollowUps.EntryPlan entry = TechniqueFollowUps.plan(definition, progress, request,
                 body.settledAt().elapsedMillis(), windDownStart);
-        TechniqueActivities.CastBinding selection = bindCast(definition, inspection, clipStart);
+        TechniqueActivities.CastBinding selection = bindCast(definition, inspection, entry);
         var start = new TechniqueActivities.Start(body, definition, request, progress, selection);
         BodyActivity activity = TechniqueActivities.start(start);
         return submitStart(host, start, activity);
     }
 
     private TechniqueActivities.CastBinding bindCast(TechniqueDefinition definition,
-                                                      TechniqueHost.Inspection inspection, long clipStart) {
+                                                      TechniqueHost.Inspection inspection,
+                                                      TechniqueFollowUps.EntryPlan entryPlan) {
         // 身体绑定与选手都基于同一次宿主查询，任一失败都不能生成扣费活动。
         Optional<TechniqueBook> book = registry.bookOf(TechniqueRegistry.reference(definition));
-        HeldItemRules heldRules = book.map(TechniqueBook::getHeldItemRules)
-                .orElse(HeldItemRules.getDefaultInstance());
+        HeldItemRules heldRules = TechniqueHeldItems.rulesFor(registry, definition);
         Hand hand = selectHand(definition, inspection.heldItems(), heldRules);
         BindingOutcome result = TechniqueBinder.bind(inspection.body(), definition,
                 hand, inspection.heldItems().getMainHandSide());
@@ -126,7 +126,8 @@ public final class TechniqueCasting {
         }
         LegRules legRules = book.map(TechniqueBook::getLegRules).orElse(LegRules.getDefaultInstance());
         ArmRules armRules = book.map(TechniqueBook::getArmRules).orElse(ArmRules.getDefaultInstance());
-        var entry = new TechniqueActivities.Entry(clipStart, heldRules, legRules, armRules);
+        var entry = new TechniqueActivities.Entry(entryPlan.clipStartMillis(), entryPlan.blockedEventId(),
+                heldRules, legRules, armRules);
         return new TechniqueActivities.CastBinding(result.getBinding(), hand, entry);
     }
 

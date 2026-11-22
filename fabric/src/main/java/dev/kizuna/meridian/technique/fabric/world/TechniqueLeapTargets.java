@@ -15,8 +15,10 @@ import net.minecraft.world.phys.Vec3;
 public final class TechniqueLeapTargets {
     private static final double CENTER = 0.5;
     private static final double HALF_WIDTH = 0.5;
+    private static final double HALF_BLOCK = 0.5;
     private static final double MINIMUM_CLEARANCE = 2;
     private static final double SURFACE_EPSILON = 0.001;
+    private static final double DIRECTION_EPSILON = 0.000001;
 
     private TechniqueLeapTargets() {
         // 不在客户端和服务端保存跨 tick 世界几何缓存。
@@ -42,6 +44,47 @@ public final class TechniqueLeapTargets {
         var aim = new TechniqueLeap.Aim(point(origin), point(target.subtract(origin)),
                 Optional.of(point(target)));
         return select(actor, profile, aim);
+    }
+
+    public static TechniqueLeap.Landing directed(LivingEntity actor, LeapProfile profile, Vec3 direction,
+                                                   double distance) {
+        // 定向跃出只在射线经过的方块列内取安全落点，不使用准星吸附和横向扩宽。
+        Vec3 horizontal = new Vec3(direction.x, 0, direction.z);
+        double length = horizontal.length();
+        if (!Double.isFinite(length) || length < DIRECTION_EPSILON || !Double.isFinite(distance) || distance <= 0) {
+            throw new IllegalArgumentException("定向跃出方向或距离非法");
+        }
+        Vec3 unit = horizontal.scale(1 / length);
+        TechniqueLeap.Point origin = point(actor.position());
+        TechniqueLeap.Point forward = point(unit);
+        double path = Math.min(distance, profile.getMaximumPath());
+        var target = new TechniqueLeap.Point(origin.x() + forward.x() * path, origin.y(),
+                origin.z() + forward.z() * path);
+        var aim = new TechniqueLeap.Aim(origin, forward, Optional.of(target));
+        return TechniqueLeap.select(profile, aim,
+                (x, y, z) -> directedStanding(actor, origin, forward, x, y, z));
+    }
+
+    public static boolean clearTakeoff(LivingEntity actor) {
+        // 起跳只检查当前身体上方的净空，避免在低顶下已经支付后卡进方块。
+        double requiredHeight = Math.max(MINIMUM_CLEARANCE, actor.getBbHeight());
+        var box = actor.getBoundingBox();
+        var headroom = new AABB(box.minX, box.maxY, box.minZ, box.maxX,
+                box.maxY + requiredHeight, box.maxZ);
+        return actor.level().noCollision(actor, headroom) && !actor.level().containsAnyLiquid(headroom);
+    }
+
+    private static Optional<TechniqueLeap.Point> directedStanding(LivingEntity actor, TechniqueLeap.Point origin,
+                                                                    TechniqueLeap.Point direction, int x, int y,
+                                                                    int z) {
+        // 方块中心允许半格离散误差，落点不因普通准星吸附偏离固定方向。
+        double dx = x + CENTER - origin.x();
+        double dz = z + CENTER - origin.z();
+        double lateral = Math.abs(dx * direction.z() - dz * direction.x());
+        if (lateral > HALF_BLOCK) {
+            return Optional.empty();
+        }
+        return standing(actor, x, y, z);
     }
 
     private static TechniqueLeap.Landing select(LivingEntity actor, LeapProfile profile, TechniqueLeap.Aim aim) {

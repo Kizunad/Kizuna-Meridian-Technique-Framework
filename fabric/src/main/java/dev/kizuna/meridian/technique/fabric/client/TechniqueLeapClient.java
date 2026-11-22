@@ -139,8 +139,10 @@ public final class TechniqueLeapClient {
         if (!registered.benefit().hasLeap()) {
             throw new IllegalArgumentException("跃步回执引用了非跃步状态");
         }
-        var flight = new TechniqueLeapFlight(registered, message.getLandingY(), position(message),
-                velocity(message), "prediction");
+        var start = new TechniqueLeapFlight.Start(registered.benefit().getLeap(), message.getEffectId(),
+                message.getLandingY(), position(message), velocity(message), "prediction",
+                TechniqueLeapFlight.WallCollisionPolicy.CONTINUE, null, null);
+        var flight = new TechniqueLeapFlight(start);
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(flight);
         access.meridian$setLeapReadyTick(AWAITING_SERVER);

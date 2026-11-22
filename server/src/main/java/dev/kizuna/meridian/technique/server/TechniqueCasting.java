@@ -61,6 +61,11 @@ public final class TechniqueCasting {
     }
 
     public CastOutcome cast(TechniqueHost host, CastRequest request, long staggeredUntilMillis) {
+        return cast(host, request, staggeredUntilMillis, Optional::empty);
+    }
+
+    CastOutcome cast(TechniqueHost host, CastRequest request, long staggeredUntilMillis,
+                     Supplier<Optional<String>> effectCheck) {
         // 请求边界错误与损坏存档分别报告，避免把非法输入写入进度；僵直到期时刻使用身体时钟。
         try {
             TechniqueProtocol.validateCast(request);
@@ -68,7 +73,7 @@ public final class TechniqueCasting {
             return failure(request.getCastId(), INVALID_REQUEST);
         }
         try {
-            return startOrReplay(host, request, staggeredUntilMillis);
+            return startOrReplay(host, request, staggeredUntilMillis, effectCheck);
         } catch (TechniqueErrors.Rejected exception) {
             return failure(request.getCastId(), exception);
         } catch (TechniqueErrors.HostRejected exception) {
@@ -82,7 +87,8 @@ public final class TechniqueCasting {
         }
     }
 
-    private CastOutcome startOrReplay(TechniqueHost host, CastRequest request, long staggeredUntilMillis) {
+    private CastOutcome startOrReplay(TechniqueHost host, CastRequest request, long staggeredUntilMillis,
+                                     Supplier<Optional<String>> effectCheck) {
         // 持久回执与活动施放优先重放；新请求基于同一次宿主查询完成校验、绑定和提交。
         Optional<CastOutcome> previous = replay(host, request);
         if (previous.isPresent()) {
@@ -110,6 +116,10 @@ public final class TechniqueCasting {
         var start = new TechniqueActivities.Start(body, definition, request, progress, selection,
                 registry.addonCostPayers());
         BodyActivity activity = TechniqueActivities.start(start);
+        Optional<String> rejection = effectCheck.get();
+        if (rejection.isPresent()) {
+            throw TechniqueErrors.rejected(EFFECT_REJECTED, rejection.orElseThrow());
+        }
         return submitStart(host, start, activity);
     }
 

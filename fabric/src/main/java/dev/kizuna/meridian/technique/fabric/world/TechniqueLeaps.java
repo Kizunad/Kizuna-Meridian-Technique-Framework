@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Comparator;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -26,19 +27,42 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 
 /** 玩家与类人共用的起跳、真实做功、碰撞和落地宿主。 */
 public final class TechniqueLeaps {
     public enum Jump { LEAP, ORDINARY, WAIT }
+    public enum LeapResult { LANDED, BLOCKED, CANCELLED }
     private static final Logger LOG = LoggerFactory.getLogger(TechniqueLeaps.class);
     private static final long MILLIS_PER_TICK = 50;
     private static final int MAX_FLIGHT_TICKS = 200;
     private static final float STEP_VOLUME = 0.15F;
+    private static final double DIRECTION_EPSILON = 0.000001;
+    private static final double LANDING_CONTACT_REACH = 0.5;
+    private static final double HALF_WIDTH = 0.5;
     private static final List<Predicate<Mob>> directors = new CopyOnWriteArrayList<>();
     private static final List<Consumer<LeapAttempt>> leapListeners = new CopyOnWriteArrayList<>();
 
     /** 大脑预估的一次跃步：求解出的落点与飞行毫秒。 */
     public record Preview(Vec3 landing, long flightMillis) { }
+
+    public record DirectedLeap(LeapProfile profile, String effectId, Vec3 direction, double distance,
+                               TechniqueLeap.Landing landing, String castId,
+                               Consumer<LeapResult> completion, Consumer<LivingEntity> contact) {
+        public DirectedLeap {
+            Objects.requireNonNull(profile);
+            Objects.requireNonNull(effectId);
+            Objects.requireNonNull(direction);
+            Objects.requireNonNull(landing);
+            Objects.requireNonNull(castId);
+            Objects.requireNonNull(completion);
+            Objects.requireNonNull(contact);
+        }
+    }
+
+    private record FlightStart(LeapProfile profile, String effectId, TechniqueLeap.Landing landing, String castId,
+                               TechniqueLeapFlight.WallCollisionPolicy wallCollisionPolicy,
+                               Consumer<LeapResult> completion, Consumer<LivingEntity> contact) { }
 
     /** 服务端一次付费起跳的结果：成功为 LEAP 并带实际做功，被拒为 ORDINARY 并带原因；调试用途，不进正式玩法。 */
     public record LeapAttempt(LivingEntity actor, TechniqueLeap.Landing landing, Jump result,
@@ -88,7 +112,8 @@ public final class TechniqueLeaps {
         }
         String castId = "leap_" + UUID.randomUUID().toString().replace("-", "");
         if (actor.level().isClientSide()) {
-            launch(actor, registered, landing, castId);
+            launch(actor, new FlightStart(registered.benefit().getLeap(), registered.benefit().getId(), landing,
+                    castId, TechniqueLeapFlight.WallCollisionPolicy.CONTINUE, null, null));
             return Jump.LEAP;
         }
         TechniqueService.LeapExertion exertion = pay(actor, registered, castId);
@@ -97,7 +122,9 @@ public final class TechniqueLeaps {
             publishLeap(new LeapAttempt(actor, landing, Jump.ORDINARY, exertion));
             return Jump.ORDINARY;
         }
-        TechniqueLeapFlight flight = launch(actor, registered, landing, castId);
+        TechniqueLeapFlight flight = launch(actor, new FlightStart(registered.benefit().getLeap(),
+                registered.benefit().getId(), landing, castId, TechniqueLeapFlight.WallCollisionPolicy.CONTINUE,
+                null, null));
         present(actor, flight, PresentationAction.START);
         // 起跳声只在服务端付费成功后播一次；客户端预测分支不播，施放者本人不会双响。
         LeapProfile profile = registered.benefit().getLeap();
@@ -109,14 +136,62 @@ public final class TechniqueLeaps {
         return Jump.LEAP;
     }
 
-    private static TechniqueLeapFlight launch(LivingEntity actor, TechniqueStatusBenefits.Registered registered,
-                                              TechniqueLeap.Landing landing, String castId) {
+    public static Jump startDirected(LivingEntity actor, DirectedLeap request) {
+        // 施放者已付起手费用；该入口只启动固定方向的轨迹，不再次调用做功宿主。
+        if (actor.level().isClientSide() || !ready(actor)) {
+            return actor.level().isClientSide() ? Jump.ORDINARY : Jump.WAIT;
+        }
+        Vec3 horizontal = new Vec3(request.direction().x, 0, request.direction().z);
+        double length = horizontal.length();
+        if (!Double.isFinite(length) || length < DIRECTION_EPSILON || !Double.isFinite(request.distance())
+                || request.distance() <= 0) {
+            return Jump.ORDINARY;
+        }
+        TechniqueLeap.Landing landing = request.landing();
+        if (!landing.supported()) {
+            return Jump.ORDINARY;
+        }
+        var flightStart = new FlightStart(request.profile(), request.effectId(), landing, request.castId(),
+                TechniqueLeapFlight.WallCollisionPolicy.FINISH, request.completion(), request.contact());
+        TechniqueLeapFlight flight = launch(actor, flightStart);
+        present(actor, flight, PresentationAction.START);
+        if (request.profile().hasTakeoffSound()) {
+            TechniqueSounds.play(actor, request.profile().getTakeoffSound());
+        }
+        TechniqueLeapNetworking.send(actor, LeapMotion.Action.START, flight);
+        return Jump.LEAP;
+    }
+
+    public static Optional<TechniqueLeap.Landing> planDirected(LivingEntity actor, LeapProfile profile,
+                                                                Vec3 direction, double distance) {
+        // 付款前冻结方向、落点和起跳净空，付款后的启动阶段只消费这份计划。
+        if (!ready(actor)) {
+            return Optional.empty();
+        }
+        Vec3 horizontal = new Vec3(direction.x, 0, direction.z);
+        double length = horizontal.length();
+        if (!Double.isFinite(length) || length < DIRECTION_EPSILON || !Double.isFinite(distance)
+                || distance <= 0 || !TechniqueLeapTargets.clearTakeoff(actor)) {
+            return Optional.empty();
+        }
+        Vec3 unit = horizontal.scale(1 / length);
+        TechniqueLeap.Landing landing = TechniqueLeapTargets.directed(actor, profile, unit, distance);
+        if (!landing.supported()) {
+            return Optional.empty();
+        }
+        return Optional.of(landing);
+    }
+
+    private static TechniqueLeapFlight launch(LivingEntity actor, FlightStart request) {
         // 两端按同一落点求解初速度并挂上飞行状态，服务端随后广播权威起点。
         var origin = TechniqueLeapTargets.point(actor.position());
-        var target = landing.point();
-        int ticks = TechniqueLeap.flightTicks(registered.benefit().getLeap(), origin, target);
+        var target = request.landing().point();
+        int ticks = TechniqueLeap.flightTicks(request.profile(), origin, target);
         Vec3 velocity = TechniqueLeapTargets.vector(TechniqueLeap.velocity(origin, target, ticks));
-        var flight = new TechniqueLeapFlight(registered, target.y(), actor.position(), velocity, castId);
+        var flightStart = new TechniqueLeapFlight.Start(request.profile(), request.effectId(), target.y(),
+                actor.position(), velocity, request.castId(), request.wallCollisionPolicy(), request.completion(),
+                request.contact());
+        var flight = new TechniqueLeapFlight(flightStart);
         var access = (TechniqueLeapAccess) actor;
         access.meridian$setLeap(flight);
         access.meridian$clearWeakNotice();
@@ -181,19 +256,29 @@ public final class TechniqueLeaps {
         }
         if (!actor.isAlive() || actor.isPassenger() || actor.isInWater() || actor.isInLava()
                 || flight.ticks >= MAX_FLIGHT_TICKS) {
-            finish(actor, flight);
+            finish(actor, flight, LeapResult.CANCELLED);
             return false;
         }
         Vec3 before = actor.position();
         actor.setDeltaMovement(flight.velocity);
         actor.move(MoverType.SELF, flight.velocity);
+        if (flight.preLandingContact == null) {
+            flight.preLandingContact = preLandingContact(actor, flight, before, actor.position());
+        }
         flight.ticks++;
         Vec3 moved = actor.position().subtract(before);
         if (actor instanceof ServerPlayer player) {
             player.doCheckFallDamage(moved.x, moved.y, moved.z, actor.onGround());
             player.connection.resetPosition();
         }
+        if (flight.wallCollisionPolicy == TechniqueLeapFlight.WallCollisionPolicy.FINISH
+                && (actor.horizontalCollision || actor.verticalCollision && flight.velocity.y > 0)) {
+            actor.setDeltaMovement(Vec3.ZERO);
+            finish(actor, flight, LeapResult.BLOCKED);
+            return true;
+        }
         if (actor.onGround()) {
+            contactAtLanding(actor, flight);
             landed(actor, flight);
             return true;
         }
@@ -201,6 +286,67 @@ public final class TechniqueLeaps {
         actor.setDeltaMovement(flight.velocity);
         actor.calculateEntityAnimation(false /* flutter */);
         return true;
+    }
+
+    private static void contactAtLanding(LivingEntity actor, TechniqueLeapFlight flight) {
+        // 仅在实际落地后沿冻结水平正前方探半格，飞行途中不检测实体。
+        if (flight.contact == null || flight.contacted) {
+            return;
+        }
+        if (flight.preLandingContact != null && canContact(actor, flight.preLandingContact)) {
+            flight.contacted = true;
+            flight.contact.accept(flight.preLandingContact);
+            return;
+        }
+        Vec3 direction = new Vec3(flight.launch.x, 0, flight.launch.z).normalize();
+        AABB contactBox = actor.getBoundingBox().move(direction.scale(LANDING_CONTACT_REACH));
+        actor.level().getEntitiesOfClass(LivingEntity.class, contactBox, target -> canContact(actor, target))
+                .stream()
+                .sorted(Comparator.comparingDouble((LivingEntity target) -> actor.distanceToSqr(target))
+                        .thenComparing(target -> target.getUUID().toString()))
+                .findFirst()
+                .ifPresent(target -> {
+                    flight.contacted = true;
+                    flight.contact.accept(target);
+                });
+    }
+
+    private static LivingEntity preLandingContact(LivingEntity actor, TechniqueLeapFlight flight,
+                                                   Vec3 start, Vec3 end) {
+        if (flight.contact == null) {
+            return null;
+        }
+        double halfWidth = actor.getBbWidth() * HALF_WIDTH;
+        double halfHeight = actor.getBbHeight() * HALF_WIDTH;
+        return actor.level().getEntitiesOfClass(LivingEntity.class,
+                        actor.getBoundingBox().expandTowards(flight.velocity), target -> canContact(actor, target)
+                                && target.getBoundingBox().inflate(halfWidth, halfHeight, halfWidth)
+                                        .clip(start, end).isPresent())
+                .stream()
+                .sorted(Comparator.comparingDouble((LivingEntity target) ->
+                                target.getBoundingBox().inflate(halfWidth, halfHeight, halfWidth)
+                                        .clip(start, end).orElseThrow().distanceToSqr(start))
+                        .thenComparing(target -> target.getUUID().toString()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public static void lockDirectedActions(LivingEntity actor) {
+        // 尸修定向施放在起手前锁住 Mob 自主移动和普通攻击。
+        ((TechniqueLeapAccess) actor).meridian$lockDirectedActions();
+    }
+
+    public static void unlockDirectedActions(LivingEntity actor) {
+        // 结束或取消定向施放后恢复 Mob 的自主动作。
+        ((TechniqueLeapAccess) actor).meridian$unlockDirectedActions();
+    }
+
+    private static boolean canContact(LivingEntity actor, LivingEntity target) {
+        // 只让活着且可攻击的接触对象进入招式回调。
+        if (target == actor || !target.isAlive()) {
+            return false;
+        }
+        return !(actor instanceof Mob mob) || mob.canAttack(target);
     }
 
     private static Vec3 nextVelocity(LivingEntity actor, Vec3 current) {
@@ -241,26 +387,52 @@ public final class TechniqueLeaps {
         }
         actor.setDeltaMovement(Vec3.ZERO);
         actor.fallDistance = 0;
-        finish(actor, flight);
+        finish(actor, flight, LeapResult.LANDED);
     }
 
-    private static void finish(LivingEntity actor, TechniqueLeapFlight flight) {
-        // 先停止本次动画再释放轨迹；间隔只从服务端真实落地或中断时刻计，玩家由 FINISH 回执自行对账。
+    public static void cancel(LivingEntity actor) {
+        // 卸载或死亡后宿主可能已不可访问，只释放轨迹并清理依赖方状态。
         var access = (TechniqueLeapAccess) actor;
+        TechniqueLeapFlight flight = access.meridian$getLeap();
+        if (flight == null) {
+            return;
+        }
         access.meridian$setLeap(null);
         flight.end = actor.position();
-        if (!actor.level().isClientSide()) {
-            int delay = flight.registered.benefit().getLeap().getLandingDelayTicks();
+        complete(actor, flight, LeapResult.CANCELLED);
+    }
+
+    private static void finish(LivingEntity actor, TechniqueLeapFlight flight, LeapResult result) {
+        // 先停止本次动画再释放轨迹；间隔只从服务端真实落地或中断时刻计，玩家由 FINISH 回执自行对账。
+        var access = (TechniqueLeapAccess) actor;
+        if (access.meridian$getLeap() != flight) {
+            return;
+        }
+        access.meridian$setLeap(null);
+        flight.end = actor.position();
+        if (!actor.level().isClientSide() && TechniqueFabric.running()) {
+            int delay = flight.profile.getLandingDelayTicks();
             access.meridian$setLeapReadyTick(actor.level().getGameTime() + delay);
             present(actor, flight, PresentationAction.STOP);
             TechniqueLeapNetworking.send(actor, LeapMotion.Action.FINISH, flight);
+        }
+        complete(actor, flight, result);
+    }
+
+    private static void complete(LivingEntity actor, TechniqueLeapFlight flight, LeapResult result) {
+        if (flight.completion != null) {
+            try {
+                flight.completion.accept(result);
+            } catch (RuntimeException failure) {
+                LOG.warn("跃步完成回调处理失败：{}", actor.getUUID(), failure);
+            }
         }
     }
 
     private static void present(LivingEntity actor, TechniqueLeapFlight flight, PresentationAction action) {
         // 复用宿主的 PA 映射和 STOP 回执，不把动画实现依赖放进功法库。
         var presentation = PresentationIntent.newBuilder()
-                .setId(flight.registered.benefit().getLeap().getPresentationId())
+                .setId(flight.profile.getPresentationId())
                 .setAction(action)
                 .build();
         var effect = EffectIntent.newBuilder()

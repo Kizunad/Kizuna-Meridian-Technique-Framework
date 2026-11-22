@@ -9,6 +9,9 @@ public interface TechniqueLeapAccess {
     boolean meridian$getLeapPending();
     void meridian$markLeapPending();
     void meridian$clearLeapPending();
+    boolean meridian$directedActionsLocked();
+    void meridian$lockDirectedActions();
+    void meridian$unlockDirectedActions();
     boolean meridian$getWeakNotice();
     void meridian$markWeakNotice();
     void meridian$clearWeakNotice();

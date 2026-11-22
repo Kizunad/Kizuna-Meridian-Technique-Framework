@@ -19,6 +19,7 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
     @Unique private TechniqueLeapFlight meridian$leap;
     @Unique private long meridian$leapReadyTick;
     @Unique private boolean meridian$leapPending;
+    @Unique private boolean meridian$directedActionsLocked;
     @Unique private boolean meridian$weakNotice;
 
     @Override
@@ -61,6 +62,24 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
     public void meridian$clearLeapPending() {
         // 到达可起跳时刻后按冻结状态重新决策。
         meridian$leapPending = false;
+    }
+
+    @Override
+    public boolean meridian$directedActionsLocked() {
+        // 纵的起手、飞行与扑空收势期间不执行原版自主攻击。
+        return meridian$directedActionsLocked;
+    }
+
+    @Override
+    public void meridian$lockDirectedActions() {
+        // 尸修宿主在付费起手前锁住原版 AI 动作。
+        meridian$directedActionsLocked = true;
+    }
+
+    @Override
+    public void meridian$unlockDirectedActions() {
+        // 接触、取消或扑空收势完成后恢复原版 AI。
+        meridian$directedActionsLocked = false;
     }
 
     @Override

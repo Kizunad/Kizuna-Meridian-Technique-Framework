@@ -342,21 +342,33 @@ public final class TechniqueService {
         } else {
             host = claimedHost;
         }
-        if (previous != null && !previous.castId.equals(request.getCastId())) {
+        boolean sameCast = previous != null && previous.castId.equals(request.getCastId());
+        if (previous != null && !sameCast) {
             advance(entityUuid, previous);
             if (previous.pendingAdvance != null || (previous.terminating && sessions.containsKey(entityUuid))) {
                 return pendingFailure(request);
             }
         }
-        if (previous == null || !previous.castId.equals(request.getCastId())) {
-            for (var check : castChecks) {
-                Optional<String> rejection = check.apply(entityUuid, request);
-                if (rejection.isPresent()) {
-                    return effectRejected(request.getCastId(), rejection.orElseThrow());
-                }
+        return castAfterAdvance(entityUuid, request, host, previous);
+    }
+
+    private CastOutcome castAfterAdvance(UUID entityUuid, CastRequest request,
+                                         TechniqueHost host, Session previous) {
+        // 普通功法保留旧检查顺序，定向跃出在绑定和费用预检后检查世界条件。
+        boolean sameCast = previous != null && previous.castId.equals(request.getCastId());
+        boolean deferEffectCheck = hasLeapEffect(request);
+        if (!deferEffectCheck && !sameCast) {
+            Optional<String> rejection = checkCastEffects(entityUuid, request);
+            if (rejection.isPresent()) {
+                return effectRejected(request.getCastId(), rejection.orElseThrow());
             }
         }
-        CastOutcome outcome = casting.cast(host, request, staggeredUntil(entityUuid));
+        Supplier<Optional<String>> delayedEffectCheck = Optional::empty;
+        if (deferEffectCheck && !sameCast) {
+            delayedEffectCheck = () -> checkCastEffects(entityUuid, request);
+        }
+        CastOutcome outcome = casting.cast(host, request, staggeredUntil(entityUuid),
+                delayedEffectCheck);
         if (success(outcome)) {
             Session registered = register(entityUuid, host);
             if (registered != null && registered.terminationOutcome != null
@@ -365,6 +377,27 @@ public final class TechniqueService {
             }
         }
         return outcome;
+    }
+
+    private boolean hasLeapEffect(CastRequest request) {
+        // 只有声明定向跃出的状态效果延后世界条件检查，其余功法沿用旧检查顺序。
+        TechniqueDefinition definition = registry.find(request.getTechnique()).orElse(null);
+        if (definition == null) {
+            return false;
+        }
+        return definition.getEffectsList().stream()
+                .anyMatch(effect -> effect.hasStatusBenefit() && effect.getStatusBenefit().hasLeap());
+    }
+
+    private Optional<String> checkCastEffects(UUID entityUuid, CastRequest request) {
+        // 世界效果只在通用校验、绑定和费用预检通过后检查，提交身体活动前仍可拒绝。
+        for (var check : castChecks) {
+            Optional<String> rejection = check.apply(entityUuid, request);
+            if (rejection.isPresent()) {
+                return rejection;
+            }
+        }
+        return Optional.empty();
     }
 
     public TechniqueRegistry registry() {

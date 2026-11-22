@@ -112,7 +112,7 @@ public final class TechniqueLeapNetworking {
         var message = LeapMotion.newBuilder()
                 .setAction(action)
                 .setEntityId(actor.getId())
-                .setEffectId(flight.registered.benefit().getId())
+                .setEffectId(flight.effectId)
                 .setX(position.x)
                 .setY(position.y)
                 .setZ(position.z)

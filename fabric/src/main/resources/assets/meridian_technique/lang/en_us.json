@@ -7,5 +7,6 @@
   "screen.meridian_technique.close": "Close",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / click outside to close; wheel to scroll",
   "tooltip.meridian_technique.scroll.learn": "Right-click to learn; the scroll is used up",
+  "tooltip.meridian_technique.scroll.innate": "An innate art must awaken in the body. Until then, read and keep the scroll.",
   "help.meridian_technique.slots": "A technique must sit in a slot before you can use it: press %s to open the workspace and drag it into a slot under Cultivation → Technique Setup; then press %s to enter combat stance and press the slot key (the hotbar number keys by default) to cast."
 }

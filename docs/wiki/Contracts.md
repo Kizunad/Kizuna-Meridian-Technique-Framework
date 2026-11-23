@@ -26,7 +26,8 @@
 若松手活动暂遇版本冲突，身体在前进到下一毫秒前用 `pendingGuardRelease(entity, body)`
 取得按首次松手时刻生成的同一请求，提交后再推进时间。服务仍负责确认收势并发布通知。
 
-`innate=true` 只替代学习检查，不绕过身体、境界、费用和宿主准入。天生式禁止入卷。
+`innate=true` 只替代学习检查，不绕过身体、境界、费用和宿主准入。天生式可以入卷，在功法谱中按当前身体的知识显示。
+读卷不能授予天生式。身体不符、天生条件未满足或整卷已会时，提示原因，保留卷轴和原有学习记录，也不触发学卷进度。
 `TechniqueKnowledge.references/contains` 按精确版本合并已学与天生式；已有学习顺序保留，新增天生引用按 ID/版本排序。
 `TechniqueService.known()` 返回 `List<KnownEntry>`，其中每项只有 `technique` 引用和 `name`。
 天生式和已学式在这个只读列表中具有相同形状；天生式没有学习时刻、没有来源，也不会伪造 `KnownTechnique`。

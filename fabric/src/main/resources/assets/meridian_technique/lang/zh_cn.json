@@ -7,5 +7,6 @@
   "screen.meridian_technique.close": "合上",
   "screen.meridian_technique.close_hint": "ESC / %s / %s / 点击纸外：合上；滚轮翻阅",
   "tooltip.meridian_technique.scroll.learn": "右键学习，学会后卷轴消耗",
+  "tooltip.meridian_technique.scroll.innate": "天生之式须待自身通窍。窍未开，读罢仍可收卷。",
   "help.meridian_technique.slots": "功法要放进槽位才能用：按 %s 打开工作台，在「修炼 → 功法配置」里把功法拖进槽位；再按 %s 进入战斗架势，按槽位键（默认是快捷栏的数字键）施放。"
 }

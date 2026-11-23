@@ -232,7 +232,7 @@ public final class TechniqueGuardTest {
     }
 
     @Test
-    public void rejectsUnsupportedDefinitionsAndInnateVolumes() {
+    public void rejectsUnsupportedGuardDefinitions() {
         // 内容错误在目录加载时拒绝，不留到世界效果派发时才失败。
         TechniqueDefinition guard = guard();
         CastPhases invalidPhases = guard.getPhases().toBuilder().setActiveMillis(0).build();
@@ -244,9 +244,19 @@ public final class TechniqueGuardTest {
                 .build();
         assertThrows(IllegalArgumentException.class, () -> load(catalog(guard.toBuilder()
                 .addEffects(unsupported).build())));
-        assertThrows(IllegalArgumentException.class,
-                () -> load(HeldTechniqueFixtures.groupedCatalog(guard)));
         assertFalse(TechniqueSelector.isOrdinarySupport(guard));
+    }
+
+    @Test
+    public void registryLoadsVolumeWithInnateMembers() {
+        // 核对正式注册表保留卷成员的精确版本及其天生属性。
+        var catalog = HeldTechniqueFixtures.groupedCatalog(guard());
+        var registry = load(catalog);
+        var volume = registry.findVolume(HeldTechniqueFixtures.UPPER).orElseThrow();
+        assertEquals(catalog.getVolumes(0), volume);
+        for (var reference : volume.getTechniquesList()) {
+            assertTrue(registry.find(reference).orElseThrow().getInnate());
+        }
     }
 
     private static TechniqueService service(MemoryHost host) {

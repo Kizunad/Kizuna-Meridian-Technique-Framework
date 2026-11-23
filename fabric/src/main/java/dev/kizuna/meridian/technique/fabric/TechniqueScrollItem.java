@@ -56,7 +56,8 @@ public final class TechniqueScrollItem extends Item {
     public void appendHoverText(ItemStack stack, Item.TooltipContext context, TooltipDisplay display,
             Consumer<Component> tooltip, TooltipFlag flag) {
         // 每式一行写境界和真元费用，语言里有补充说明就接在后面；客户端不根据本地进度猜测能否学习。
-        for (var technique : scroll.techniques()) {
+        var techniques = scroll.techniques();
+        for (var technique : techniques) {
             tooltip.accept(techniqueLine(technique));
         }
         // 整本书共通的规矩（拿什么兵器、磨什么）写在书名键加 .note 里，缺键时不显示。
@@ -73,7 +74,10 @@ public final class TechniqueScrollItem extends Item {
         if (!prerequisites.isEmpty()) {
             tooltip.accept(Component.literal("前置卷：" + String.join("、", prerequisites)));
         }
-        tooltip.accept(Component.translatable("tooltip.meridian_technique.scroll.learn"));
+        boolean hasInnate = techniques.stream().anyMatch(technique -> technique.definition().getInnate());
+        String hint = hasInnate ? "tooltip.meridian_technique.scroll.innate"
+                : "tooltip.meridian_technique.scroll.learn";
+        tooltip.accept(Component.translatable(hint));
     }
 
     /** 功法怎么放进槽位、怎么进架势；键名按玩家实际绑定的显示。阅读页末尾和学会第一卷时的聊天共用。 */
@@ -144,7 +148,7 @@ public final class TechniqueScrollItem extends Item {
             service.learn(entityId, volumeId);
             return null;
         } catch (TechniqueService.PrerequisiteVolumeException | TechniqueService.BodyTemplateMismatchException
-                exception) {
+                | TechniqueService.InnateLockedException exception) {
             return Component.literal(exception.getMessage());
         } catch (TechniqueService.NoHostException exception) {
             return Component.literal("你还没有可用的身体，无法学习功法");

@@ -65,6 +65,31 @@ public class TechniqueStaggerTest {
     }
 
     @Test
+    public void explicitInterruptKeepsCooldownAndRejectsWarmupEndBoundary() {
+        // 独立中断只结束一次并保留冷却；第二次施放到起手右边界时仍应照常出手。
+        MemoryHost host = learnedHost();
+        TechniqueService service = service(host, registry(definition()));
+        List<TechniqueCastEnded> events = new ArrayList<>();
+        service.addCastEndListener(events::add);
+        String first = "first-warmup";
+        String next = "next-warmup";
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), first)).getPhase());
+        assertTrue(service.interruptWarmup(ENTITY, first));
+        assertFalse(service.interruptWarmup(ENTITY, first));
+        assertEquals(1, events.size());
+        assertEquals(TechniqueCastEndReason.INTERRUPTED, events.getFirst().reason());
+        assertEquals(TechniqueFailure.COOLING_DOWN, service.cast(ENTITY, request(host.current(), next)).getFailure());
+        host.nowMillis = Fixtures.COOLDOWN;
+        assertEquals(CastPhase.WARMUP, service.cast(ENTITY, request(host.current(), next)).getPhase());
+        assertFalse(service.interruptWarmup(ENTITY, first));
+        host.nowMillis = Fixtures.COOLDOWN + WARMUP;
+        assertFalse(service.interruptWarmup(ENTITY, next));
+        service.tick();
+        assertEquals(1, events.size());
+        assertEquals(next, TechniqueState.read(host.current()).getActiveCast().getRequest().getCastId());
+    }
+
+    @Test
     public void hitWithoutStaggerDoesNotInterrupt() {
         // 剂量不足门槛时伤害附属给出零时长，起手照常推进到出手。
         MemoryHost host = learnedHost();

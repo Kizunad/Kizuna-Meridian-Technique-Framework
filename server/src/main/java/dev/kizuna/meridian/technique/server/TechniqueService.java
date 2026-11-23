@@ -611,6 +611,19 @@ public final class TechniqueService {
         }
     }
 
+    public boolean interruptWarmup(UUID entityUuid, String castId) {
+        // 仅在同步提交了指定起手的中断时确认；正在交付效果的会话由调用方稍后重试。
+        Session session = sessions.get(Objects.requireNonNull(entityUuid));
+        if (session == null || !session.castId.equals(castId) || session.processing
+                || session.terminating || session.deferred != null) {
+            return false;
+        }
+        var outcome = process(entityUuid, session,
+                () -> interruptWarmup(entityUuid, session, TechniqueCastEndReason.INTERRUPTED));
+        return outcome.filter(result -> result.getPhase() == CastPhase.INTERRUPTED
+                && castId.equals(result.getCastId())).isPresent();
+    }
+
     public Optional<CastOutcome> stagger(UUID entityUuid, Stagger stagger) {
         // Damage 写受击僵直，Brewing 写魅惑定身，袖手拳写被擒和倒地；都拒绝新式并打断可打断的起手。
         Objects.requireNonNull(entityUuid);
@@ -1617,7 +1630,7 @@ public final class TechniqueService {
         if (transition == Transition.HARD_CONTROL) {
             if (session.inspected == null
                     || !TechniqueState.read(session.inspected).getActiveCast().hasSustained()) {
-                return interruptByStagger(entityUuid, session);
+                return interruptWarmup(entityUuid, session, TechniqueCastEndReason.STAGGERED);
             }
         }
         if (transition != Transition.STAGGER || session.terminating) {
@@ -1636,11 +1649,11 @@ public final class TechniqueService {
             }
             return Optional.ofNullable(session.terminationOutcome);
         }
-        return interruptByStagger(entityUuid, session);
+        return interruptWarmup(entityUuid, session, TechniqueCastEndReason.STAGGERED);
     }
 
-    private Optional<CastOutcome> interruptByStagger(UUID entityUuid, Session session) {
-        // 先完成未交付批次，再按当前起手窗口决定僵直是否终止施放。
+    private Optional<CastOutcome> interruptWarmup(UUID entityUuid, Session session, TechniqueCastEndReason reason) {
+        // 先完成未交付批次，再根据中断来源检查当前起手窗口。
         try {
             if (session.pendingAdvance != null) {
                 CastOutcome pendingOutcome = session.pendingAdvance.outcome();
@@ -1651,14 +1664,19 @@ public final class TechniqueService {
                     return Optional.of(pendingOutcome);
                 }
             }
-            TechniqueCasting.AdvanceResult result = casting.interruptByStagger(session.host, session.previousMillis);
+            TechniqueCasting.AdvanceResult result;
+            if (reason == TechniqueCastEndReason.STAGGERED) {
+                result = casting.interruptByStagger(session.host, session.previousMillis);
+            } else {
+                result = casting.interruptWarmup(session.host, session.previousMillis, session.castId);
+            }
             if (!success(result.outcome())) {
                 handleFailure(entityUuid, session, result.outcome());
             } else if (result.recoveryCommit().isPresent() || result.outcome().getPhase() == CastPhase.IDLE) {
                 session.pendingAdvance = result;
                 session.endReason = TechniqueCastEndReason.COMPLETED;
                 if (result.outcome().getPhase() == CastPhase.INTERRUPTED) {
-                    session.endReason = TechniqueCastEndReason.STAGGERED;
+                    session.endReason = reason;
                 }
                 if (!deliverPending(entityUuid, session)) {
                     return Optional.ofNullable(session.terminationOutcome);

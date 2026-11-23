@@ -289,6 +289,9 @@ Framework 负责复核 `旧总量 = 新总量 + 释放`、余额、容量、功�
 
 `interruptByStagger(host, previousMillis)` 只由服务的僵直入口调用。起手窗口是半开区间 `[start, warmup_end)`，
 只有该窗口内且声明可打断时停止。起手结束边界上的僵直不取消施放。
+`service.interruptWarmup(entityUuid, castId)` 供服务端附属按观察到的施放身份中断起手，适用于免受击打断的功法。
+返回 `true` 表示已经中断，结束事件原因为 `INTERRUPTED`，费用与冷却沿用提前终止规则。
+施放已换、已离开起手或正在交付效果时返回 `false`。需要重试的宿主应重新观察当前起手。该入口不施加僵直。
 `cancelOnUnload(host, previousMillis)`、`cancelOnDisconnect(host, previousMillis)` 清当前施放与动作，
 不退任何费用，并重算冷却。三个提前结束入口都返回 `AdvanceResult`；若 `previousMillis` 已达到表现的
 生效时刻，则同时返回对应 `PresentationAction.STOP`，一次性表现同样停止。

@@ -487,6 +487,11 @@ public final class TechniqueCasting {
         return transition(host, Signal.STAGGER, previousMillis);
     }
 
+    AdvanceResult interruptWarmup(TechniqueHost host, long previousMillis, String castId) {
+        // 附属只能中断它观察到的那一次起手。
+        return transition(host, Signal.WARMUP_INTERRUPT, previousMillis, castId);
+    }
+
     public AdvanceResult cancelOnUnload(TechniqueHost host, long previousMillis) {
         // 必须在冻结时间或撤销宿主访问权之前完成停止提交。
         return transition(host, Signal.UNLOAD, previousMillis);
@@ -503,6 +508,11 @@ public final class TechniqueCasting {
     }
 
     private AdvanceResult transition(TechniqueHost host, Signal signal, long previousMillis) {
+        // 僵直和生命周期事件作用于宿主的当前施放。
+        return transition(host, signal, previousMillis, "");
+    }
+
+    private AdvanceResult transition(TechniqueHost host, Signal signal, long previousMillis, String expectedCastId) {
         // 每次从权威进度恢复状态，库对象重建不会影响边界或动作身份。
         String castId = "";
         try {
@@ -522,7 +532,7 @@ public final class TechniqueCasting {
                 throw new IllegalArgumentException("效果调度时刻倒退");
             }
             CastPhase phase = TechniqueScheduler.phase(active, nowMillis);
-            CastPhase ending = ending(active, phase, signal);
+            CastPhase ending = ending(active, phase, signal, expectedCastId);
             if (ending == CastPhase.CAST_PHASE_UNSPECIFIED) {
                 return new AdvanceResult(outcome(active, phase, body.revision()),
                         List.of(), Optional.empty(), nowMillis);
@@ -558,8 +568,14 @@ public final class TechniqueCasting {
         return TechniqueScheduler.stopEffects(active, previousMillis, currentMillis);
     }
 
-    private static CastPhase ending(ActiveCast active, CastPhase current, Signal signal) {
+    private static CastPhase ending(ActiveCast active, CastPhase current, Signal signal, String expectedCastId) {
         // 收势边界优先于取消；可打断标志不影响卸载或下线清理，出手与收势中的僵直不打断。
+        if (signal == Signal.WARMUP_INTERRUPT) {
+            if (current == CastPhase.WARMUP && expectedCastId.equals(active.getRequest().getCastId())) {
+                return CastPhase.INTERRUPTED;
+            }
+            return CastPhase.CAST_PHASE_UNSPECIFIED;
+        }
         if (signal == Signal.HARD_CONTROL && active.hasSustained()) {
             return CastPhase.INTERRUPTED;
         }
@@ -640,5 +656,5 @@ public final class TechniqueCasting {
         }
     }
 
-    private enum Signal { CLOCK, STAGGER, HARD_CONTROL, UNLOAD, DISCONNECT }
+    private enum Signal { CLOCK, STAGGER, WARMUP_INTERRUPT, HARD_CONTROL, UNLOAD, DISCONNECT }
 }

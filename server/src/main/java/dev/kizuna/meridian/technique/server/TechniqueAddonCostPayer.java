@@ -3,6 +3,7 @@ package dev.kizuna.meridian.technique.server;
 import com.google.protobuf.Any;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.AddonCost;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 
 import java.util.Objects;
 
@@ -11,6 +12,11 @@ public interface TechniqueAddonCostPayer {
     String key();
 
     Payment pay(BodySnapshot body, AddonCost cost);
+
+    default double qiMultiplier(BodySnapshot body, TechniqueDefinition technique) {
+        // 付款方可按可信宿主状态调整起手真元，未参与时使用目录原价。
+        return 1;
+    }
 
     record Payment(Any progress, String failureTranslationKey, String reason) {
         public Payment {

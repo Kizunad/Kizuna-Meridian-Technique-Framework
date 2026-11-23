@@ -14,7 +14,13 @@ public final class TechniqueAvailability {
 
     public static boolean affordable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding) {
         // 调用方先完成身体绑定，再以同一快照检查全部真元费用。
-        return TechniqueActivities.affordable(body, definition, binding);
+        return affordable(body, definition, binding, TechniqueAddonCostPayers.empty());
+    }
+
+    public static boolean affordable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding,
+                                     TechniqueAddonCostPayers payers) {
+        // 有附属环境费用的宿主传入正在使用的目录支付方。
+        return TechniqueActivities.affordable(body, definition, binding, payers);
     }
 
     public static boolean workable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding) {

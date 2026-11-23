@@ -379,6 +379,8 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 `meridian_technique_addon_cost` 支付方，`amount` 使用显式单位并且为正，`parameters` 由该支付方解释。
 起手时支付方只根据同一份 `BodySnapshot` 返回替换后的附属进度，功法库把它与真元、做功、动作和功法进度
 放进同一份 `BodyActivity`。任一支付方拒绝时不提交活动，`CastOutcome.translation_key` 保留附属提供的翻译键。
+起手前按所有已登记支付方的 `qiMultiplier` 连乘缩放真元费用，再按原分配规则支付。倍率必须为有限正数。
+没有附属费用的式也适用。带环境的可付性查询可向 `TechniqueAvailability.affordable` 传入同一支付方索引。
 可付余额合计不低于 `amount` 就放，余额为零的经脉不分摊；例如只有脏经有本行真元、腑经为空时由脏经独付。
 余额最大的经脉（同额取 ID 较小者）承担比例份额的取整余数，其余经脉份额低于最小流转单位时跳过。
 目录不对 `BY_BALANCE` 做逐绑定数量的平摊预检，余额是否足够只在起手时按实际身体判断。

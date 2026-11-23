@@ -24,6 +24,35 @@ public final class TechniqueAddonCostTest {
     private static final double GOLD_COST = 7;
     private static final long GOLD_BALANCE = 10;
     private static final double QI_TOLERANCE = 1e-9;
+    private static final double DOUBLE_COST = 2;
+    private static final double UNAFFORDABLE_COST = 100;
+
+    @Test
+    public void scaledQiAndGoldCommitTogetherOnce() {
+        // 起手费用按环境倍增，重放同一请求不会二次收费。
+        var definition = addonDefinition();
+        var before = withGold(body(Shape.PAIRED), GOLD_BALANCE);
+        var host = new MemoryHost(before);
+        var casting = new TechniqueCasting(registry(definition, payer(DOUBLE_COST)));
+        var request = request(before, "scaled_price");
+        assertEquals(TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED, casting.cast(host, request).getFailure());
+        assertTrue(casting.cast(host, request).getReplayed());
+        assertEquals(1, host.activitySubmissions);
+        assertEquals(DOUBLE_COST * COST_QI, before.totalQi() - host.current().totalQi(), QI_TOLERANCE);
+        assertEquals(GOLD_BALANCE - (long) GOLD_COST, gold(host.current()));
+    }
+
+    @Test
+    public void scaledQiShortageLeavesGoldAndBodyUntouched() {
+        // 原价能付、调整后的价格不能付时，身体与附属进度均不写回。
+        var before = withGold(body(Shape.PAIRED), GOLD_BALANCE);
+        var host = new MemoryHost(before);
+        var casting = new TechniqueCasting(registry(addonDefinition(), payer(UNAFFORDABLE_COST)));
+        var outcome = casting.cast(host, request(before, "scaled_shortage"));
+        assertEquals(TechniqueFailure.INSUFFICIENT_QI, outcome.getFailure());
+        assertEquals(before, host.current());
+        assertEquals(0, host.activitySubmissions);
+    }
 
     @Test
     public void addonCostAndQiCommitInOneActivity() {
@@ -88,9 +117,20 @@ public final class TechniqueAddonCostTest {
     }
 
     private static TechniqueAddonCostPayers payer() {
+        // 原价用例与动态价格使用同一付款逻辑。
+        return payer(1);
+    }
+
+    private static TechniqueAddonCostPayers payer(double multiplier) {
         // 测试支付方从身体附属进度读取并计算剩余金量。
         TechniqueAddonCostPayers payers = new TechniqueAddonCostPayers();
         payers.register(new TechniqueAddonCostPayer() {
+            @Override
+            public double qiMultiplier(BodySnapshot body, TechniqueDefinition technique) {
+                // 由本例给出可信的环境倍率。
+                return multiplier;
+            }
+
             @Override
             public String key() {
                 // 使用测试目录声明的稳定费用键。

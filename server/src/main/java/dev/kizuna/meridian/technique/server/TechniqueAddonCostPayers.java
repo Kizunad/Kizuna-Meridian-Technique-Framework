@@ -1,5 +1,9 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.QiCost;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +23,7 @@ public final class TechniqueAddonCostPayers {
 
     private TechniqueAddonCostPayers(Map<String, TechniqueAddonCostPayer> payers) {
         // 冻结索引只供目录校验和施放读取。
-        this.payers = Map.copyOf(payers);
+        this.payers = Collections.unmodifiableMap(new LinkedHashMap<>(payers));
         this.mutable = false;
     }
 
@@ -39,6 +43,38 @@ public final class TechniqueAddonCostPayers {
     public Optional<TechniqueAddonCostPayer> find(String key) {
         // 目录校验和施放均按完整费用键精确解析。
         return Optional.ofNullable(payers.get(key));
+    }
+
+    List<QiCost> qiCosts(BodySnapshot body, TechniqueDefinition technique) {
+        // 真元倍率也适用于没有附属资源费用的式，每个支付方只查询一次。
+        var costs = technique.getCost().getQiList();
+        if (costs.isEmpty()) {
+            return costs;
+        }
+        double product = 1;
+        for (var payer : payers.values()) {
+            double factor = payer.qiMultiplier(body, technique);
+            if (!Double.isFinite(factor) || factor <= 0) {
+                throw new IllegalArgumentException("起手真元倍率必须为有限正数");
+            }
+            product *= factor;
+        }
+        if (product == 1) {
+            return costs;
+        }
+        double multiplier = product;
+        return costs.stream().map(cost -> scaled(cost, multiplier)).toList();
+    }
+
+    private static QiCost scaled(QiCost cost, double multiplier) {
+        // 先改变总价，再由原有的均摊、逐脉或余额分摊算法计算账户变更。
+        var quantity = cost.getAmount();
+        double amount = quantity.getValue() * multiplier;
+        if (!Double.isFinite(amount) || amount <= 0) {
+            throw new IllegalArgumentException("调整后的起手真元费用必须为有限正数");
+        }
+        var replacement = quantity.toBuilder().setValue(amount).build();
+        return cost.toBuilder().setAmount(replacement).build();
     }
 
     public TechniqueAddonCostPayers frozen() {

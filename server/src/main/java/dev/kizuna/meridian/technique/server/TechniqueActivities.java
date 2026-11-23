@@ -71,7 +71,7 @@ final class TechniqueActivities {
         TechniqueBinding binding = start.binding();
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
-        Accounts accounts = accounts(body, definition.getCost().getQiList(), slots);
+        Accounts accounts = accounts(body, start.addonCostPayers().qiCosts(body, definition), slots);
         ActiveCast initialActive = activeCast(start);
         TechniqueScheduler.ModifierPlan modifierPlan = TechniqueScheduler.modifierPlan(definition, initialActive);
         ActiveCast active = initialActive.toBuilder().addAllPendingModifiers(modifierPlan.pending()).build();
@@ -360,12 +360,13 @@ final class TechniqueActivities {
                 .build();
     }
 
-    static boolean affordable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding) {
+    static boolean affordable(BodySnapshot body, TechniqueDefinition definition, TechniqueBinding binding,
+                              TechniqueAddonCostPayers payers) {
         // 预检复用起手的费用分配和扣账计算，不提交账户或改变权威版本。
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
         try {
-            accounts(body, definition.getCost().getQiList(), slots);
+            accounts(body, payers.qiCosts(body, definition), slots);
             return true;
         } catch (TechniqueErrors.Rejected rejected) {
             return false;

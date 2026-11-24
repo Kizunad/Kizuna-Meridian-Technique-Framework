@@ -46,22 +46,38 @@ final class TechniqueFollowUps {
         var previous = new HashSet<TechniqueReference>();
         for (FollowUp transition : rules.getTransitionsList()) {
             TechniqueReference reference = transition.getPrevious();
-            TechniqueProtocol.validateReference(reference);
+            boolean ordinaryBlockedTransition = reference.getId().isEmpty() && reference.getVersion() == 0;
+            if (!ordinaryBlockedTransition) {
+                TechniqueProtocol.validateReference(reference);
+            }
             long startMillis = transition.getStartMillis();
-            TechniqueDefinition previousDefinition = definitions.get(reference);
-            if (previousDefinition == null || reference.equals(TechniqueRegistry.reference(definition))
+            TechniqueDefinition previousDefinition;
+            if (ordinaryBlockedTransition) {
+                previousDefinition = null;
+            } else {
+                previousDefinition = definitions.get(reference);
+            }
+            if ((!ordinaryBlockedTransition && (previousDefinition == null
+                    || reference.equals(TechniqueRegistry.reference(definition))
                     || TechniqueSustained.enabled(previousDefinition)
-                    || !previous.add(reference) || !transition.hasAfterRecoveryMillis()
+                    || !previous.add(reference))) || (ordinaryBlockedTransition
+                    && transition.getBlockedAttackSourcesCount() == 0) || !transition.hasAfterRecoveryMillis()
                     || !transition.hasStartMillis() || startMillis < 0
                     || startMillis >= definition.getPhases().getWarmupMillis()) {
                 throw TechniqueErrors.invalid(
-                        "follow_up",
-                        "前式不存在、重复、自引用或起播时刻不在起手段内");
+                        "follow_up", "前式不存在、重复、自引用或起播时刻不在起手段内");
             }
             TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
             TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
             validateBlockedAttackSources(transition);
-            validateWeaponGroup(transition, previousDefinition, definition);
+            if (ordinaryBlockedTransition) {
+                if (transition.hasPreviousProjectileWeapon() || transition.hasNextProjectileWeapon()) {
+                    throw TechniqueErrors.invalid(
+                            "follow_up.projectile_weapon", "普通攻击承接不能声明投射武器类别");
+                }
+            } else {
+                validateWeaponGroup(transition, previousDefinition, definition);
+            }
         }
     }
 
@@ -139,7 +155,7 @@ final class TechniqueFollowUps {
     private static Optional<AvailableTransition> availableTransition(TechniqueDefinition definition,
                                                                       TechniqueProgress progress, long now) {
         // 当前施放优先；存在当前施放时不能退回更早的历史制造承接窗口。
-        LastCast previous;
+        Optional<LastCast> previous = Optional.empty();
         if (progress.hasActiveCast()) {
             ActiveCast active = progress.getActiveCast();
             if (active.hasSustained()) {
@@ -149,18 +165,25 @@ final class TechniqueFollowUps {
             if (phase != CastPhase.RECOVERING && phase != CastPhase.FINISHED) {
                 return Optional.empty();
             }
-            previous = history(active, CastPhase.FINISHED);
+            previous = Optional.of(history(active, CastPhase.FINISHED));
         } else {
             LastCast last = progress.getLastCast();
-            if (!progress.hasLastCast() || last.getEnding() != CastPhase.FINISHED) {
-                return Optional.empty();
+            if (progress.hasLastCast() && last.getEnding() == CastPhase.FINISHED) {
+                previous = Optional.of(last);
             }
-            previous = last;
         }
         for (FollowUp transition : definition.getFollowUp().getTransitionsList()) {
-            if (!transition.getPrevious().equals(previous.getTechnique())
-                    || !inWindow(previous, transition, now)) {
-                continue;
+            boolean ordinaryBlockedTransition = transition.getPrevious().getId().isEmpty()
+                    && transition.getPrevious().getVersion() == 0;
+            if (!ordinaryBlockedTransition) {
+                if (previous.isEmpty()) {
+                    continue;
+                }
+                LastCast previousCast = previous.orElseThrow();
+                if (!transition.getPrevious().equals(previousCast.getTechnique())
+                        || !inWindow(previousCast, transition, now)) {
+                    continue;
+                }
             }
             Optional<String> blockedEventId = blockedEventId(transition, progress, now);
             if (blockedEventId.isPresent()) {

@@ -883,6 +883,12 @@ public final class TechniqueService {
         return false;
     }
 
+    public boolean recordBlockedAttack(UUID attackerUuid, String eventId,
+                                       BlockedAttackSource source, long blockedMillis) {
+        // Damage 适配层使用稳定事件身份提交，不需要复制观察值构造规则。
+        return recordBlockedAttack(new BlockedAttackObservation(attackerUuid, eventId, source, blockedMillis));
+    }
+
     private static Optional<BodySnapshot> inspectBlockedAttack(TechniqueHost host,
                                                                 BlockedAttackObservation observation) {
         // 阻挡时刻必须已经落在宿主结清的身体时钟内，死体不再接收新事实。
@@ -979,7 +985,9 @@ public final class TechniqueService {
                 return true;
             }
             String eventId = progress.getBlockedAttack().getEventId();
-            TechniqueProgress cleared = progress.toBuilder().clearBlockedAttack().build();
+            TechniqueProgress.Builder clearedBuilder = progress.toBuilder();
+            clearedBuilder.clearBlockedAttack();
+            TechniqueProgress cleared = clearedBuilder.build();
             BodyActivity activity = blockedAttackActivity(cleared);
             BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
             String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
@@ -1002,10 +1010,12 @@ public final class TechniqueService {
                                                TechniqueProgress progress) {
         // 死体不能执行普通活动，清理通过可信恢复命令保存相同的进度变更。
         String eventId = progress.getBlockedAttack().getEventId();
-        TechniqueProgress updated = progress.toBuilder().clearBlockedAttack().build();
+        TechniqueProgress.Builder clearedBuilder = progress.toBuilder();
+        clearedBuilder.clearBlockedAttack();
+        TechniqueProgress cleared = clearedBuilder.build();
         String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
         try {
-            long revision = host.submitRecovery(requestId, progressCommand(body, updated));
+            long revision = host.submitRecovery(requestId, progressCommand(body, cleared));
             if (revision != body.revision() + 1) {
                 throw new IllegalStateException("宿主返回的阻挡事实清除版本不一致");
             }

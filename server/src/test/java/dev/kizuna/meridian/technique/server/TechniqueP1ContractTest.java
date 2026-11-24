@@ -232,6 +232,59 @@ public class TechniqueP1ContractTest {
     }
 
     @Test
+    public void ordinaryBlockedTransitionDoesNotRequirePreviousCast() {
+        // 普通攻击没有功法历史时，带阻挡来源的空前式承接仍只认身体上的可信事实。
+        TechniqueDefinition ordinary = definition().toBuilder().setId(PREVIOUS_ID).build();
+        TechniqueDefinition followUp = ordinaryBlockedDefinition();
+        TechniqueProgress progress = TechniqueState.empty().toBuilder()
+                .setBlockedAttack(BlockedAttack.newBuilder()
+                        .setEventId("ordinary_blocked")
+                        .setSource(BlockedAttackSource.SHIELD)
+                        .setBlockedMillis(0)
+                        .build())
+                .build();
+        TechniqueCatalog catalog = catalog(ordinary).toBuilder().addDefinitions(followUp).build();
+        TechniqueRegistry.load(Fixtures.addons(), List.of(catalog));
+
+        assertTrue(TechniqueFollowUps.available(followUp, progress, 600).isPresent());
+        assertTrue(TechniqueFollowUps.available(followUp, progress, 601).isEmpty());
+        assertThrows(TechniqueErrors.Rejected.class, () -> TechniqueFollowUps.plan(
+                followUp, TechniqueState.empty(), request(followUp, "ordinary_missing").toBuilder()
+                        .setEntry(CastEntry.FOLLOW_UP).build(), 0, OptionalLong.empty()));
+    }
+
+    @Test
+    public void cancelledBlockedFollowUpRestoresConsumedFactForRetry() {
+        // 承接起手被取消时恢复同一事件，窗口内的重试仍能再次读取它。
+        TechniqueDefinition ordinary = previousDefinition();
+        TechniqueDefinition followUp = ordinaryBlockedDefinition();
+        TechniqueProgress initial = progressWithHistory(ordinary, BlockedAttackSource.SHIELD, 0).toBuilder()
+                .setBlockedAttack(BlockedAttack.newBuilder()
+                        .setEventId("cancelled_follow_up")
+                        .setSource(BlockedAttackSource.SHIELD)
+                        .setBlockedMillis(0)
+                        .build())
+                .addKnown(known(ordinary))
+                .addKnown(known(followUp))
+                .build();
+        TechniqueCatalog catalog = catalog(ordinary).toBuilder().addDefinitions(followUp).build();
+        TechniqueRegistry registry = TechniqueRegistry.load(Fixtures.addons(), List.of(catalog));
+        MemoryHost host = new MemoryHost(withProgress(body(Shape.TENDRIL), initial));
+        TechniqueService service = HeldTechniqueFixtures.service(host, registry);
+
+        CastRequest request = request(followUp, "cancelled_follow_up").toBuilder()
+                .setEntry(CastEntry.FOLLOW_UP)
+                .build();
+        service.cast(ENTITY, request);
+        TechniqueProgress started = TechniqueState.read(host.current());
+        assertFalse(started.hasBlockedAttack());
+
+        TechniqueProgress restored = TechniqueActivities.endedProgress(started, 100);
+        assertEquals("cancelled_follow_up", restored.getBlockedAttack().getEventId());
+        assertTrue(TechniqueFollowUps.available(followUp, restored, 100).isPresent());
+    }
+
+    @Test
     public void lifecycleCleanupIsDeferredOnUnloadDisconnectDeathAndLoad() {
         // 离场入口只排队，下一 tick 清理存活身体；死亡与读档继续由各自可信入口处理。
         assertClearedAfterExit(Exit.UNLOAD);
@@ -397,6 +450,24 @@ public class TechniqueP1ContractTest {
                 .build();
         FollowUpRules rules = FollowUpRules.newBuilder()
                 .addTransitions(transition)
+                .build();
+        return definition().toBuilder()
+                .setId(NEXT_ID)
+                .setFollowUp(rules)
+                .build();
+    }
+
+    private static TechniqueDefinition ordinaryBlockedDefinition() {
+        // 空前式只用于普通攻击阻挡，来源列表使其不能退化成普通无条件承接。
+        FollowUp transition = FollowUp.newBuilder()
+                .setRecoveryStartRatio(quantity(0, Unit.RATIO))
+                .setAfterRecoveryMillis(FOLLOW_UP_AFTER_RECOVERY)
+                .setStartMillis(0)
+                .addBlockedAttackSources(BlockedAttackSource.SHIELD)
+                .build();
+        FollowUpRules rules = FollowUpRules.newBuilder()
+                .addTransitions(transition)
+                .setOnlyFollowUp(true /* onlyFollowUp */)
                 .build();
         return definition().toBuilder()
                 .setId(NEXT_ID)

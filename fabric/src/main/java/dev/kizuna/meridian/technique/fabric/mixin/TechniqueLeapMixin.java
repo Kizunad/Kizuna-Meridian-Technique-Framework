@@ -66,7 +66,7 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
 
     @Override
     public boolean meridian$directedActionsLocked() {
-        // 纵的起手、飞行与扑空收势期间不执行原版自主攻击。
+        // 纵的定向起手、飞行与扑空收势期间冻结宿主自主动作。
         return meridian$directedActionsLocked;
     }
 
@@ -78,7 +78,7 @@ public abstract class TechniqueLeapMixin implements TechniqueLeapAccess {
 
     @Override
     public void meridian$unlockDirectedActions() {
-        // 接触、取消或扑空收势完成后恢复原版 AI。
+        // 接触、取消或扑空收势完成后恢复原版 AI 动作。
         meridian$directedActionsLocked = false;
     }
 

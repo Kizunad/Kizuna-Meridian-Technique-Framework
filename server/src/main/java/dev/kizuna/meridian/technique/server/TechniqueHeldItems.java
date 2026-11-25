@@ -48,7 +48,26 @@ public final class TechniqueHeldItems {
         validateSelectionOrder(rules.getSelectionOrderList());
         validateAmmunition(rules);
         validateRequiredItemTags(rules);
+        validateRefusals(rules);
         validateConsumptionStrategy(rules.getConsumptionStrategy());
+    }
+
+    private static void validateRefusals(HeldItemRules rules) {
+        // 提示按声明顺序匹配，每条文字和整张表分别有界。
+        if (rules.getRefusalsCount() > MAX_RULES) {
+            throw TechniqueErrors.invalid("refusals", "拒绝提示过多");
+        }
+        for (var refusal : rules.getRefusalsList()) {
+            if (!refusal.getItemTag().isEmpty()) {
+                TechniqueValues.id(refusal.getItemTag(), "refusal.item_tag");
+            }
+            String reason = refusal.getReason();
+            String key = refusal.getTranslationKey();
+            if (reason.isBlank() || key.isBlank()
+                    || Math.max(reason.length(), key.length()) > TechniqueValues.MAX_TEXT) {
+                throw TechniqueErrors.invalid("refusals", "拒绝原因或翻译键为空或过长");
+            }
+        }
     }
 
     static HeldItemRules rulesFor(TechniqueRegistry registry, TechniqueDefinition definition) {
@@ -279,12 +298,12 @@ public final class TechniqueHeldItems {
         HeldItem main = items.getMainHand();
         HeldItem off = items.getOffHand();
         if (main.getItemId().isEmpty() && off.getItemId().isEmpty()) {
-            throw TechniqueErrors.rejected(requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_REQUIRED));
+            throw refusal(rules, items, requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_REQUIRED));
         }
         Candidate mainCandidate = candidate(rules, items, main, Hand.MAIN_HAND, requiredWeapon);
         Candidate offCandidate = candidate(rules, items, off, Hand.OFF_HAND, requiredWeapon);
         if (mainCandidate == null && offCandidate == null) {
-            throw TechniqueErrors.rejected(requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_UNUSABLE));
+            throw refusal(rules, items, requiredFailure(requiredWeapon, TechniqueFailure.HELD_ITEM_UNUSABLE));
         }
         Hand selected;
         if (requiredWeapon != ProjectileWeaponCategory.PROJECTILE_WEAPON_CATEGORY_UNSPECIFIED
@@ -314,6 +333,18 @@ public final class TechniqueHeldItems {
             return Hand.MAIN_HAND;
         }
         return Hand.OFF_HAND;
+    }
+
+    private static TechniqueErrors.Rejected refusal(HeldItemRules rules, HeldItems items, TechniqueFailure failure) {
+        // 任一手能解释拒绝即可；空标签作为内容声明的通用提示。
+        for (var refusal : rules.getRefusalsList()) {
+            String tag = refusal.getItemTag();
+            if (tag.isEmpty() || items.getMainHand().getTagsList().contains(tag)
+                    || items.getOffHand().getTagsList().contains(tag)) {
+                return TechniqueErrors.rejected(failure, refusal.getReason(), refusal.getTranslationKey());
+            }
+        }
+        return TechniqueErrors.rejected(failure);
     }
 
     public static Optional<Hand> find(HeldItemRules rules, HeldItems items) {

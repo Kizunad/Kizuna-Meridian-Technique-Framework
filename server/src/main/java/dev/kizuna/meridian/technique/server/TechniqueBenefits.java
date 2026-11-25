@@ -31,13 +31,28 @@ public final class TechniqueBenefits {
             validateLeap(benefit.getLeap());
         } else if (benefit.hasTissue()) {
             validateTissue(benefit);
+        } else if (benefit.hasWeaponHeat()) {
+            var heat = benefit.getWeaponHeat();
+            StatusBenefit quenched = heat.getQuenched();
+            TechniqueValues.id(heat.getSoftItemTag(), "weapon_heat.soft_item_tag");
+            TechniqueValues.id(heat.getFireDamageType(), "weapon_heat.fire_damage_type");
+            double ratio = heat.getHitDamageRatio();
+            double handHp = heat.getHandDamageHp();
+            if (!quenched.hasPlain() || quenched.hasWeaponHeat()
+                    || quenched.getId().equals(benefit.getId())
+                    || !(ratio > 0 && ratio <= 1)
+                    || !(handHp > 0 && handHp <= TechniqueValues.MAX_QUANTITY)
+                    || heat.getExtraDurability() != 1) {
+                throw TechniqueErrors.invalid("weapon_heat", "淬冷状态、烫伤剂量或磨损非法");
+            }
+            validate(quenched);
         } else {
             validatePlain(benefit.getPlain());
         }
     }
 
     private static int abilityCount(StatusBenefit benefit) {
-        // 三种状态能力必须恰有一种，避免宿主对同一效果产生歧义。
+        // 状态能力必须恰有一种，避免宿主对同一效果产生歧义。
         int count = 0;
         if (benefit.hasLeap()) {
             count++;
@@ -46,6 +61,9 @@ public final class TechniqueBenefits {
             count++;
         }
         if (benefit.hasPlain()) {
+            count++;
+        }
+        if (benefit.hasWeaponHeat()) {
             count++;
         }
         return count;

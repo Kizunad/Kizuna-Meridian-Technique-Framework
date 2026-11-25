@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InjuryKind;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ShieldInteraction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundCue;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponHeatProfile;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
 import dev.kizuna.meridian.technique.server.TechniqueStrikeTargets;
@@ -76,12 +77,17 @@ public final class TechniqueWorldEffects {
         ItemStack stack = actor.getItemInHand(hand);
         WeaponStrikeIntent intent = effect.getWeaponStrike();
         WeaponStrike strike = intent.getStrike();
+        var heat = TechniqueWeaponHeat.active(actor, hand, strike.getHeatStatusId());
         CastHits hits = casts.computeIfAbsent(effect.getCastId(), id -> new CastHits());
         hits.lastWeapon = stack.copy();
         hits.lastStrikeMillis = effect.getScheduledMillis();
         actor.swing(hand);
-        HeldItemCategory category = TechniqueWorldItems.category(intent.getHeldItemRules(), stack);
-        StrikeData data = strikeData(hand, stack, category, strike);
+        var rules = intent.getHeldItemRules();
+        if (!TechniqueWorldItems.matches(rules.getRequiredItemTagsList(), stack, actor)) {
+            return;
+        }
+        HeldItemCategory category = TechniqueWorldItems.category(rules, stack, actor);
+        StrikeData data = strikeData(hand, stack, category, strike, heat);
         if (!TechniqueWorldItems.usable(stack)) {
             work.execute(actor, data.source(), () -> { /* 空手或装物容器只记本次挥手做功。 */ });
             return;
@@ -91,13 +97,13 @@ public final class TechniqueWorldEffects {
                 candidates.stream().map(LivingEntity::getStringUUID).toList());
         List<SoundCue> hitSounds = intent.getHitSoundsList();
         work.execute(actor, data.source(), () -> hitTargets(candidates, selected, hits, data, hitSounds));
-        if (strike.getLastStrike()) {
-            consume(stack, hand, intent);
+        if (heat != null || strike.getLastStrike()) {
+            consume(stack, hand, intent, heat);
         }
     }
 
     private StrikeData strikeData(InteractionHand hand, ItemStack stack, HeldItemCategory category,
-                                  WeaponStrike strike) {
+                                  WeaponStrike strike, WeaponHeatProfile heat) {
         // 双手只改变剂量和伤害类型标签，身体系数及做功由 Damage 读取；26.2 的伤害类型按注册表查找项取。
         boolean twoHanded = twoHanded(actor, hand, strike);
         String side = "main_hand";
@@ -111,11 +117,33 @@ public final class TechniqueWorldEffects {
             kind = "blunt";
         }
         Identifier defaultType = Identifier.fromNamespaceAndPath(damageNamespace, kind + "_" + side);
-        Identifier damageType = damageType(strike, hand, defaultType);
+        Identifier damageType = strikeType(hand, stack, strike, heat, defaultType);
         var key = ResourceKey.create(Registries.DAMAGE_TYPE, damageType);
         var type = actor.level().registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(key);
         double multiplier = strike.getMultiplier().getValue() * gripMultiplier(strike, twoHanded);
-        return new StrikeData(stack, category, strike, multiplier, new DamageSource(type, actor));
+        DamageSource source;
+        if (heat == null) {
+            source = new DamageSource(type, actor);
+        } else {
+            source = new TechniqueWeaponHeat.HeatedStrike(type, actor, heat);
+        }
+        return new StrikeData(stack, category, strike, multiplier, source);
+    }
+
+    private Identifier strikeType(InteractionHand hand, ItemStack stack, WeaponStrike strike,
+                                  WeaponHeatProfile heat, Identifier defaultType) {
+        // 热兵、材质和普通打击沿同一选手与伤害标签路径结算。
+        if (heat != null) {
+            if (hand == InteractionHand.OFF_HAND) {
+                return Identifier.parse(strike.getHeatedOffHandDamageTypeId());
+            }
+            return Identifier.parse(strike.getHeatedMainHandDamageTypeId());
+        }
+        String requiredTag = strike.getDamageTypeItemTag();
+        if (!requiredTag.isEmpty() && !TechniqueWeaponHeat.matches(actor, stack, requiredTag)) {
+            return defaultType;
+        }
+        return damageType(strike, hand, defaultType);
     }
 
     static Identifier damageType(WeaponStrike strike, InteractionHand hand, Identifier defaultType) {
@@ -138,7 +166,7 @@ public final class TechniqueWorldEffects {
         if (rules.getCategoriesCount() == 0 || !TechniqueWorldItems.usable(stack)) {
             return Optional.empty();
         }
-        HeldItemCategory category = TechniqueWorldItems.category(rules, stack);
+        HeldItemCategory category = TechniqueWorldItems.category(rules, stack, actor);
         boolean twoHanded = twoHanded(actor, hand, strike);
         double grip = gripMultiplier(strike, twoHanded);
         DamageSource source = actor.damageSources().mobAttack(actor);
@@ -252,15 +280,22 @@ public final class TechniqueWorldEffects {
                 SoundEvents.SHIELD_BREAK, target.getSoundSource(), SHIELD_BREAK_VOLUME, pitch);
     }
 
-    private void consume(ItemStack stack, InteractionHand hand, WeaponStrikeIntent intent) {
+    private void consume(ItemStack stack, InteractionHand hand, WeaponStrikeIntent intent,
+                         WeaponHeatProfile heat) {
         // 生物与创造玩家不磨损；末击挥空仍消耗，耐久附魔和无法破坏由原版处理。
         // 26.2 的磨损入口按手自行广播损坏；不可磨损物品照原版磨坏的顺序，先减少再广播损坏。
         if (!(actor instanceof ServerPlayer player) || player.isCreative()) {
             return;
         }
         if (stack.getMaxDamage() > 0) {
-            double multiplier = TechniqueWorldItems.durabilityMultiplier(intent.getHeldItemRules(), stack);
-            int amount = (int) Math.ceil(intent.getStrike().getDurabilityBase() * multiplier);
+            int amount = 0;
+            if (intent.getStrike().getLastStrike()) {
+                double multiplier = TechniqueWorldItems.durabilityMultiplier(intent.getHeldItemRules(), stack, actor);
+                amount = (int) Math.ceil(intent.getStrike().getDurabilityBase() * multiplier);
+            }
+            if (heat != null) {
+                amount += heat.getExtraDurability();
+            }
             stack.hurtAndBreak(amount, actor, hand);
         } else {
             var item = stack.getItem();

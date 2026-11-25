@@ -1509,12 +1509,16 @@ public final class TechniqueService {
                     continue;
                 }
                 if (effect.hasBlockWork() || effect.hasUseBrew() || effect.hasOrganRefine()
+                        || effect.hasStatusBenefit() && effect.getStatusBenefit().hasWeaponHeat()
                         || effect.hasGrapple() || effect.hasThrow()
                         || effect.hasLaunchProjectile() && effect.getLaunchProjectile().getProjectile().hasBrew()) {
                     HeldItems heldItems = session.host.inspect().heldItems();
                     EffectHandling handling = handleExtensionEffect(entityUuid, effect, heldItems);
                     if (!handling.accepted()) {
                         return Optional.of(handling.reason());
+                    }
+                    if (effect.hasStatusBenefit()) {
+                        session.completedCleanup.add(requestId);
                     }
                     continue;
                 }

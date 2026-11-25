@@ -136,6 +136,12 @@ message HeldItemRules {
   optional bool other_hand_empty_or_ammunition = 6;
   repeated string required_item_tags = 7; // 非空时，选中的物品还须命中任一标签
   HeldItemConsumptionStrategy consumption_strategy = 8; // 整件消耗效果必须显式启用
+  repeated HeldItemRefusal refusals = 9; // 两手均不合要求时，按声明顺序解释原因
+}
+message HeldItemRefusal {
+  string item_tag = 1; // 空值匹配空手与其余物品
+  string reason = 2;
+  string translation_key = 3;
 }
 enum HeldItemConsumptionStrategy {
   HELD_ITEM_CONSUMPTION_UNSPECIFIED = 0;
@@ -298,6 +304,15 @@ message StatusBenefit {
   LeapProfile leap = 4;
   TissueBenefitProfile tissue = 5; // 与 leap 恰有一种；状态撤销时仅清理本状态拥有的修正。
   PlainBenefitProfile plain = 6; // 原版效果属性由宿主生命周期管理。
+  WeaponHeatProfile weapon_heat = 7; // 绑定起手所选的手和剑，淬冷后暂时失去指定物品标签
+}
+message WeaponHeatProfile {
+  string soft_item_tag = 1;
+  StatusBenefit quenched = 2; // 只允许 plain 状态
+  string fire_damage_type = 3;
+  double hand_damage_hp = 4; // 每秒对持物手皮肤造成的身体 HP
+  double hit_damage_ratio = 5;
+  int32 extra_durability = 6; // 每次打击另扣的耐久
 }
 message PlainBenefitProfile {
   optional double movement_speed_multiplier = 1; // [0, 1]，缺省为 1。
@@ -562,6 +577,10 @@ message WeaponStrike {
   string dedup_group = 17; // 必填局部标识，同次施放内同组每目标只命中一次
   string main_hand_damage_type_id = 18; // 与副手 ID 成对；显式直读模式只支持单手
   string off_hand_damage_type_id = 19;
+  string damage_type_item_tag = 20; // 当前物品缺少该标签时使用宿主普通伤害
+  string heat_status_id = 21; // 选定手上有此热兵状态时使用下列伤害身份
+  string heated_main_hand_damage_type_id = 22;
+  string heated_off_hand_damage_type_id = 23;
 }
 message BreakBlocks {
   Quantity forward_distance = 1; // METER，(0, 1024]

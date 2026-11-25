@@ -8,6 +8,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeel;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInfusionStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponHeat;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
@@ -180,7 +181,13 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueCastStatusSync.listen(server, created);
         TechniqueInputBuffer.start();
         created.addSoundListener(TechniqueSounds.listener(server));
-        created.setEffectHandler(event -> EFFECT_HANDLER.invoker().onEffect(event));
+        created.setEffectHandler(event -> {
+            var intent = event.intent();
+            if (intent.hasStatusBenefit() && intent.getStatusBenefit().hasWeaponHeat()) {
+                return TechniqueWeaponHeat.apply(server, event);
+            }
+            return EFFECT_HANDLER.invoker().onEffect(event);
+        });
         warnUnregisteredSounds(registry);
         service = created;
         SERVICE_STARTED.invoker().onServiceStarted(created);

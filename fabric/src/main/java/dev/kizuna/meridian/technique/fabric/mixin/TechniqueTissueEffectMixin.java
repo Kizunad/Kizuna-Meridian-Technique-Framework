@@ -4,6 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueAccess;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponHeat;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TissueBenefitLeases;
 import java.util.Base64;
 import java.util.Collection;
@@ -21,9 +22,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LivingEntity.class)
-public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAccess {
+public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAccess, TechniqueWeaponHeat.Access {
     @Unique private static final String MERIDIAN_TISSUE_LEASES = "meridian_technique:tissue_benefits";
     @Unique private TechniqueTissueEffects meridian$tissues;
+    @Unique private final TechniqueWeaponHeat.Lease meridian$heat = new TechniqueWeaponHeat.Lease();
+
+    @Override
+    public TechniqueWeaponHeat.Lease meridian$weaponHeat() {
+        // 武器只与当前实体的持物绑定。
+        return meridian$heat;
+    }
 
     @Override
     public TechniqueTissueEffects meridian$tissueEffects() {
@@ -82,6 +90,10 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void meridian$reconcile(CallbackInfo callback) {
+        LivingEntity actor = (LivingEntity) (Object) this;
+        if (!actor.level().isClientSide()) {
+            meridian$heat.tick(actor);
+        }
         // 仅加载或长时效果跨窗口触发事务，常规 tick 不重发曲线。
         if (meridian$tissues != null) {
             meridian$tissues.tick();
@@ -110,6 +122,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))
     private void meridian$save(ValueOutput output, CallbackInfo callback) {
+        meridian$heat.save(output);
         // 原版效果保存剩余刻数，额外字段只保存有界 Protobuf 相位与归属元数据。
         if (meridian$tissues != null) {
             TissueBenefitLeases saved = TissueBenefitLeases.newBuilder()
@@ -121,6 +134,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
     private void meridian$load(ValueInput input, CallbackInfo callback) {
+        meridian$heat.load(input);
         // 不在读档期间提交身体活动，身体认领完成后按原版剩余时间恢复。
         String encoded = input.getStringOr(MERIDIAN_TISSUE_LEASES, "");
         try {

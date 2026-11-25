@@ -113,7 +113,12 @@ public final class TechniqueRegistry {
         var identities = new HashSet<String>();
         for (TechniqueDefinition definition : definitions.values()) {
             for (TechniqueEffect effect : definition.getEffectsList()) {
-                if (effect.hasStatusBenefit() && !identities.add(effect.getStatusBenefit().getId())) {
+                if (!effect.hasStatusBenefit()) {
+                    continue;
+                }
+                var benefit = effect.getStatusBenefit();
+                if (!identities.add(benefit.getId()) || benefit.hasWeaponHeat()
+                        && !identities.add(benefit.getWeaponHeat().getQuenched().getId())) {
                     throw TechniqueErrors.invalid(definition.getId(), "状态增益身份重复");
                 }
             }

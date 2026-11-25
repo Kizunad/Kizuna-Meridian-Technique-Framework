@@ -35,8 +35,11 @@ public final class TechniqueWorldItems {
 
     public static HeldItems inspect(LivingEntity entity) {
         // 空手也提供消息，主手侧决定 Damage 的实际出力手臂。
-        HeldItem main = item(entity.getMainHandItem());
-        HeldItem off = item(entity.getOffhandItem());
+        if (!entity.level().isClientSide()) {
+            ((TechniqueWeaponHeat.Access) entity).meridian$weaponHeat().check(entity);
+        }
+        HeldItem main = effectiveItem(entity, entity.getMainHandItem());
+        HeldItem off = effectiveItem(entity, entity.getOffhandItem());
         HandSide side = HandSide.RIGHT;
         if (entity.getMainArm() == HumanoidArm.LEFT) {
             side = HandSide.LEFT;
@@ -62,6 +65,20 @@ public final class TechniqueWorldItems {
         return result.build();
     }
 
+    static HeldItem effectiveItem(LivingEntity entity, ItemStack stack) {
+        // 淬冷时只屏蔽对应标签，仍然保留其他标签、容器和远程物品事实。
+        HeldItem actual = item(stack);
+        var tags = actual.getTagsList();
+        var effective = tags.stream().filter(tag -> !TechniqueWeaponHeat.suppressed(entity, tag)).toList();
+        if (effective.size() == tags.size()) {
+            return actual;
+        }
+        return actual.toBuilder()
+                .clearTags()
+                .addAllTags(effective)
+                .build();
+    }
+
     public static boolean usable(ItemStack stack) {
         // 装物容器不能在中途切换后被当成一次性武器消耗。
         return !stack.isEmpty() && !containsItems(stack);
@@ -76,22 +93,33 @@ public final class TechniqueWorldItems {
 
     public static HeldItemCategory category(HeldItemRules rules, ItemStack stack) {
         // 有序规则的末项覆盖未分类物品。
+        return category(rules, stack, null);
+    }
+
+    static HeldItemCategory category(HeldItemRules rules, ItemStack stack, LivingEntity actor) {
+        // 有施放者时按其当前的有效标签判断软硬。
         return rules.getCategoriesList().stream()
-                .filter(category -> matches(category.getItemTagsList(), stack))
+                .filter(category -> matches(category.getItemTagsList(), stack, actor))
                 .findFirst().orElseThrow();
     }
 
     public static double durabilityMultiplier(HeldItemRules rules, ItemStack stack) {
         // 数据包声明首次命中的耐久倍率，不按物品硬编码。
+        return durabilityMultiplier(rules, stack, null);
+    }
+
+    static double durabilityMultiplier(HeldItemRules rules, ItemStack stack, LivingEntity actor) {
+        // 磨损使用与伤害类别相同的有效标签。
         return rules.getDurabilityList().stream()
-                .filter(rule -> matches(rule.getItemTagsList(), stack))
+                .filter(rule -> matches(rule.getItemTagsList(), stack, actor))
                 .findFirst().orElseThrow().getMultiplier().getValue();
     }
 
-    private static boolean matches(List<String> tags, ItemStack stack) {
+    static boolean matches(List<String> tags, ItemStack stack, LivingEntity actor) {
         // 同一项中的多个标签使用任一命中语义。
         return tags.isEmpty() || tags.stream().anyMatch(id ->
-                stack.is(TagKey.create(Registries.ITEM, Identifier.parse(id))));
+                stack.is(TagKey.create(Registries.ITEM, Identifier.parse(id)))
+                        && (actor == null || !TechniqueWeaponHeat.suppressed(actor, id)));
     }
 
     @FunctionalInterface

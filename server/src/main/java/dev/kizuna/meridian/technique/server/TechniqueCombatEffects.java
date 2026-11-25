@@ -59,6 +59,18 @@ final class TechniqueCombatEffects {
         // 完整伤害身份必须成对，单手目录不借用双手伤害标签。
         String main = strike.getMainHandDamageTypeId();
         String off = strike.getOffHandDamageTypeId();
+        String itemTag = strike.getDamageTypeItemTag();
+        if (!itemTag.isEmpty()) {
+            id(itemTag, "weapon_strike.damage_type_item_tag");
+        }
+        String heat = strike.getHeatStatusId();
+        String heatedMain = strike.getHeatedMainHandDamageTypeId();
+        String heatedOff = strike.getHeatedOffHandDamageTypeId();
+        if (!heat.isEmpty() || !heatedMain.isEmpty() || !heatedOff.isEmpty()) {
+            id(heat, "weapon_strike.heat_status_id");
+            id(heatedMain, "weapon_strike.heated_main_hand_damage_type_id");
+            id(heatedOff, "weapon_strike.heated_off_hand_damage_type_id");
+        }
         if (main.isEmpty() && off.isEmpty()) {
             return;
         }

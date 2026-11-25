@@ -47,14 +47,27 @@ public final class TechniqueStatusBenefits {
     private static void register(TechniqueDefinition technique, StatusBenefit benefit) {
         // 先验证身份和范围，再注册为可被原版命令补全的有益状态；26.2 的效果实例按注册项引用效果。
         TechniqueBenefits.validate(benefit);
-        if (benefits.containsKey(benefit.getId())) {
-            throw new IllegalArgumentException("状态增益身份重复：" + benefit.getId());
+        Registered status = registerEffect(technique, benefit, MobEffectCategory.BENEFICIAL);
+        if (benefit.hasWeaponHeat()) {
+            var cooled = benefit.getWeaponHeat().getQuenched();
+            TechniqueWeaponHeat.register(status, registerEffect(technique, cooled, MobEffectCategory.HARMFUL));
         }
-        Identifier effectId = Identifier.parse(benefit.getId());
+    }
+
+    private static Registered registerEffect(TechniqueDefinition technique, StatusBenefit benefit,
+                                             MobEffectCategory category) {
+        // 淬冷和施放所得的增益各有自己的原版登记、颜色和计时。
+        String id = benefit.getId();
+        if (benefits.containsKey(id)) {
+            throw new IllegalArgumentException("状态增益身份重复：" + id);
+        }
+        Identifier effectId = Identifier.parse(id);
         Holder<MobEffect> effect = Registry.registerForHolder(BuiltInRegistries.MOB_EFFECT, effectId,
-                new QuietBenefit(benefit.getColorRgb()));
+                new QuietBenefit(category, benefit.getColorRgb()));
         Identifier movementModifier = effectId.withPath(path -> path + "/movement_speed");
-        benefits.put(benefit.getId(), new Registered(benefit, technique, effect, movementModifier));
+        Registered result = new Registered(benefit, technique, effect, movementModifier);
+        benefits.put(id, result);
+        return result;
     }
 
     public static Registered get(String id) {
@@ -80,7 +93,8 @@ public final class TechniqueStatusBenefits {
     public static Optional<Registered> activePlain(LivingEntity actor) {
         // 普通效果按其注册 profile 查询，供伤害策略读取当前铜皮状态。
         return benefits.values().stream()
-                .filter(value -> value.benefit().hasPlain() && actor.hasEffect(value.effect())).findFirst();
+                .filter(value -> value.benefit().hasPlain() && value.effect().value().isBeneficial()
+                        && actor.hasEffect(value.effect())).findFirst();
     }
 
     public static Optional<Registered> tissue(MobEffectInstance instance) {
@@ -173,9 +187,9 @@ public final class TechniqueStatusBenefits {
     }
 
     private static final class QuietBenefit extends TechniqueQuietEffect {
-        private QuietBenefit(int color) {
+        private QuietBenefit(MobEffectCategory category, int color) {
             // 图标和颜色来自内容，行为由共享跃步宿主执行。
-            super(MobEffectCategory.BENEFICIAL, color);
+            super(category, color);
         }
     }
 }

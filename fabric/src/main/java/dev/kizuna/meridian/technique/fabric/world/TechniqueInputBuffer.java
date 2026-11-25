@@ -107,8 +107,18 @@ public final class TechniqueInputBuffer {
             return;
         }
         // 等到头也没放出来，或者换成了别的拒绝原因：这时才把原因报给玩家。
-        player.sendSystemMessage(Component.literal(outcome.getReason()), ACTION_BAR);
+        player.sendSystemMessage(failureMessage(outcome), ACTION_BAR);
         TechniqueCastStatusSync.send(player, pending.request().getTechnique().getId(), outcome.getFailure());
+    }
+
+    public static Component failureMessage(CastOutcome outcome) {
+        // 有翻译键时由客户端解析；旧回执仍显示原因。
+        String key = outcome.getTranslationKey();
+        String reason = outcome.getReason();
+        if (key.isEmpty()) {
+            return Component.literal(reason);
+        }
+        return Component.translatableWithFallback(key, reason);
     }
 
     /** 玩家断线、死亡、退出架势时清掉。 */

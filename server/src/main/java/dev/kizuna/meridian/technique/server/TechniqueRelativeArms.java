@@ -16,15 +16,17 @@ final class TechniqueRelativeArms {
 
     static void validate(AddonRegistry addons, List<BodyMessages.TemplateReference> templates,
                          TechniqueDefinition definition) {
-        // 相对手臂只用于声明武器类别的组织槽，左右集合须已由模板证明存在。
+        // 持物打击与远程式都按起手选定的手位绑定，左右组织须在模板中存在。
+        boolean weaponAction = definition.hasProjectileWeapon()
+                || definition.getEffectsList().stream().anyMatch(TechniqueEffect::hasWeaponStrike);
         for (TechniqueSlot slot : definition.getSlotsList()) {
             if (!slot.hasRelativeArm()) {
                 continue;
             }
             RelativeArmSlot arm = slot.getRelativeArm();
-            if (!definition.hasProjectileWeapon() || slot.getModule() != ModuleKind.TISSUE
+            if (!weaponAction || slot.getModule() != ModuleKind.TISSUE
                     || (arm.getArm() != DrawStrengthArm.OTHER_ARM && arm.getArm() != DrawStrengthArm.WEAPON_ARM)) {
-                throw TechniqueErrors.invalid(slot.getId(), "相对手臂只允许远程式的组织槽");
+                throw TechniqueErrors.invalid(slot.getId(), "相对手臂只允许持物打击或远程式的组织槽");
             }
             Set<String> known = matchingIds(addons, templates, slot);
             validateSide(arm.getLeftModuleIdsList(), known, slot);

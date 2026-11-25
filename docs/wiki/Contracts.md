@@ -570,7 +570,7 @@ oneof 编号固定为 `inspect=10`、`activity=11(BodyActivity)`、`effect=12(Ef
 后续效果的 `lock_target=7` 供宿主复用锁定目标。即使没有限速，也在成功起手时立即提交锁定。
 
 `TechniqueSlot.relative_arm=9` 使用 `RelativeArmSlot(arm, left_module_ids, right_module_ids)`，
-适用于远程式组织槽；左右集合不得重叠、重复或超过 16 项，分别满足槽位最少数量，
+适用于远程式和带 `weapon_strike` 的持物近战式组织槽。左右集合不得重叠、重复或超过 16 项，分别满足槽位最少数量，
 每个 ID 须在引用模板中匹配槽位标签和类型。内容明确列出身体的组织身份，库不解析 ID 前缀。
 `TechniqueHeldItems.find/select(rules, items, definition)` 是公开的同规则预判与选手入口。
 先选手，再调用 `TechniqueBinder.bind(body, definition, selectedHand, mainHandSide)`，

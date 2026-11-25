@@ -4,12 +4,14 @@ import dev.kizuna.meridian.core.Anatomy;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BoundSlot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUp;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.FollowUpRules;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ModuleKind;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBinding;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /** 学会以后随时能查的一式明细：卷轴正文那几行，加上境界、承接关系和这具身体要用的部位。 */
@@ -25,13 +27,9 @@ public final class TechniqueReferenceText {
         if (!realm.isEmpty()) {
             lines.add("境界：" + realm + "以上");
         }
-        List<String> previous = definition.getFollowUp().getTransitionsList().stream()
-                .map(FollowUp::getPrevious)
-                .map(reference -> name(registry, reference.getId())).distinct().toList();
-        if (definition.getFollowUp().getOnlyFollowUp()) {
-            lines.add("承接：只能接在" + TechniqueNames.list(previous) + "的收势后，不能单独起手");
-        } else if (!previous.isEmpty()) {
-            lines.add("承接：可以接在" + TechniqueNames.list(previous) + "的收势后");
+        FollowUpRules rules = definition.getFollowUp();
+        if (rules.getTransitionsCount() > 0) {
+            lines.add(followUpLine(registry, rules));
         }
         List<String> next = registry.definitions().stream()
                 .filter(candidate -> candidate.getFollowUp().getTransitionsList().stream()
@@ -41,6 +39,42 @@ public final class TechniqueReferenceText {
             lines.add("后招：收势时可接" + TechniqueNames.list(next));
         }
         return List.copyOf(lines);
+    }
+
+    private static String followUpLine(TechniqueRegistry registry, FollowUpRules rules) {
+        // 分开写收势和被挡两种时机，普通攻击没有可查的式名。
+        var recovery = new LinkedHashSet<String>();
+        var blocked = new LinkedHashSet<String>();
+        boolean ordinaryAttack = false;
+        for (FollowUp transition : rules.getTransitionsList()) {
+            var previous = transition.getPrevious();
+            if (TechniqueFollowUps.isOrdinaryAttack(previous)) {
+                ordinaryAttack = true;
+            } else if (transition.getBlockedAttackSourcesCount() > 0) {
+                blocked.add(name(registry, previous.getId()));
+            } else {
+                recovery.add(name(registry, previous.getId()));
+            }
+        }
+        var conditions = new ArrayList<String>();
+        if (!recovery.isEmpty()) {
+            conditions.add(TechniqueNames.list(List.copyOf(recovery)) + "的收势后");
+        }
+        var attacks = new ArrayList<String>();
+        if (!blocked.isEmpty()) {
+            attacks.add(TechniqueNames.list(List.copyOf(blocked)));
+        }
+        if (ordinaryAttack) {
+            attacks.add("普通攻击");
+        }
+        if (!attacks.isEmpty()) {
+            conditions.add(String.join("或", attacks) + "被挡下后");
+        }
+        String timing = String.join("，或", conditions);
+        if (rules.getOnlyFollowUp()) {
+            return "承接：只能接在" + timing + "，不能单独起手";
+        }
+        return "承接：可以接在" + timing;
     }
 
     /** 这具身体放这一式时用到的部位，按经脉、筋肉、器官各一行；名字来自身体结构。 */

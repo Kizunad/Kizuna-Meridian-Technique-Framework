@@ -46,7 +46,7 @@ final class TechniqueFollowUps {
         var previous = new HashSet<TechniqueReference>();
         for (FollowUp transition : rules.getTransitionsList()) {
             TechniqueReference reference = transition.getPrevious();
-            boolean ordinaryBlockedTransition = reference.getId().isEmpty() && reference.getVersion() == 0;
+            boolean ordinaryBlockedTransition = isOrdinaryAttack(reference);
             if (!ordinaryBlockedTransition) {
                 TechniqueProtocol.validateReference(reference);
             }
@@ -79,6 +79,11 @@ final class TechniqueFollowUps {
                 validateWeaponGroup(transition, previousDefinition, definition);
             }
         }
+    }
+
+    static boolean isOrdinaryAttack(TechniqueReference previous) {
+        // 目录用空标识和零版本表示被挡的普通攻击。
+        return previous.getId().isEmpty() && previous.getVersion() == 0;
     }
 
     private static void validateBlockedAttackSources(FollowUp transition) {
@@ -173,14 +178,13 @@ final class TechniqueFollowUps {
             }
         }
         for (FollowUp transition : definition.getFollowUp().getTransitionsList()) {
-            boolean ordinaryBlockedTransition = transition.getPrevious().getId().isEmpty()
-                    && transition.getPrevious().getVersion() == 0;
-            if (!ordinaryBlockedTransition) {
+            TechniqueReference reference = transition.getPrevious();
+            if (!isOrdinaryAttack(reference)) {
                 if (previous.isEmpty()) {
                     continue;
                 }
                 LastCast previousCast = previous.orElseThrow();
-                if (!transition.getPrevious().equals(previousCast.getTechnique())
+                if (!reference.equals(previousCast.getTechnique())
                         || !inWindow(previousCast, transition, now)) {
                     continue;
                 }

@@ -1,8 +1,10 @@
 package dev.kizuna.meridian.technique.server;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BlockedAttackSource;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Presentation;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueCatalog;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import org.junit.Test;
 
 import java.util.List;
@@ -38,6 +40,32 @@ public final class TechniqueReferenceTextTest {
         TechniqueDefinition optional = next.toBuilder()
                 .setFollowUp(next.getFollowUp().toBuilder().setOnlyFollowUp(false /* onlyFollowUp */)).build();
         assertTrue(TechniqueReferenceText.lines(registry, optional).contains("承接：可以接在前式的收势后"));
+    }
+
+    @Test
+    public void linesDescribeBlockedTechniqueAndOrdinaryAttack() {
+        // 同一后式能接指定前式和普通攻击，两者都要被挡下。
+        TechniqueCatalog base = CombatTechniqueFixtures.combatCatalog();
+        TechniqueDefinition first = named(base.getDefinitions(0), "前式");
+        TechniqueDefinition next = base.getDefinitions(1);
+        var rules = next.getFollowUp();
+        var blocked = rules.getTransitions(0).toBuilder()
+                .addBlockedAttackSources(BlockedAttackSource.SHIELD)
+                .build();
+        var ordinary = blocked.toBuilder().setPrevious(TechniqueReference.getDefaultInstance()).build();
+        var mixed = rules.toBuilder()
+                .setTransitions(0, blocked)
+                .addTransitions(ordinary)
+                .build();
+        var followUp = next.toBuilder().setFollowUp(mixed).build();
+        var catalog = base.toBuilder()
+                .setDefinitions(0, first)
+                .setDefinitions(1, followUp)
+                .build();
+        TechniqueRegistry registry = TechniqueRegistry.load(addons(), List.of(catalog));
+
+        List<String> lines = TechniqueReferenceText.lines(registry, followUp);
+        assertTrue(lines.toString(), lines.contains("承接：只能接在前式或普通攻击被挡下后，不能单独起手"));
     }
 
     @Test

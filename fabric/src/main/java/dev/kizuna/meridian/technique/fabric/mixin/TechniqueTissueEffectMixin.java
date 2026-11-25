@@ -5,10 +5,12 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueAccess;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponHeat;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponBinds;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TissueBenefitLeases;
 import java.util.Base64;
 import java.util.Collection;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -85,6 +87,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
     private void meridian$removed(Collection<MobEffectInstance> effects, CallbackInfo callback) {
         // 到期、牛奶和命令清除都在本次身体后续事件前撤销自有修正。
         meridian$tissueEffects().removed(effects);
+        TechniqueWeaponBinds.effectsRemoved((LivingEntity) (Object) this, effects);
         TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
     }
 
@@ -92,6 +95,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
     private void meridian$reconcile(CallbackInfo callback) {
         LivingEntity actor = (LivingEntity) (Object) this;
         if (!actor.level().isClientSide()) {
+            TechniqueWeaponBinds.tick(actor);
             meridian$heat.tick(actor);
         }
         // 仅加载或长时效果跨窗口触发事务，常规 tick 不重发曲线。
@@ -101,8 +105,25 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
         TechniqueStatusBenefits.reconcilePlainMovementSpeed((LivingEntity) (Object) this);
     }
 
+    @Inject(method = "swing(Lnet/minecraft/world/InteractionHand;Z)V", at = @At("HEAD"), cancellable = true)
+    private void meridian$boundSwing(InteractionHand hand, boolean broadcast, CallbackInfo callback) {
+        // 受缚的原版挥手不能广播，另一手的动画照常播放。
+        if (TechniqueWeaponBinds.locked((LivingEntity) (Object) this, hand)) {
+            callback.cancel();
+        }
+    }
+
+    @Inject(method = "startUsingItem", at = @At("HEAD"), cancellable = true)
+    private void meridian$boundWeaponUse(InteractionHand hand, CallbackInfo callback) {
+        // 生物直接拉弓、上弦时也须保留参与牵制的手。
+        if (TechniqueWeaponBinds.blocksWeaponUse((LivingEntity) (Object) this, hand)) {
+            callback.cancel();
+        }
+    }
+
     @Inject(method = "remove", at = @At("HEAD"))
     private void meridian$unload(Entity.RemovalReason reason, CallbackInfo callback) {
+        TechniqueWeaponBinds.clear((LivingEntity) (Object) this);
         // 在实体从宿主目录撤销认领前冻结状态曲线，维度移动保留原版剩余时间。
         if (meridian$tissues != null) {
             meridian$tissues.suspend();
@@ -112,6 +133,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
 
     @Inject(method = "die", at = @At("HEAD"))
     private void meridian$death(DamageSource source, CallbackInfo callback) {
+        TechniqueWeaponBinds.clear((LivingEntity) (Object) this);
         // 先清理旧身体状态，复活实体不会继承旧组织归属。
         if (meridian$tissues != null) {
             LivingEntity actor = (LivingEntity) (Object) this;
@@ -134,6 +156,7 @@ public abstract class TechniqueTissueEffectMixin implements TechniqueTissueAcces
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
     private void meridian$load(ValueInput input, CallbackInfo callback) {
+        TechniqueWeaponBinds.afterLoad((LivingEntity) (Object) this);
         meridian$heat.load(input);
         // 不在读档期间提交身体活动，身体认领完成后按原版剩余时间恢复。
         String encoded = input.getStringOr(MERIDIAN_TISSUE_LEASES, "");

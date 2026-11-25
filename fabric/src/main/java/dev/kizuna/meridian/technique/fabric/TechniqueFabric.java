@@ -9,6 +9,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueInfusionStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponHeat;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponBinds;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
@@ -28,6 +29,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -42,6 +44,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -125,6 +128,8 @@ public final class TechniqueFabric implements ModInitializer {
         TechniqueCodex.register();
         TechniqueScrollItems.register(new TechniqueScrollCatalog(catalogs.earlySources()));
         TechniqueStatusBenefits.register(catalogs.earlySources());
+        UseItemCallback.EVENT.register((player, level, hand) ->
+                TechniqueWeaponBinds.blocksWeaponUse(player, hand) ? InteractionResult.FAIL : InteractionResult.PASS);
         TechniqueInfusionStatuses.register(catalogs.earlySources());
         for (var source : catalogs.earlySources()) {
             for (var definition : source.catalog().getDefinitionsList()) {

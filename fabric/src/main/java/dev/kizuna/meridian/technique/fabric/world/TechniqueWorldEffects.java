@@ -13,6 +13,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponHeatPro
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrikeIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages;
 import dev.kizuna.meridian.technique.server.TechniqueStrikeTargets;
+import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,6 +24,8 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -77,11 +80,24 @@ public final class TechniqueWorldEffects {
         ItemStack stack = actor.getItemInHand(hand);
         WeaponStrikeIntent intent = effect.getWeaponStrike();
         WeaponStrike strike = intent.getStrike();
+        if (intent.hasBeginBind()) {
+            beginBind(effect, stack, hand);
+            return;
+        }
+        var pull = TechniqueWeaponBinds.pullFor(actor, strike, effect.getCastId());
+        if (strike.getCutBoundArm() && pull.isEmpty()) {
+            return;
+        }
+        if (!strike.getCutBoundArm() && !strike.getReleaseBoundArm() && TechniqueWeaponBinds.locked(actor, hand)) {
+            return;
+        }
         var heat = TechniqueWeaponHeat.active(actor, hand, strike.getHeatStatusId());
         CastHits hits = casts.computeIfAbsent(effect.getCastId(), id -> new CastHits());
         hits.lastWeapon = stack.copy();
         hits.lastStrikeMillis = effect.getScheduledMillis();
-        actor.swing(hand);
+        if (!strike.getCutBoundArm()) {
+            actor.swing(hand);
+        }
         var rules = intent.getHeldItemRules();
         if (!TechniqueWorldItems.matches(rules.getRequiredItemTagsList(), stack, actor)) {
             return;
@@ -92,13 +108,44 @@ public final class TechniqueWorldEffects {
             work.execute(actor, data.source(), () -> { /* 空手或装物容器只记本次挥手做功。 */ });
             return;
         }
-        List<LivingEntity> candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
-        List<String> selected = TechniqueStrikeTargets.select(strike, hits.groups,
-                candidates.stream().map(LivingEntity::getStringUUID).toList());
-        List<SoundCue> hitSounds = intent.getHitSoundsList();
-        work.execute(actor, data.source(), () -> hitTargets(candidates, selected, hits, data, hitSounds));
+        strikeTargets(effect, hits, data, pull);
         if (heat != null || strike.getLastStrike()) {
             consume(stack, hand, intent, heat);
+        }
+    }
+
+    private void strikeTargets(EffectIntent effect, CastHits hits, StrikeData data,
+                               Optional<TechniqueWeaponBinds.Pull> pull) {
+        // 抽回仅结算已锁定的人与部位；中途脱离仍按挥空结算末击磨损。
+        WeaponStrike strike = data.strike();
+        List<LivingEntity> candidates;
+        if (strike.getReleaseBoundArm() || strike.getCutBoundArm()) {
+            candidates = pull.stream().map(TechniqueWeaponBinds.Pull::target).toList();
+        } else {
+            candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
+        }
+        List<String> selected = TechniqueStrikeTargets.select(strike, hits.groups,
+                candidates.stream().map(LivingEntity::getStringUUID).toList());
+        List<SoundCue> hitSounds = effect.getWeaponStrike().getHitSoundsList();
+        Runnable strikeWork = () -> work.execute(actor, data.source(),
+                () -> hitTargets(candidates, selected, hits, data, hitSounds));
+        if (pull.isPresent()) {
+            TechniqueWeaponBinds.hit(pull.orElseThrow(), data.source(), strikeWork);
+            if (strike.getReleaseBoundArm()) {
+                TechniqueFabric.service().recordBindRelease(actor.getUUID(), effect.getCastId());
+            }
+        } else {
+            strikeWork.run();
+        }
+    }
+
+    private void beginBind(EffectIntent effect, ItemStack stack, InteractionHand hand) {
+        // 建缠独立索敌，不占用随后六次割击各自的命中预算。
+        var intent = effect.getWeaponStrike();
+        if (TechniqueWorldItems.usable(stack)
+                && TechniqueWorldItems.matches(intent.getHeldItemRules().getRequiredItemTagsList(), stack, actor)) {
+            var candidates = TechniqueWorldTargets.candidates(actor, intent.getStrike(), hostile);
+            TechniqueWeaponBinds.begin(actor, hand, effect, candidates);
         }
     }
 
@@ -226,6 +273,7 @@ public final class TechniqueWorldEffects {
             }
             if (damaged) {
                 TechniqueSounds.playAll(actor, target, hitSounds);
+                hitParticle(target, data.strike().getHitParticleId());
             }
         }
     }
@@ -265,6 +313,17 @@ public final class TechniqueWorldEffects {
         double enchanted = EnchantmentHelper.modifyDamage((ServerLevel) target.level(), stack, target, source,
                 (float) total);
         return enchanted * category.getBaseDamage().getValue();
+    }
+
+    private static void hitParticle(LivingEntity target, String id) {
+        // 只在造成伤害的那个目标身上播放目录声明的简单粒子。
+        if (id.isEmpty()) {
+            return;
+        }
+        if (BuiltInRegistries.PARTICLE_TYPE.getValue(Identifier.parse(id)) instanceof SimpleParticleType particle) {
+            Vec3 center = target.getBoundingBox().getCenter();
+            ((ServerLevel) target.level()).sendParticles(particle, center.x, center.y, center.z, 1, 0, 0, 0, 0);
+        }
     }
 
     private static void disableShield(LivingEntity target, long millis) {
@@ -328,6 +387,7 @@ public final class TechniqueWorldEffects {
 
     public void finish(String castId) {
         // 解锁时释放整次施放的命中预算，并重置玩家的原版攻击冷却。
+        TechniqueWeaponBinds.finish(actor, castId);
         casts.remove(castId);
         if (actor instanceof ServerPlayer player) {
             player.resetAttackStrengthTicker();

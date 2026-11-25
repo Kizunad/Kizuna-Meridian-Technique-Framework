@@ -144,6 +144,9 @@ public final class TechniqueCasting {
 
     private Hand selectHand(TechniqueDefinition definition, HeldItems items, HeldItemRules rules) {
         // 无书级持物声明的功法沿用空手语义，持物规则只从当前目录获取。
+        if (TechniqueHeldItems.needsBoundHand(definition, items)) {
+            throw TechniqueErrors.rejected(HELD_ITEM_UNUSABLE);
+        }
         if (definition.hasBrewItem()) {
             TechniqueBrewEffects.requireHeld(definition.getBrewItem(), items);
             return Hand.MAIN_HAND;

@@ -11,6 +11,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegSelection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.LegStrike;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.StrikeFacing;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponStrike;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponBind;
 
 import java.util.HashSet;
 import java.util.List;
@@ -49,6 +50,9 @@ final class TechniqueCombatEffects {
         validateShape(strike, angle);
         validateShield(strike);
         validateDamageTypes(strike);
+        if (!strike.getHitParticleId().isEmpty()) {
+            id(strike.getHitParticleId(), "weapon_strike.hit_particle_id");
+        }
         if (strike.hasInjuryOverride() && strike.getInjuryOverride() != InjuryKind.CUTTING
                 && strike.getInjuryOverride() != InjuryKind.BLUNT) {
             throw TechniqueErrors.invalid("injury_override", "未知致伤覆盖");
@@ -213,6 +217,7 @@ final class TechniqueCombatEffects {
         // 全部去重组共用不同目标的合计预算和耐久基数，只有最后一次打击负责扣耐久。
         List<WeaponStrike> strikes = definition.getEffectsList().stream()
                 .filter(TechniqueEffect::hasWeaponStrike).map(TechniqueEffect::getWeaponStrike).toList();
+        validateBindSequence(definition, strikes);
         if (strikes.isEmpty()) {
             return;
         }
@@ -226,6 +231,50 @@ final class TechniqueCombatEffects {
                         definition.getId(),
                         "整次目标上限、耐久基数或最后一击声明不一致");
             }
+        }
+    }
+
+    static void validateBind(WeaponBind bind) {
+        // 双方各占一个独立的原版效果，存续期相同，反拉只比较同侧手臂。
+        var caster = bind.getCaster();
+        var target = bind.getTarget();
+        TechniqueBenefits.validate(caster);
+        TechniqueBenefits.validate(target);
+        id(bind.getImmuneStatusId(), "weapon_bind.immune_status_id");
+        millis(bind.getStaggerMillis(), "weapon_bind.stagger_millis");
+        double ratio = bind.getCounterForceRatio();
+        if (!caster.hasPlain() || !target.hasPlain() || caster.getId().equals(target.getId())
+                || caster.getDurationMillis() != target.getDurationMillis()
+                || !(ratio > 1 && ratio <= MAX_PEAK) || bind.getStaggerMillis() == 0) {
+            throw TechniqueErrors.invalid("weapon_bind", "双方状态、反拉系数或踉跄时长非法");
+        }
+    }
+
+    private static void validateBindSequence(TechniqueDefinition definition, List<WeaponStrike> strikes) {
+        // 建缠与抽回各一次，恰好覆盖有效段；只有单体末击可以借用这个目标。
+        var binds = definition.getEffectsList().stream().filter(TechniqueEffect::hasWeaponBind).toList();
+        var pulls = definition.getEffectsList().stream().filter(e -> e.getWeaponStrike().getReleaseBoundArm()).toList();
+        var cuts = definition.getEffectsList().stream().filter(TechniqueEffect::hasBoundArmCut).toList();
+        if (binds.isEmpty() && pulls.isEmpty() && cuts.isEmpty()) {
+            return;
+        }
+        var phases = definition.getPhases();
+        long start = phases.getWarmupMillis();
+        long duration = phases.getActiveMillis();
+        if (binds.size() != 1 || pulls.size() != 1 || strikes.size() != 1) {
+            throw TechniqueErrors.invalid("weapon_bind", "牵制需要一次建缠和一次抽回");
+        }
+        var bind = binds.getFirst();
+        int bindIndex = definition.getEffectsList().indexOf(bind);
+        for (var cut : cuts) {
+            if (definition.getEffectsList().indexOf(cut) <= bindIndex || cut.getAtMillis() >= start + duration) {
+                throw TechniqueErrors.invalid("bound_arm_cut", "割击须排在建缠之后、抽回之前");
+            }
+        }
+        if (bind.getAtMillis() != start || pulls.getFirst().getAtMillis() != start + duration
+                || bind.getWeaponBind().getCaster().getDurationMillis() != duration
+                || strikes.getFirst().getShape() != StrikeShape.SINGLE_TARGET) {
+            throw TechniqueErrors.invalid("weapon_bind", "牵制必须从起手结束持续到单体末击");
         }
     }
 }

@@ -312,7 +312,14 @@ public final class TechniqueProtocol {
     private static void validateWeaponStrikeIntent(EffectIntent intent) {
         // 持物参数、书规则和目标声音使用同一个效果边界，禁止绕过目录约束。
         validateHeldEffect(intent);
-        TechniqueCombatEffects.validateStrike(intent.getWeaponStrike().getStrike());
+        var weapon = intent.getWeaponStrike();
+        TechniqueCombatEffects.validateStrike(weapon.getStrike());
+        if (weapon.hasBeginBind()) {
+            TechniqueCombatEffects.validateBind(weapon.getBeginBind());
+            if (!weapon.getStrike().getReleaseBoundArm()) {
+                throw TechniqueErrors.invalid("begin_bind", "建缠需要配对的抽回末击");
+            }
+        }
         TechniqueHeldItems.validateRules(intent.getWeaponStrike().getHeldItemRules());
         for (SoundCue cue : intent.getWeaponStrike().getHitSoundsList()) {
             TechniqueSoundCues.validateAnchor(cue, SoundAnchor.TARGET, "weapon_strike.hit_sounds");

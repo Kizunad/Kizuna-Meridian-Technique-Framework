@@ -355,6 +355,7 @@ public final class TechniqueScheduler {
         switch (effect.getOperationCase()) {
             case IMPULSE -> intent.setImpulse(resolvedImpulse(active, effect.getImpulse()));
             case STATUS_BENEFIT -> intent.setStatusBenefit(effect.getStatusBenefit());
+            case WEAPON_BIND, BOUND_ARM_CUT -> intent.setWeaponStrike(boundStrike(context));
             case WEAPON_STRIKE -> {
                 List<SoundCue> hitSounds = TechniqueSoundCues.hitSounds(definition, index);
                 intent.setWeaponStrike(weaponStrike(active, effect.getWeaponStrike(), hitSounds));
@@ -387,6 +388,29 @@ public final class TechniqueScheduler {
         return ConsumeHeldItemIntent.newBuilder()
                 .setStrategy(active.getHeldItemRules().getConsumptionStrategy())
                 .build();
+    }
+
+    private static WeaponStrikeIntent boundStrike(EffectContext context) {
+        // 建缠与持段割击沿用抽回的选手、伤害身份和受甲规则，割击各有独立命中预算。
+        var definition = context.definition();
+        var effect = context.effect();
+        WeaponStrike pull = definition.getEffectsList().stream().map(TechniqueEffect::getWeaponStrike)
+                .filter(WeaponStrike::getReleaseBoundArm).findFirst().orElseThrow();
+        if (effect.hasWeaponBind()) {
+            return weaponStrike(context.active(), pull, List.of()).toBuilder()
+                    .setBeginBind(effect.getWeaponBind())
+                    .build();
+        }
+        int index = context.index();
+        var cut = pull.toBuilder()
+                .clearReleaseBoundArm()
+                .clearHitParticleId()
+                .setCutBoundArm(true /* cutBoundArm */)
+                .setLastStrike(false /* lastStrike */)
+                .setDedupGroup("bound_cut_" + index)
+                .setMultiplier(effect.getBoundArmCut())
+                .build();
+        return weaponStrike(context.active(), cut, TechniqueSoundCues.hitSounds(definition, index));
     }
 
     private static PresentationIntent presentationIntent(PresentationEffect presentation, double tempo) {

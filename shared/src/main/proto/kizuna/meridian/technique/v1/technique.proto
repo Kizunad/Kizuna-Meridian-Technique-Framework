@@ -179,6 +179,7 @@ message HeldItems {
   optional ProjectileWeaponCategory main_hand_projectile_weapon = 4;
   optional ProjectileWeaponCategory off_hand_projectile_weapon = 5;
   optional bool can_find_ammunition = 6;
+  Hand bound_hand = 7; // 这只手参与兵器牵制，不能被选作出手侧
 }
 enum BrewUseMethod {
   BREW_USE_METHOD_UNSPECIFIED = 0;
@@ -581,6 +582,16 @@ message WeaponStrike {
   string heat_status_id = 21; // 选定手上有此热兵状态时使用下列伤害身份
   string heated_main_hand_damage_type_id = 22;
   string heated_off_hand_damage_type_id = 23;
+  bool release_bound_arm = 25; // 末击仅对本次施放锁住的前臂抽回
+  bool cut_bound_arm = 26; // 持段只割已绑定的前臂，不解开牵制
+  string hit_particle_id = 27; // 在实际受伤的目标处播放一个简单原版粒子
+}
+message WeaponBind {
+  StatusBenefit caster = 1;
+  StatusBenefit target = 2;
+  string immune_status_id = 3;
+  double counter_force_ratio = 4;
+  int64 stagger_millis = 5;
 }
 message BreakBlocks {
   Quantity forward_distance = 1; // METER，(0, 1024]
@@ -592,6 +603,7 @@ message WeaponStrikeIntent {
   WeaponStrike strike = 1;
   HeldItemRules held_item_rules = 2; // 按打击时选定手的当前物品重新匹配
   repeated SoundCue hit_sounds = 3; // 并入的 TARGET 声音，在每个真正受伤的目标处各播一次
+  WeaponBind begin_bind = 4; // 起手结束时借用末击的选手和索敌规则，仅建立牵制
 }
 message LegStrikeIntent {
   LegStrike strike = 1;
@@ -671,6 +683,7 @@ message FollowUp {
   optional ProjectileWeaponCategory previous_projectile_weapon = 5;
   optional ProjectileWeaponCategory next_projectile_weapon = 6;
   repeated BlockedAttackSource blocked_attack_sources = 7; // 非空时须在最近一次被挡后的 600 ms 内承接
+  optional int64 after_bind_release_millis = 8; // 要求前式真实抽回，自抽回起计时
 }
 message FollowUpRules {
   repeated FollowUp transitions = 1;
@@ -698,6 +711,8 @@ message TechniqueEffect {
     Throw throw = 27; // 附属处理器认领；只摔同一施放擒住的目标
     Guard guard = 28; // 持续守式恰有一个，at_millis 等于起手时长；仅 EFFECTIVE 阶段可查询到
     ConsumeHeldItem consume_held_item = 29; // 整件消耗起手选定手上的整叠物品
+    WeaponBind weapon_bind = 30;
+    Quantity bound_arm_cut = 31; // 按末击同侧、同来源割一次，数值为本击的独立倍率
   }
 }
 message ConsumeHeldItem {}
@@ -1171,4 +1186,6 @@ message TechniqueProgress {
   ActiveInfusion active_infusion = 7; // 收势不清除；身体死亡时由可信恢复入口清除
   map<string, int64> guard_break_ends = 8; // 破防式 ID → 禁守截止；下次成功起该式后清除
   BlockedAttack blocked_attack = 9; // 最近一次可信阻挡；承接成功起手时原子消费
+  string released_bind_cast_id = 10;
+  int64 bind_release_millis = 11;
 }

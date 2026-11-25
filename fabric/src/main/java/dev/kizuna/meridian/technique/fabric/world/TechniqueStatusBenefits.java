@@ -38,6 +38,12 @@ public final class TechniqueStatusBenefits {
                 for (var effect : technique.getEffectsList()) {
                     if (effect.hasStatusBenefit()) {
                         register(technique, effect.getStatusBenefit());
+                    } else if (effect.hasWeaponBind()) {
+                        var bind = effect.getWeaponBind();
+                        var caster = registerEffect(technique, bind.getCaster(), MobEffectCategory.NEUTRAL);
+                        var target = registerEffect(technique, bind.getTarget(), MobEffectCategory.HARMFUL);
+                        TechniqueWeaponBinds.registerEffect(caster.effect());
+                        TechniqueWeaponBinds.registerEffect(target.effect());
                     }
                 }
             }

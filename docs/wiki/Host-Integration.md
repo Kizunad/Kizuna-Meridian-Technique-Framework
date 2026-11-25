@@ -655,3 +655,9 @@ Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、�
 `meridian_technique:breathing_practice`，并挂上原版无限图标。另一式可随即使用前台。
 维持时按全身内腔的实际体积分摊费用，允许未开脉。已付时间、撤效和向环境释放的元随身体活动提交。
 外部清图标通过 `TechniqueBreathingStatuses.REMOVED` 通知身体宿主按当刻收功。
+
+### 兵器牵制
+
+目录在起手末声明 `weapon_bind`，在有效段末声明带 `release_bound_arm` 的单体末击。两端分别登记状态，持续时间与有效段相同。中间的每个 `bound_arm_cut` 在目录指定的时刻以自己的倍率割同一条前臂，继承末击的伤害身份和护甲规则。一旦解除，余下小割失效。打击后紧跟的同刻 TARGET 声音和 `hit_particle_id` 在目标实际受伤处播放。
+
+`TechniqueWorldItems.inspect` 返回两手实物与当前受缚手位 `bound_hand`。持物选手和固定出手侧的拳掌预检共用该事实。传送越界、换剑、取消、死亡、卸载和驱散会释放双方；自然抽回才写入施放者身体的施放身份及时刻。后式可声明 `after_bind_release_millis`，使实际承接与时间轴提示都取真实抽回窗口和普通收势窗口的交集。

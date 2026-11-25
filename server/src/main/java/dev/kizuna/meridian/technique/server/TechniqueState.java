@@ -78,6 +78,14 @@ public final class TechniqueState {
             throw TechniqueErrors.invalid(KEY, "进度版本不支持、记录数量或载荷大小超限");
         }
         validateKnown(progress.getKnownList());
+        String released = progress.getReleasedBindCastId();
+        long releaseMillis = progress.getBindReleaseMillis();
+        if (!released.isEmpty()) {
+            TechniqueValues.castId(released);
+        }
+        if (releaseMillis < 0 || released.isEmpty() && releaseMillis != 0) {
+            throw TechniqueErrors.invalid(KEY, "抽回时刻缺少施放身份或为负");
+        }
         validateEndTimes(progress.getCooldownsMap(), "cooldowns");
         validateEndTimes(progress.getCurveEndsMap(), "curve_ends");
         validateEndTimes(progress.getGuardBreakEndsMap(), "guard_break_ends");

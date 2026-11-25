@@ -845,6 +845,24 @@ public final class TechniqueService {
         strikeListeners.remove(listener);
     }
 
+    public void recordBindRelease(UUID caster, String castId) {
+        // 只认仍在执行的施放；真实抽回后写进同一身体，供玩家与生物共享承接判定。
+        TechniqueHost host = hosts.resolve(caster).orElseThrow();
+        BodySnapshot body = host.inspect().body();
+        TechniqueProgress progress = TechniqueState.read(body);
+        if (!progress.getActiveCast().getRequest().getCastId().equals(castId)
+                || progress.getReleasedBindCastId().equals(castId)) {
+            return;
+        }
+        TechniqueProgress updated = progress.toBuilder()
+                .setReleasedBindCastId(castId)
+                .setBindReleaseMillis(body.settledAt().elapsedMillis())
+                .build();
+        BodyActivity activity = progressActivity(updated);
+        var submission = new TechniqueHost.Submission("bind_release/" + castId, body.revision(), activity);
+        validateCommit(body, activity, host.submit(submission));
+    }
+
     public boolean recordBlockedAttack(BlockedAttackObservation observation) {
         // Damage 只提交可信事件事实，攻击者身体进度负责隔离、去重和承接窗口。
         Objects.requireNonNull(observation);
@@ -866,7 +884,7 @@ public final class TechniqueService {
             TechniqueProgress updated = progress.toBuilder()
                     .setBlockedAttack(blockedAttack(observation))
                     .build();
-            BodyActivity activity = blockedAttackActivity(updated);
+            BodyActivity activity = progressActivity(updated);
             BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
             try {
                 TechniqueHost.Submission submission = new TechniqueHost.Submission(
@@ -920,7 +938,7 @@ public final class TechniqueService {
         return previous.getBlockedMillis() <= observation.blockedMillis();
     }
 
-    private static BodyActivity blockedAttackActivity(TechniqueProgress progress) {
+    private static BodyActivity progressActivity(TechniqueProgress progress) {
         // 进度先编码成 Any，再装入活动，保证活动构造没有嵌套 builder。
         Any packedProgress = TechniqueState.pack(progress);
         return BodyActivity.newBuilder()
@@ -988,7 +1006,7 @@ public final class TechniqueService {
             TechniqueProgress.Builder clearedBuilder = progress.toBuilder();
             clearedBuilder.clearBlockedAttack();
             TechniqueProgress cleared = clearedBuilder.build();
-            BodyActivity activity = blockedAttackActivity(cleared);
+            BodyActivity activity = progressActivity(cleared);
             BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
             String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
             try {

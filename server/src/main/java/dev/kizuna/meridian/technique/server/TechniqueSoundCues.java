@@ -156,7 +156,8 @@ public final class TechniqueSoundCues {
             if (effect.getAtMillis() != atMillis) {
                 return false;
             }
-            if (effect.hasWeaponStrike() || effect.hasLegStrike() || effect.hasLimbStrike()) {
+            if (effect.hasWeaponStrike() || effect.hasLegStrike()
+                    || effect.hasLimbStrike() || effect.hasBoundArmCut()) {
                 return true;
             }
             if (!effect.hasSound()) {

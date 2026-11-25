@@ -43,6 +43,9 @@ public final class TechniqueStaggers {
         if (entity == null) {
             return;
         }
+        if (event.remainingMillis() > 0) {
+            TechniqueWeaponBinds.interruptCaster(entity);
+        }
         switch (event.kind()) {
             case HIT -> slow(entity, event, MODIFIER_ID);
             case DOWN -> slow(entity, event, DOWN_MODIFIER_ID);

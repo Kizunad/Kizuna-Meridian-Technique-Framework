@@ -362,6 +362,9 @@ final class TechniqueDefinitions {
                 case IMPULSE -> validateImpulse(effect.getImpulse());
                 case STATUS_BENEFIT -> validateBenefit(addons, templates, slots, effect.getStatusBenefit());
                 case WEAPON_STRIKE -> TechniqueCombatEffects.validateStrike(effect.getWeaponStrike());
+                case WEAPON_BIND -> TechniqueCombatEffects.validateBind(effect.getWeaponBind());
+                case BOUND_ARM_CUT -> TechniqueValues.positive(effect.getBoundArmCut(), Unit.RATIO,
+                        TechniqueValues.MAX_PEAK, "bound_arm_cut");
                 case LEG_STRIKE -> TechniqueCombatEffects.validateLegStrike(effect.getLegStrike());
                 case LIMB_STRIKE -> TechniqueLimbStrikes.validate(effect.getLimbStrike());
                 case GRAPPLE -> TechniqueGrapples.validateWithin(effect, durationMillis);

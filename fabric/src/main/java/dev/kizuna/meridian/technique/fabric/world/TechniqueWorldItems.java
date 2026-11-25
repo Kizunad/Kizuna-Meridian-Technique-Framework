@@ -48,6 +48,7 @@ public final class TechniqueWorldItems {
                 .setMainHand(main)
                 .setOffHand(off)
                 .setMainHandSide(side)
+                .setBoundHand(TechniqueWeaponBinds.boundHand(entity))
                 .build();
     }
 

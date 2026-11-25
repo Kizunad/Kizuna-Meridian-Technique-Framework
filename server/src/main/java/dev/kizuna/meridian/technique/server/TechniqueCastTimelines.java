@@ -45,7 +45,7 @@ public final class TechniqueCastTimelines {
         status.setFreeMillis(TechniqueFollowUps.windDownStart(active, definition)
                 .orElse(active.getRecoveryEndMillis() - started));
         for (TechniqueReference reference : TechniqueKnowledge.references(registry, body, progress)) {
-            registry.find(reference).ifPresent(next -> followUp(next, active, status));
+            registry.find(reference).ifPresent(next -> followUp(next, progress, status));
         }
         return status;
     }
@@ -61,8 +61,9 @@ public final class TechniqueCastTimelines {
         }
     }
 
-    private static void followUp(TechniqueDefinition next, ActiveCast active, CastStatus.Builder status) {
+    private static void followUp(TechniqueDefinition next, TechniqueProgress progress, CastStatus.Builder status) {
         // 这一式声明了能接在当前这一式后面：窗口从收势过了声明的比例开到收势结束后的宽限为止。
+        ActiveCast active = progress.getActiveCast();
         long started = active.getStartedMillis();
         for (FollowUp transition : next.getFollowUp().getTransitionsList()) {
             if (!transition.getPrevious().equals(active.getRequest().getTechnique())) {
@@ -70,10 +71,27 @@ public final class TechniqueCastTimelines {
             }
             long open = TechniqueFollowUps.windowOpen(active.getActiveEndMillis(), active.getRecoveryEndMillis(),
                     transition);
-            status.addFollowUps(FollowUpHint.newBuilder()
-                    .setTechniqueId(next.getId())
-                    .setOpenMillis(open - started)
-                    .setCloseMillis(active.getRecoveryEndMillis() + transition.getAfterRecoveryMillis() - started));
+            long close = active.getRecoveryEndMillis() + transition.getAfterRecoveryMillis();
+            if (transition.hasAfterBindReleaseMillis()) {
+                if (!progress.getReleasedBindCastId().equals(active.getRequest().getCastId())) {
+                    continue;
+                }
+                long release = progress.getBindReleaseMillis();
+                var hint = hint(next, Math.max(open, release) - started,
+                        Math.min(close, release + transition.getAfterBindReleaseMillis()) - started);
+                status.addFollowUps(hint);
+            } else {
+                status.addFollowUps(hint(next, open - started, close - started));
+            }
         }
+    }
+
+    private static FollowUpHint hint(TechniqueDefinition next, long open, long close) {
+        // 客户端只展示服务器计算的相对时窗。
+        return FollowUpHint.newBuilder()
+                .setTechniqueId(next.getId())
+                .setOpenMillis(open)
+                .setCloseMillis(close)
+                .build();
     }
 }

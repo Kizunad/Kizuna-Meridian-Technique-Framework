@@ -172,7 +172,7 @@ public final class TechniqueHeldItems {
         // 主手侧和两手消息都必须由宿主显式提供，不能把未接入误当成空手。
         TechniqueValues.knownFields(items);
         if (!items.hasMainHand() || !items.hasOffHand() || items.getMainHandSideValue() <= 0
-                || items.getMainHandSide() == HandSide.UNRECOGNIZED) {
+                || items.getMainHandSide() == HandSide.UNRECOGNIZED || items.getBoundHand() == Hand.UNRECOGNIZED) {
             throw TechniqueErrors.invalid("held_items", "缺少两手物品或主手侧");
         }
         validateItem(items.getMainHand());
@@ -241,6 +241,32 @@ public final class TechniqueHeldItems {
     public static Hand select(HeldItemRules rules, HeldItems items, TechniqueDefinition definition) {
         // 宿主预判和正式起手共用式级武器与弹药覆盖，避免 AI 误选另一类武器。
         return select(rules, items, definition.getProjectileWeapon(), ammunitionRequirement(definition, rules));
+    }
+
+    static boolean needsBoundHand(TechniqueDefinition definition, HeldItems items) {
+        // 前手用副手、后手用主手；擒摔占双臂，持药施法固定主手。
+        Hand bound = items.getBoundHand();
+        if (bound == Hand.HAND_UNSPECIFIED) {
+            return false;
+        }
+        if (definition.hasBrewItem() && bound == Hand.MAIN_HAND) {
+            return true;
+        }
+        for (var effect : definition.getEffectsList()) {
+            if (effect.hasGrapple() || effect.hasThrow()) {
+                return true;
+            }
+            boolean needsHand = switch (effect.getLimbStrike().getArm()) {
+                case FRONT_ARM -> bound == Hand.OFF_HAND;
+                case REAR_ARM -> bound == Hand.MAIN_HAND;
+                case BOTH_ARMS -> true;
+                default -> false;
+            };
+            if (needsHand) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static AmmunitionRequirement ammunitionRequirement(TechniqueDefinition definition, HeldItemRules rules) {
@@ -372,7 +398,8 @@ public final class TechniqueHeldItems {
     private static Candidate candidate(HeldItemRules rules, HeldItems items, HeldItem item, Hand hand,
                                       ProjectileWeaponCategory requiredWeapon) {
         // 类别和耐久表各取首次命中，无耐久物品用无穷排序值表示一次性消耗。
-        if (item.getItemId().isEmpty() || item.getContainsItems() || !matchesRequiredItem(rules, item)) {
+        if (hand == items.getBoundHand() || item.getItemId().isEmpty()
+                || item.getContainsItems() || !matchesRequiredItem(rules, item)) {
             return null;
         }
         Optional<HeldItemCategory> categoryResult = rules.getCategoriesList().stream()

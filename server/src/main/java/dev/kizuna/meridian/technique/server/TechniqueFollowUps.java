@@ -70,6 +70,13 @@ final class TechniqueFollowUps {
             TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
             TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
             validateBlockedAttackSources(transition);
+            if (transition.hasAfterBindReleaseMillis()) {
+                TechniqueValues.millis(transition.getAfterBindReleaseMillis(), "after_bind_release_millis");
+                if (previousDefinition == null || previousDefinition.getEffectsList().stream()
+                        .noneMatch(effect -> effect.getWeaponStrike().getReleaseBoundArm())) {
+                    throw TechniqueErrors.invalid("follow_up", "牵制承接需要前式声明抽回末击");
+                }
+            }
             if (ordinaryBlockedTransition) {
                 if (transition.hasPreviousProjectileWeapon() || transition.hasNextProjectileWeapon()) {
                     throw TechniqueErrors.invalid(
@@ -185,7 +192,8 @@ final class TechniqueFollowUps {
                 }
                 LastCast previousCast = previous.orElseThrow();
                 if (!reference.equals(previousCast.getTechnique())
-                        || !inWindow(previousCast, transition, now)) {
+                        || !inWindow(previousCast, transition, now)
+                        || !afterRelease(previousCast, transition, progress, now)) {
                     continue;
                 }
             }
@@ -212,6 +220,16 @@ final class TechniqueFollowUps {
             return Optional.empty();
         }
         return Optional.of(blocked.getEventId());
+    }
+
+    private static boolean afterRelease(LastCast previous, FollowUp transition, TechniqueProgress progress, long now) {
+        // 援引实际抽回的那次施放；挥空或中途松脱都没有这条事实。
+        if (!transition.hasAfterBindReleaseMillis()) {
+            return true;
+        }
+        long released = progress.getBindReleaseMillis();
+        return previous.getCastId().equals(progress.getReleasedBindCastId())
+                && now >= released && now - released <= transition.getAfterBindReleaseMillis();
     }
 
     record EntryPlan(long clipStartMillis, String blockedEventId) { }

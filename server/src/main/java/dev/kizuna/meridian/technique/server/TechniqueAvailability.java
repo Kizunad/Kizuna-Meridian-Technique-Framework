@@ -30,6 +30,10 @@ public final class TechniqueAvailability {
 
     /** 手里的东西对不对：这一式（和它所在的书）要的兵器、弹药、药瓶现在拿没拿着。和起手选手用的是同一套规则。 */
     public static boolean holdable(TechniqueRegistry registry, TechniqueDefinition definition, HeldItems items) {
+        // 固定手位的式也接受和正式起手相同的锁臂预检。
+        if (TechniqueHeldItems.needsBoundHand(definition, items)) {
+            return false;
+        }
         if (definition.hasBrewItem()) {
             try {
                 TechniqueBrewEffects.requireHeld(definition.getBrewItem(), items);

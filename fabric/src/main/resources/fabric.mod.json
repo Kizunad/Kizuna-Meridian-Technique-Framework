@@ -3,7 +3,13 @@
   "id": "meridian_technique",
   "version": "${version}",
   "name": "Kizuna's Meridian Technique Framework",
-  "description": "功法目录、施放调度与宿主入口",
+  "contact": {
+    "homepage": "https://github.com/Kizunad/Kizuna-Meridian-Technique-Framework",
+    "sources": "https://github.com/Kizunad/Kizuna-Meridian-Technique-Framework",
+    "issues": "https://github.com/Kizunad/Kizuna-Meridian-Technique-Framework/issues"
+  },
+  "icon": "assets/meridian_technique/icon.png",
+  "description": "Organizes martial techniques and lets characters learn and use the moves defined by add-ons.\n收录各附属的功法，让角色学习和施展其中的招式。",
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",

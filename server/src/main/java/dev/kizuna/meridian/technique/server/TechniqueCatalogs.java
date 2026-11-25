@@ -23,7 +23,7 @@ public final class TechniqueCatalogs {
             TechniqueCatalogSource original = originals.get(index);
             register(source + " catalogs[" + index + "]", original.addons(), original.catalog());
         }
-        registry.addonCostPayers().all().forEach(addonCostPayers::register);
+        registry.addonCostPayers().copyTo(addonCostPayers);
     }
 
     public void register(TechniqueAddonCostPayer payer) {

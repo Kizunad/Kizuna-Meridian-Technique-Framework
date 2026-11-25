@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -71,7 +72,7 @@ final class TechniqueActivities {
         TechniqueBinding binding = start.binding();
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
-        Accounts accounts = accounts(body, start.addonCostPayers().qiCosts(body, definition), slots);
+        Accounts accounts = accounts(body, definition, slots, start.addonCostPayers());
         ActiveCast initialActive = activeCast(start);
         TechniqueScheduler.ModifierPlan modifierPlan = TechniqueScheduler.modifierPlan(definition, initialActive);
         ActiveCast active = initialActive.toBuilder().addAllPendingModifiers(modifierPlan.pending()).build();
@@ -366,7 +367,7 @@ final class TechniqueActivities {
         Map<String, BoundSlot> slots = binding.getSlotsList().stream()
                 .collect(Collectors.toMap(BoundSlot::getSlotId, Function.identity()));
         try {
-            accounts(body, payers.qiCosts(body, definition), slots);
+            accounts(body, definition, slots, payers);
             return true;
         } catch (TechniqueErrors.Rejected rejected) {
             return false;
@@ -397,32 +398,70 @@ final class TechniqueActivities {
         }
     }
 
-    private static Accounts accounts(BodySnapshot body, List<QiCost> costs, Map<String, BoundSlot> slots) {
+    private static Accounts accounts(BodySnapshot body, TechniqueDefinition definition, Map<String, BoundSlot> slots,
+                                     TechniqueAddonCostPayers payers) {
         // 器官缓存与经脉内腔可有相同局部 ID，同种账户的多笔费用只提交一次余额替换。
         var originals = new LinkedHashMap<AccountId, QiInventory>();
         var replacements = new LinkedHashMap<AccountId, QiInventory>();
         var released = new ArrayList<QiInventory>();
         var namesByKind = new LinkedHashMap<ModuleKind, Map<String, String>>();
-        for (QiCost cost : costs) {
-            BoundSlot slot = slots.get(cost.getSlotId());
-            ModuleKind kind = slot.getModule();
+        var paymentOrgan = payers.qiPaymentOrgan(body);
+        for (QiCost cost : payers.qiCosts(body, definition)) {
+            var source = paymentSource(body, cost, slots.get(cost.getSlotId()), paymentOrgan);
+            ModuleKind kind = source.kind();
             Map<String, String> names = namesByKind.computeIfAbsent(kind, module -> accountNames(body, module));
             Function<String, QiInventory> balance = id -> {
                 var account = new AccountId(kind, id);
                 var original = originals.computeIfAbsent(account, key -> key.inventory(body));
                 return replacements.getOrDefault(account, original);
             };
-            for (CostAllocation allocation : allocations(cost, slot, balance, names)) {
+            for (CostAllocation allocation : allocations(cost, source, balance, names)) {
                 String moduleId = allocation.moduleId();
                 QiInventory previous = balance.apply(moduleId);
                 var payer = new TechniqueQiPayment.Payer(TechniqueNames.meridians(readable(List.of(moduleId), names)),
-                        slot.getModuleIdsCount() > 1);
+                        source.ids().size() > 1);
                 QiInventory debit = TechniqueQiPayment.select(previous, cost, allocation.amount(), payer);
                 replacements.put(new AccountId(kind, moduleId), QiAccounting.debit(previous, debit));
                 released.add(debit);
             }
         }
         return new Accounts(accountChanges(originals, replacements), QiInventory.combine(released));
+    }
+
+    private record PaymentSource(ModuleKind kind, List<String> ids, double amount) { }
+
+    private static PaymentSource paymentSource(BodySnapshot body, QiCost cost, BoundSlot slot,
+                                               Optional<String> paymentOrgan) {
+        // 绑定始终用于招式本身。账户替换只影响经脉费用，逐脉价按原绑定数量合计。
+        double amount = cost.getAmount().getValue();
+        if (slot.getModule() != ModuleKind.MERIDIAN || paymentOrgan.isEmpty()) {
+            var ids = slot.getModuleIdsList().stream().sorted().toList();
+            return new PaymentSource(slot.getModule(), ids, amount);
+        }
+        var ids = slot.getModuleIdsList();
+        for (String id : ids) {
+            validateOpened(meridian(body, id));
+        }
+        String organ = paymentOrgan.orElseThrow();
+        validatePaymentOrgan(body, organ);
+        double total = amount;
+        if (cost.getDistribution() == QiDistribution.EACH) {
+            total = amount * ids.size();
+        }
+        return new PaymentSource(ModuleKind.ORGAN, List.of(organ), total);
+    }
+
+    private static void validatePaymentOrgan(BodySnapshot body, String id) {
+        // 登记跨模板版本生效；该版本缺器官、器官受损失能或所属部位失能都拒绝。
+        var definition = body.structure().organs().stream().filter(organ -> organ.id().value().equals(id))
+                .findFirst().orElseThrow(() -> TechniqueErrors.rejected(MISSING_MODULE));
+        var state = body.organStates().stream().filter(organ -> organ.id().equals(definition.id()))
+                .findFirst().orElseThrow();
+        var part = body.partStates().stream().filter(value -> value.id().equals(definition.partId()))
+                .findFirst().orElseThrow();
+        if (state.hp() == 0 || part.hp() == 0) {
+            throw TechniqueErrors.rejected(MODULE_UNAVAILABLE);
+        }
     }
 
     private static List<QiAccountChange> accountChanges(Map<AccountId, QiInventory> originals,
@@ -461,22 +500,24 @@ final class TechniqueActivities {
                 .filter(name -> !name.isEmpty()).toList();
     }
 
-    private static MeridianState opened(MeridianState state) {
+    private static MeridianState meridian(BodySnapshot body, String id) {
+        // 绑定模块来自同一快照，按局部 ID 取实际经脉。
+        return body.meridianStates().stream().filter(state -> state.id().value().equals(id)).findFirst().orElseThrow();
+    }
+
+    private static void validateOpened(MeridianState state) {
         // 扣费前确认经脉仍已开拓；按余额分摊也先检查全部绑定经脉，再计算可付余额。
         if (state.opening().stage() != MeridianOpening.Stage.OPENED) {
             throw TechniqueErrors.rejected(MERIDIAN_NOT_OPENED);
         }
-        return state;
     }
 
-    private static List<CostAllocation> allocations(QiCost cost, BoundSlot slot,
+    private static List<CostAllocation> allocations(QiCost cost, PaymentSource source,
                                                     Function<String, QiInventory> balance,
                                                     Map<String, String> names) {
         // EVEN 使用稳定的经脉顺序，最后一条吸收浮点余数，确保总扣费仍等于声明总量。
-        List<String> moduleIds = slot.getModuleIdsList().stream()
-                .sorted(Comparator.naturalOrder())
-                .toList();
-        double amount = cost.getAmount().getValue();
+        List<String> moduleIds = source.ids();
+        double amount = source.amount();
         return switch (cost.getDistribution()) {
             case EACH -> moduleIds.stream()
                     .map(moduleId -> new CostAllocation(moduleId, amount))
@@ -642,9 +683,9 @@ final class TechniqueActivities {
                 return body.organStates().stream().filter(state -> state.id().value().equals(id))
                         .findFirst().orElseThrow().buffer();
             }
-            var channel = body.meridianStates().stream().filter(state -> state.id().value().equals(id))
-                    .findFirst().orElseThrow();
-            return opened(channel).lumenQi();
+            var channel = meridian(body, id);
+            validateOpened(channel);
+            return channel.lumenQi();
         }
 
         QiAccountChange.Builder change() {

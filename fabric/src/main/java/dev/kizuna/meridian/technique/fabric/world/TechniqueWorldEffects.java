@@ -109,7 +109,7 @@ public final class TechniqueWorldEffects {
             return;
         }
         if (strike.hasSplash()) {
-            releaseSplash(hand, rules, data, hits);
+            releaseSplash(effect, hand, data, hits);
             return;
         }
         strikeTargets(effect, hits, data, pull);
@@ -158,18 +158,20 @@ public final class TechniqueWorldEffects {
                 candidates.stream().map(LivingEntity::getStringUUID).toList());
     }
 
-    private void releaseSplash(InteractionHand hand, HeldItemRules rules, StrikeData data, CastHits hits) {
+    private void releaseSplash(EffectIntent effect, InteractionHand hand, StrikeData data, CastHits hits) {
         // 热兵绑定和整叠消耗在同一次宿主效果回执内提交；挥空也结束流金。
         WeaponStrike strike = data.strike();
         List<LivingEntity> candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
         List<String> selected = selectTargets(strike, hits, candidates);
         var heat = ((TechniqueWeaponHeat.Access) actor).meridian$weaponHeat();
+        var rules = effect.getWeaponStrike().getHeldItemRules();
         if (!heat.release(actor, hand, rules.getRequiredHeatStatus())) {
             return;
         }
         if (!(actor instanceof ServerPlayer player && player.isCreative())) {
             actor.setItemInHand(hand, ItemStack.EMPTY);
         }
+        TechniqueWeaponSplash.RELEASED.invoker().released(actor, effect.getTechnique());
         TechniqueWeaponSplash.show(actor, strike);
         work.execute(actor, data.source(), () -> splashTargets(candidates, selected, data));
     }

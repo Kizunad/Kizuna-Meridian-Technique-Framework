@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.technique.fabric.world;
 
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.WeaponSplash;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
@@ -12,6 +13,18 @@ import net.minecraft.world.entity.LivingEntity;
 
 /** 泼洒沿宿主选敌和做功边界执行，由伤害宿主结算部位与组织能力。 */
 public final class TechniqueWeaponSplash {
+    public interface Released {
+        void released(LivingEntity actor, TechniqueReference technique);
+    }
+
+    /** 热兵释放成功时通知一次，包括挥空。 */
+    public static final Event<Released> RELEASED = EventFactory.createArrayBacked(Released.class,
+            listeners -> (actor, technique) -> {
+                for (var listener : listeners) {
+                    listener.released(actor, technique);
+                }
+            });
+
     public interface Hit {
         boolean hit(LivingEntity target, DamageSource source, double dose, WeaponSplash splash);
     }

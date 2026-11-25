@@ -135,6 +135,9 @@ loom {
             source sourceSets.gametest
             runDir gametestRunDirectory
             vmArg '-Dfabric-api.gametest'
+            if (providers.gradleProperty('gametestFilter').isPresent()) {
+                vmArg "-Dfabric-api.gametest.filter=${providers.gradleProperty('gametestFilter').get()}"
+            }
             vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
         }
     }

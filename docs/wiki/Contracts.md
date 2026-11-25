@@ -385,6 +385,13 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 余额最大的经脉（同额取 ID 较小者）承担比例份额的取整余数，其余经脉份额低于最小流转单位时跳过。
 目录不对 `BY_BALANCE` 做逐绑定数量的平摊预检，余额是否足够只在起手时按实际身体判断。
 
+附属可在 `meridian_technique_addon_cost` 的 `registerPayers` 中调用
+`registerQiPaymentOrgan(templateId, organId)`，为身体模板登记一个本地器官 ID，所有模板版本共用此登记。
+对该身体，经脉槽照常绑定和检查开脉，真元预检与起手从登记器官的缓存付款。器官及所属部位须能使用，
+属性、相态和价格仍按原式计算。`EACH` 按原绑定经脉数量计价，`EVEN`、`BY_BALANCE` 支付原总额。
+显式器官费用使用目录指定器官；同次施放涉及同一账户的费用合并为一次身体活动提交。
+AI 预检传入当前 `registry.addonCostPayers()`，未登记账户的身体沿用目录的扣款路径。
+
 同一功法的**每条**修正必须满足：
 `effect.at_millis + curve.last.offset_millis <= warmup_millis + active_millis + recovery_millis + cooldown_millis`。
 生效延迟也计入期限；等于正常冷却结束合法。提前终止可能使冷却早于曲线结束，
@@ -756,3 +763,6 @@ Meridian UI 初始化时把功法库说明来源登记到界面框架；原版�
 `StatusBenefit.weapon_heat` 将原版效果绑定到施放者选定手的物品栈。服务端逐刻和出手时核对绑定、进水与淋雨，提前中断时施加目录声明的淬冷效果。淬冷期间宿主的持物事实、伤害类型选择和磨损都屏蔽该软兵标签。原版效果负责剩余时间与同步。武器打击显式引用热兵状态及两手伤害类型，命中和每秒握持热伤由伤害宿主接收。
 
 `HeldItemRules.required_heat_status` 对应每只手观察到的 `HeldItem.heat_status`。`weapon_strike.splash` 要求单手扇面末击、指定热兵状态与 `CONSUME_SELECTED_STACK`。释放时复核原手原栈，在同一个打击回执中结束热兵、消耗整叠并分配回落额度。创造玩家保留手中物品。命中的部位数、沉积状态、动作速度和回落物由目录给定。每次施放独立分配回落，即使多把兵器同时命中同一目标，各自的到期份额也随世界保存。
+
+宿主可用 `TechniqueWorldTargets.inStrikeSector(actor, target, strike)` 检查目录规定的距离和角度，面向以调用时为准。目标身份、敌我、存活和可视性由宿主检查。
+`TechniqueWeaponSplash.RELEASED` 在热兵实际释放后通知施放者和精确招式。挥空也通知，起手中断或热兵复核失败时没有释放事件。

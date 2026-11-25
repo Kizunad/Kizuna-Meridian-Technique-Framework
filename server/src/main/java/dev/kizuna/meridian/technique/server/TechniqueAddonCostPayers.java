@@ -13,17 +13,20 @@ import java.util.Optional;
 /** 目录加载时冻结的附属费用支付方索引。 */
 public final class TechniqueAddonCostPayers {
     private final Map<String, TechniqueAddonCostPayer> payers;
+    private final Map<String, String> qiPaymentOrgans;
     private final boolean mutable;
 
     public TechniqueAddonCostPayers() {
         // Fabric 入口先收集支付方，目录发布前由注册表复制为不可变索引。
         this.payers = new LinkedHashMap<>();
+        this.qiPaymentOrgans = new LinkedHashMap<>();
         this.mutable = true;
     }
 
-    private TechniqueAddonCostPayers(Map<String, TechniqueAddonCostPayer> payers) {
+    private TechniqueAddonCostPayers(Map<String, TechniqueAddonCostPayer> payers, Map<String, String> qiPaymentOrgans) {
         // 冻结索引只供目录校验和施放读取。
         this.payers = Collections.unmodifiableMap(new LinkedHashMap<>(payers));
+        this.qiPaymentOrgans = Map.copyOf(qiPaymentOrgans);
         this.mutable = false;
     }
 
@@ -43,6 +46,29 @@ public final class TechniqueAddonCostPayers {
     public Optional<TechniqueAddonCostPayer> find(String key) {
         // 目录校验和施放均按完整费用键精确解析。
         return Optional.ofNullable(payers.get(key));
+    }
+
+    public void registerQiPaymentOrgan(String templateId, String organId) {
+        // 每种身体模板的经脉费用至多有一个付款器官；器官的健康和库存由施放时的快照决定。
+        if (!mutable) {
+            throw new IllegalStateException("附属费用支付方索引已冻结");
+        }
+        TechniqueValues.id(templateId, "qi_payment.template_id");
+        TechniqueValues.localId(organId, "qi_payment.organ_id");
+        if (qiPaymentOrgans.putIfAbsent(templateId, organId) != null) {
+            throw new IllegalArgumentException("真元付款器官重复：" + templateId);
+        }
+    }
+
+    Optional<String> qiPaymentOrgan(BodySnapshot body) {
+        // 用权威身体模板选账户，施放请求不能指定付款器官。
+        return Optional.ofNullable(qiPaymentOrgans.get(body.template().id().value()));
+    }
+
+    void copyTo(TechniqueAddonCostPayers target) {
+        // 编程式目录合并也经过登记时的重复性检查。
+        payers.values().forEach(target::register);
+        qiPaymentOrgans.forEach(target::registerQiPaymentOrgan);
     }
 
     List<QiCost> qiCosts(BodySnapshot body, TechniqueDefinition technique) {
@@ -79,7 +105,7 @@ public final class TechniqueAddonCostPayers {
 
     public TechniqueAddonCostPayers frozen() {
         // 服务器注册表不暴露可变入口，支付方身份在目录加载时固定。
-        return new TechniqueAddonCostPayers(payers);
+        return new TechniqueAddonCostPayers(payers, qiPaymentOrgans);
     }
 
     public List<TechniqueAddonCostPayer> all() {
@@ -89,6 +115,6 @@ public final class TechniqueAddonCostPayers {
 
     public static TechniqueAddonCostPayers empty() {
         // 没有附属费用的旧目录使用空索引，通过相同硬校验路径加载。
-        return new TechniqueAddonCostPayers(Map.of());
+        return new TechniqueAddonCostPayers(Map.of(), Map.of());
     }
 }

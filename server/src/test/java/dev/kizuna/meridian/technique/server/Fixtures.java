@@ -47,6 +47,7 @@ public final class Fixtures {
     static final String SOURCE_TAG = "sample:source";
     static final String MUSCLE_TAG = "sample:actuator";
     static final String ORGAN_TAG = "sample:organ";
+    static final String CONTROL_ORGAN = "control";
 
     enum Shape { PAIRED, TENDRIL }
     private enum Training { NONE, ENABLED }
@@ -88,6 +89,13 @@ public final class Fixtures {
         TechniqueProgress progress = progress(definition());
         body.putAddonProgress(TechniqueState.KEY, TechniqueState.pack(progress));
         return BodyProtobuf.fromMessage(body.build());
+    }
+
+    static BodySnapshot fundedOrgan() {
+        // 使用与经脉相同的真元明细填充器官，可以独立核对两种账户的扣款。
+        var builder = BodyProtobuf.toMessage(body(Shape.PAIRED)).toBuilder();
+        builder.getOrganStatesBuilder(0).setBuffer(inventory());
+        return BodyProtobuf.fromMessage(builder.build());
     }
 
     private static BodyStructure structure(Shape shape) {

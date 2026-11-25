@@ -13,6 +13,7 @@
   "entrypoints": {
     "fabric-gametest": [
       "dev.kizuna.meridian.technique.server.TechniqueServiceGameTest",
+      "dev.kizuna.meridian.technique.server.TechniquePaymentOrganGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueProjectileGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueScrollGameTest",
       "dev.kizuna.meridian.technique.server.TechniqueAdvancementGameTest",
@@ -22,6 +23,9 @@
       "dev.kizuna.meridian.technique.fabric.world.TechniqueWorldBlockingGameTest",
       "dev.kizuna.meridian.technique.fabric.world.TechniqueHitFeelGameTest",
       "dev.kizuna.meridian.technique.fabric.TechniqueCodexGameTest"
+    ],
+    "meridian_technique_addon_cost": [
+      "dev.kizuna.meridian.technique.server.TechniquePaymentOrganGameTest"
     ],
     "meridian_technique_catalog": [
       "dev.kizuna.meridian.technique.server.TechniqueGameTestHost"

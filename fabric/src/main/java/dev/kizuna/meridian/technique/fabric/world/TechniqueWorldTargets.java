@@ -11,7 +11,7 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.Vec3;
 
 /** 目标几何随每次打击读取实际朝向，敌我策略由实体宿主提供。 */
-final class TechniqueWorldTargets {
+public final class TechniqueWorldTargets {
     private static final double HALF = 0.5;
     private static final double TARGET_MARGIN = 0.1;
 
@@ -35,8 +35,7 @@ final class TechniqueWorldTargets {
             }
         }
         return nearby.stream()
-                .filter(target -> actor.distanceToSqr(target) <= distance * distance)
-                .filter(target -> inSector(actor, target, strike))
+                .filter(target -> inStrikeSector(actor, target, strike))
                 .toList();
     }
 
@@ -64,8 +63,12 @@ final class TechniqueWorldTargets {
                 .orElse(null);
     }
 
-    private static boolean inSector(LivingEntity actor, LivingEntity target, WeaponStrike strike) {
+    public static boolean inStrikeSector(LivingEntity actor, LivingEntity target, WeaponStrike strike) {
         // 扇区只比较水平方向，纵向仍由最大距离约束。
+        double reach = strike.getDistance().getValue();
+        if (actor.distanceToSqr(target) > reach * reach) {
+            return false;
+        }
         Vec3 facing = Vec3.directionFromRotation(0, actor.getYRot() + (float) strike.getFacingOffset().getValue());
         Vec3 delta = target.position().subtract(actor.position()).multiply(1, 0, 1);
         if (delta.lengthSqr() == 0) {

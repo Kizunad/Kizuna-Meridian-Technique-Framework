@@ -113,6 +113,13 @@ public final class TechniqueRegistry {
         var identities = new HashSet<String>();
         for (TechniqueDefinition definition : definitions.values()) {
             for (TechniqueEffect effect : definition.getEffectsList()) {
+                var strike = effect.getWeaponStrike();
+                if (strike.hasSplash()) {
+                    var coating = strike.getSplash().getCoating();
+                    if (!identities.add(coating.getId())) {
+                        throw TechniqueErrors.invalid(definition.getId(), "沉积状态身份重复");
+                    }
+                }
                 if (!effect.hasStatusBenefit()) {
                     continue;
                 }

@@ -108,6 +108,10 @@ public final class TechniqueWorldEffects {
             work.execute(actor, data.source(), () -> { /* 空手或装物容器只记本次挥手做功。 */ });
             return;
         }
+        if (strike.hasSplash()) {
+            releaseSplash(hand, rules, data, hits);
+            return;
+        }
         strikeTargets(effect, hits, data, pull);
         if (heat != null || strike.getLastStrike()) {
             consume(stack, hand, intent, heat);
@@ -124,8 +128,7 @@ public final class TechniqueWorldEffects {
         } else {
             candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
         }
-        List<String> selected = TechniqueStrikeTargets.select(strike, hits.groups,
-                candidates.stream().map(LivingEntity::getStringUUID).toList());
+        List<String> selected = selectTargets(strike, hits, candidates);
         List<SoundCue> hitSounds = effect.getWeaponStrike().getHitSoundsList();
         Runnable strikeWork = () -> work.execute(actor, data.source(),
                 () -> hitTargets(candidates, selected, hits, data, hitSounds));
@@ -146,6 +149,48 @@ public final class TechniqueWorldEffects {
                 && TechniqueWorldItems.matches(intent.getHeldItemRules().getRequiredItemTagsList(), stack, actor)) {
             var candidates = TechniqueWorldTargets.candidates(actor, intent.getStrike(), hostile);
             TechniqueWeaponBinds.begin(actor, hand, effect, candidates);
+        }
+    }
+
+    private static List<String> selectTargets(WeaponStrike strike, CastHits hits, List<LivingEntity> candidates) {
+        // 普通击、牵制与泼金均按本次施放的命中预算筛选各自的候选目标。
+        return TechniqueStrikeTargets.select(strike, hits.groups,
+                candidates.stream().map(LivingEntity::getStringUUID).toList());
+    }
+
+    private void releaseSplash(InteractionHand hand, HeldItemRules rules, StrikeData data, CastHits hits) {
+        // 热兵绑定和整叠消耗在同一次宿主效果回执内提交；挥空也结束流金。
+        WeaponStrike strike = data.strike();
+        List<LivingEntity> candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
+        List<String> selected = selectTargets(strike, hits, candidates);
+        var heat = ((TechniqueWeaponHeat.Access) actor).meridian$weaponHeat();
+        if (!heat.release(actor, hand, rules.getRequiredHeatStatus())) {
+            return;
+        }
+        if (!(actor instanceof ServerPlayer player && player.isCreative())) {
+            actor.setItemInHand(hand, ItemStack.EMPTY);
+        }
+        TechniqueWeaponSplash.show(actor, strike);
+        work.execute(actor, data.source(), () -> splashTargets(candidates, selected, data));
+    }
+
+    private void splashTargets(List<LivingEntity> candidates, List<String> selected, StrikeData data) {
+        // 稳定的近远顺序分配同一把兵器的回收额，额度用完仍能命中。
+        var splash = data.strike().getSplash();
+        int remaining = splash.getDropLimit();
+        for (var target : candidates) {
+            if (!selected.contains(target.getStringUUID())) {
+                continue;
+            }
+            double dose = baseDamage(data.stack(), data.category(), target, data.source()) * data.multiplier();
+            if (TechniqueWeaponSplash.HIT.invoker().hit(target, data.source(), dose, splash)) {
+                TechniqueStatusBenefits.apply(target, splash.getCoating());
+                int count = Math.min(remaining, splash.getDropsPerTarget());
+                if (count > 0) {
+                    TechniqueSplashDrops.schedule(target, splash, count);
+                    remaining -= count;
+                }
+            }
         }
     }
 

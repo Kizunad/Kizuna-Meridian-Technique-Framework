@@ -137,6 +137,7 @@ message HeldItemRules {
   repeated string required_item_tags = 7; // 非空时，选中的物品还须命中任一标签
   HeldItemConsumptionStrategy consumption_strategy = 8; // 整件消耗效果必须显式启用
   repeated HeldItemRefusal refusals = 9; // 两手均不合要求时，按声明顺序解释原因
+  string required_heat_status = 10; // 仅匹配实际绑定此热兵状态的物品栈
 }
 message HeldItemRefusal {
   string item_tag = 1; // 空值匹配空手与其余物品
@@ -171,6 +172,7 @@ message HeldItem {
   string brew_kind_id = 5; // 巫药种类；非巫药为空
   optional int32 brew_quality = 6; // 巫药品质组件值 [0, 3]
   optional BrewUseMethod brew_use = 7;
+  string heat_status = 8; // 当前手实际绑定的热兵状态
 }
 message HeldItems {
   HeldItem main_hand = 1;
@@ -582,6 +584,7 @@ message WeaponStrike {
   string heat_status_id = 21; // 选定手上有此热兵状态时使用下列伤害身份
   string heated_main_hand_damage_type_id = 22;
   string heated_off_hand_damage_type_id = 23;
+  WeaponSplash splash = 24; // 末击将热兵整叠消耗并在扇区命中部位留下沉积
   bool release_bound_arm = 25; // 末击仅对本次施放锁住的前臂抽回
   bool cut_bound_arm = 26; // 持段只割已绑定的前臂，不解开牵制
   string hit_particle_id = 27; // 在实际受伤的目标处播放一个简单原版粒子
@@ -592,6 +595,14 @@ message WeaponBind {
   string immune_status_id = 3;
   double counter_force_ratio = 4;
   int64 stagger_millis = 5;
+}
+message WeaponSplash {
+  StatusBenefit coating = 1;
+  double tempo_multiplier = 2;
+  uint32 max_parts = 3;
+  string drop_item = 4;
+  uint32 drops_per_target = 5;
+  uint32 drop_limit = 6;
 }
 message BreakBlocks {
   Quantity forward_distance = 1; // METER，(0, 1024]

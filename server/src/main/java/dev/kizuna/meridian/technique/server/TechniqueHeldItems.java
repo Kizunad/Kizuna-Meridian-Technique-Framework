@@ -48,6 +48,10 @@ public final class TechniqueHeldItems {
         validateSelectionOrder(rules.getSelectionOrderList());
         validateAmmunition(rules);
         validateRequiredItemTags(rules);
+        String requiredHeat = rules.getRequiredHeatStatus();
+        if (!requiredHeat.isEmpty()) {
+            TechniqueValues.id(requiredHeat, "required_heat_status");
+        }
         validateRefusals(rules);
         validateConsumptionStrategy(rules.getConsumptionStrategy());
     }
@@ -215,6 +219,10 @@ public final class TechniqueHeldItems {
             return;
         }
         TechniqueValues.id(item.getItemId(), "held_item.item_id");
+        String heat = item.getHeatStatus();
+        if (!heat.isEmpty()) {
+            TechniqueValues.id(heat, "held_item.heat_status");
+        }
         validateTags(item.getTagsList());
         if (!item.hasDamageable() || !item.hasContainsItems()) {
             throw TechniqueErrors.invalid("held_item", "有物品时须声明耐久和是否装着东西");
@@ -301,9 +309,14 @@ public final class TechniqueHeldItems {
 
     static void validateConsumption(HeldItemRules rules, TechniqueDefinition definition) {
         // 整把消耗必须由 Framework 声明策略，内容定义不能自行决定扣除方式。
-        boolean consumesHeldItem = definition.getEffectsList().stream()
-                .anyMatch(effect -> effect.hasConsumeHeldItem());
-        if (!consumesHeldItem) {
+        var effects = definition.getEffectsList();
+        boolean consumesHeldItem = effects.stream().anyMatch(effect -> effect.hasConsumeHeldItem());
+        boolean splashes = effects.stream()
+                .anyMatch(effect -> effect.getWeaponStrike().hasSplash());
+        if (splashes) {
+            validateSplashRules(rules);
+        }
+        if (!consumesHeldItem && !splashes) {
             return;
         }
         if (rules.getConsumptionStrategy() != HeldItemConsumptionStrategy.CONSUME_SELECTED_STACK) {
@@ -311,6 +324,14 @@ public final class TechniqueHeldItems {
         }
         if (rules.getCategoriesCount() == 0) {
             throw TechniqueErrors.invalid("held_item_rules", "整把消耗效果必须声明持物规则");
+        }
+    }
+
+    static void validateSplashRules(HeldItemRules rules) {
+        // 目录与世界回执共用热兵和选定手整叠消耗的门槛。
+        if (rules.getRequiredHeatStatus().isEmpty()
+                || rules.getConsumptionStrategy() != HeldItemConsumptionStrategy.CONSUME_SELECTED_STACK) {
+            throw TechniqueErrors.invalid("weapon_splash", "泼洒需要热兵与整叠消耗策略");
         }
     }
 
@@ -400,6 +421,10 @@ public final class TechniqueHeldItems {
         // 类别和耐久表各取首次命中，无耐久物品用无穷排序值表示一次性消耗。
         if (hand == items.getBoundHand() || item.getItemId().isEmpty()
                 || item.getContainsItems() || !matchesRequiredItem(rules, item)) {
+            return null;
+        }
+        String heat = rules.getRequiredHeatStatus();
+        if (!heat.isEmpty() && !heat.equals(item.getHeatStatus())) {
             return null;
         }
         Optional<HeldItemCategory> categoryResult = rules.getCategoriesList().stream()

@@ -10,6 +10,7 @@ import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponHeat;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueWeaponBinds;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueSplashDrops;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStaggers;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueStatusBenefits;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueTissueEffects;
@@ -153,6 +154,7 @@ public final class TechniqueFabric implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(this::start);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stop());
         ServerTickEvents.END_SERVER_TICK.register(this::tick);
+        ServerTickEvents.END_SERVER_TICK.register(TechniqueSplashDrops::tick);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> disconnect(handler.player));
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> unload(entity));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {

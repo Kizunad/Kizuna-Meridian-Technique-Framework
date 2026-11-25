@@ -175,6 +175,26 @@ public final class TechniqueWeaponHeat {
             bind(actor, main ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND, status);
         }
 
+        String status(ItemStack held) {
+            // 持物事实只把状态交给与实际热兵相同的栈。
+            if (benefit != null && held == stack) {
+                return benefit.getId();
+            }
+            return "";
+        }
+
+        boolean release(LivingEntity actor, InteractionHand selected, String required) {
+            // 出手前再查水、换手、换栈和自然到期；正常释放不触发淬冷。
+            check(actor);
+            if (benefit == null || hand != selected || !required.equals(benefit.getId())) {
+                return false;
+            }
+            var heated = TechniqueStatusBenefits.get(required).effect();
+            clear();
+            actor.removeEffect(heated);
+            return true;
+        }
+
         private void clear() {
             // 丢弃已到期的原版效果引用，避免随后误用旧手位。
             benefit = null;

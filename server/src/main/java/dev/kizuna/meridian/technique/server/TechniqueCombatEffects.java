@@ -50,12 +50,34 @@ final class TechniqueCombatEffects {
         validateShape(strike, angle);
         validateShield(strike);
         validateDamageTypes(strike);
-        if (!strike.getHitParticleId().isEmpty()) {
-            id(strike.getHitParticleId(), "weapon_strike.hit_particle_id");
+        String particleId = strike.getHitParticleId();
+        if (!particleId.isEmpty()) {
+            id(particleId, "weapon_strike.hit_particle_id");
+        }
+        if (strike.hasSplash()) {
+            validateSplash(strike);
         }
         if (strike.hasInjuryOverride() && strike.getInjuryOverride() != InjuryKind.CUTTING
                 && strike.getInjuryOverride() != InjuryKind.BLUNT) {
             throw TechniqueErrors.invalid("injury_override", "未知致伤覆盖");
+        }
+    }
+
+    private static void validateSplash(WeaponStrike strike) {
+        // 沉积必须来自单手扇面末击；同一把兵器共享一个有界回收额度。
+        var splash = strike.getSplash();
+        var coating = splash.getCoating();
+        double tempo = splash.getTempoMultiplier();
+        int maxParts = splash.getMaxParts();
+        int dropsPerTarget = splash.getDropsPerTarget();
+        int dropLimit = splash.getDropLimit();
+        TechniqueBenefits.validate(coating);
+        id(splash.getDropItem(), "weapon_splash.drop_item");
+        if (!coating.hasPlain() || !strike.getLastStrike() || strike.getShape() != StrikeShape.SECTOR
+                || strike.getCanTwoHand() || strike.getMainHandDamageTypeId().isEmpty()
+                || !(tempo > 0 && tempo < 1) || maxParts < 1 || maxParts > MAX_MODULES
+                || dropsPerTarget < 1 || dropLimit < dropsPerTarget || dropLimit > MAX_TARGETS) {
+            throw TechniqueErrors.invalid("weapon_splash", "沉积状态、部位数或回落额度非法");
         }
     }
 

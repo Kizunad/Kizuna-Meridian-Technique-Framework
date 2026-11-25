@@ -71,12 +71,14 @@ public final class TechniqueWorldItems {
         HeldItem actual = item(stack);
         var tags = actual.getTagsList();
         var effective = tags.stream().filter(tag -> !TechniqueWeaponHeat.suppressed(entity, tag)).toList();
-        if (effective.size() == tags.size()) {
+        String heat = ((TechniqueWeaponHeat.Access) entity).meridian$weaponHeat().status(stack);
+        if (effective.size() == tags.size() && heat.isEmpty()) {
             return actual;
         }
         return actual.toBuilder()
                 .clearTags()
                 .addAllTags(effective)
+                .setHeatStatus(heat)
                 .build();
     }
 

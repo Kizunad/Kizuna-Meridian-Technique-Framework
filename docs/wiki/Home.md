@@ -50,5 +50,6 @@ Fabric 的 `world` 工具包提供共享选目标、持物打击、劈门与正�
 
 - [数据契约与校验](Contracts.md)
 - [宿主与施放流程](Host-Integration.md)
+- [加一卷类人功法](Humanoid-Technique-Cookbook.md)
 - [规则、测试与交付记录](Verification.md)
 - [许可](Licensing.md)

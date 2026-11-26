@@ -27,3 +27,28 @@
 - 客户端测试：`kz client ~/Code/<本仓的 worktree>` 列出有哪些项，`kz client ~/Code/<本仓的 worktree> <项>` 跑其中一项
 - 要自己写 Gradle 参数时：`kz gradle ~/Code/<本仓的 worktree> -- <参数>`
 - 不提交、不推送；在自己的 worktree（`~/Code/wt-*`）里改，不改主目录。
+
+## 速查
+
+### 自动生成
+
+- Fabric 模组 `meridian_technique`，清单 `fabric/src/main/resources/fabric.mod.json`
+  - `client` → `dev.kizuna.meridian.technique.fabric.client.TechniqueScrollClient`
+  - `main` → `dev.kizuna.meridian.technique.fabric.TechniqueFabric`
+- 数据目录：`fabric/src/gametest/resources/data/meridian_technique_test/`、`fabric/src/gametest/resources/data/sample_manifest/`、`fabric/src/gametest/resources/data/sample_scrolls/`、`fabric/src/main/resources/data/meridian_technique/`
+- 资源目录：`fabric/src/gametest/resources/assets/sample_scrolls/`、`fabric/src/main/resources/assets/meridian_technique/`
+- Protobuf 数据文件（含功法目录）：`fabric/src/gametest/resources/data/sample_manifest/catalog.txtpb`、`fabric/src/gametest/resources/data/sample_scrolls/catalog.txtpb`、`server/src/test/resources/peddler_leg_strikes.txtpb`
+- 随包 TOML：无
+- 测试源集：`fabric/src/clientTest/`、`fabric/src/gametest/`、`fabric/src/test/`、`fabric/src/testFixtures/`、`server/src/test/`
+- `kz` 装配 ID：`technique`（`--with` 使用工作树路径）
+- `kz test --part unit`：`test build`
+- `kz test --part gametest`
+  - `:fabric:runGametest -PgametestRunDir=build/{name}`，运行目录 `fabric/build/{name}`
+- `kz client` 项目：`leap`、`scroll`、`status`
+
+### 常见坑
+
+- 2026-11-22 新增 GameTest 类还要登记测试源集的 `fabric-gametest` 入口。交付前逐名核日志和总条数。来源 `codex-worker-rules.md`「新用例要真跑到」。
+- 2026-11-10 改默认配置后用 `kz test <树> --part gametest` 起新运行目录，旧配置文件会保留原值。来源 `C5b-FIX-TASK.md`。
+- 2026-11-25 迭代时用 `--part gametest -- -PgametestFilter=<类或方法>`，用例通过后再跑全量和负对照。来源 `KNOWN-PUSH-FIX-20261125-TASK.md` 和 dev 构建规则。
+- 2026-11-26 JUnit 若触发 Minecraft 日志初始化，将工作目录设在模块的 `build/test-runtime/`，检查树里有无新增日志。来源 `TEST-LOGS-OUT-TASK.md`。

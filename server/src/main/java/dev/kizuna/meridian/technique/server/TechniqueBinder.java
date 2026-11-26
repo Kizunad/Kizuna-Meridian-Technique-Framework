@@ -49,6 +49,15 @@ public final class TechniqueBinder {
         return bindSlots(body, definition, selectedHand, mainHandSide, Purpose.CAST);
     }
 
+    static BindingOutcome bindForLearning(BodySnapshot body, TechniqueDefinition definition) {
+        // 读卷只取本式要求已开的经脉槽，不需要手持兵器、付真元或占用施放组织。
+        var meridians = definition.getSlotsList().stream()
+                .filter(slot -> slot.getModule() == ModuleKind.MERIDIAN && slot.getRequireOpened())
+                .toList();
+        var training = definition.toBuilder().clearSlots().addAllSlots(meridians).build();
+        return bind(body, training);
+    }
+
     public static BindingOutcome bindBenefit(BodySnapshot body, TechniqueDefinition definition, StatusBenefit benefit) {
         // 命令状态只要求存活身体与描述引用的组织，疲劳耗尽也应允许恢复状态。
         var vitality = body.vitality();

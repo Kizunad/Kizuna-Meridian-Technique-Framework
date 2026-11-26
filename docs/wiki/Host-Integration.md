@@ -628,6 +628,8 @@ Framework 的 `handleActivity`；内容包只维护 `status_benefit.tissue`、�
 
 ## 可信施放准入
 
+目录可为单式声明 `learn_requires_open_meridians`。学习提交以同一身体快照核对该式的 `minimum_realm` 和全部 `require_opened` 经脉槽。读卷、整书、单式与精确版本共用此检查，通过后一次写入各式。学习不扣真元，起手另查费用、所持兵器和完整绑定。
+
 宿主可在 `SERVICE_STARTED` 回调中通过 `TechniqueService.addCastGuard(BiPredicate<UUID, CastRequest>)`
 登记施放准入。所有 `cast` 在读取或修改身体前依次检查；任一返回 false，回执为 Framework `ACCESS_DENIED`，
 并沿同一施放观察者发布。已支付施放的推进、费用、冷却和结束流程保持既有语义。

@@ -535,8 +535,9 @@ public final class TechniqueService {
             if (!registry.applies(reference, body.template())) {
                 throw new BodyTemplateMismatchException();
             }
-            if (!knowledge.contains(reference) && registry.find(reference).orElseThrow().getInnate()) {
-                throw new InnateLockedException();
+            var definition = registry.find(reference).orElseThrow();
+            if (!knowledge.contains(reference)) {
+                validateLearning(body, definition);
             }
         }
         for (String id : prerequisites) {
@@ -561,6 +562,19 @@ public final class TechniqueService {
         List<KnownEntry> result = entries(TechniqueKnowledge.references(registry, body, learned));
         publishKnownChanged(entityUuid, result);
         return result;
+    }
+
+    private static void validateLearning(BodySnapshot body, TechniqueDefinition definition) {
+        // 所有待学单式均获准后，调用方才会提交整笔进度活动。
+        if (definition.getInnate()) {
+            throw new InnateLockedException();
+        }
+        if (definition.getLearnRequiresOpenMeridians()) {
+            var binding = TechniqueBinder.bindForLearning(body, definition);
+            if (!binding.hasBinding()) {
+                throw new LearningDeniedException(binding.getReason());
+            }
+        }
     }
 
     public void addKnownChangedListener(Consumer<KnownChanged> listener) {
@@ -1861,6 +1875,13 @@ public final class TechniqueService {
     private static String effectRequestId(EffectIntent effect) {
         // 同一施放中的各效果独立去重，停止表现和解锁也各有固定身份。
         return EFFECT_REQUEST_PREFIX + effect.getCastId() + "_" + effect.getEffectId();
+    }
+
+    public static final class LearningDeniedException extends IllegalArgumentException {
+        private LearningDeniedException(String reason) {
+            // 卷轴和命令展示绑定器指出的境界或缺少的经脉。
+            super(reason);
+        }
     }
 
     public static final class InnateLockedException extends IllegalArgumentException {

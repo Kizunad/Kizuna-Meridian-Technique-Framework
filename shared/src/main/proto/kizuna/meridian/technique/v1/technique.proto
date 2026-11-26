@@ -949,6 +949,7 @@ message TechniqueDefinition {
   InnateUnlock innate_unlock = 24; // 仅天生式可填；缺省时不设知识门槛，空消息仅要求境界
   MaintainedBreathing maintained_breathing = 25; // 起手完成后释放前台，按身体时间维持吐纳效果
   HeldItemRules held_item_rules = 26; // 单式完整覆盖书级规则
+  bool learn_requires_open_meridians = 27; // 学习提交须达到本式境界并满足声明的已开经脉槽
 }
 
 enum TechniqueFailure {

@@ -1,0 +1,63 @@
+definitions {
+  id: "sample:peer_0" version: 1
+  phases { warmup_millis: 236 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 0.7866 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_0" }
+}
+definitions {
+  id: "sample:peer_1" version: 1
+  phases { warmup_millis: 256 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 0.8521 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_1" }
+}
+definitions {
+  id: "sample:peer_2" version: 1
+  phases { warmup_millis: 277 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 0.9231 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_2" }
+}
+definitions {
+  id: "sample:peer_3" version: 1
+  phases { warmup_millis: 300 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_3" }
+}
+definitions {
+  id: "sample:peer_4" version: 1
+  phases { warmup_millis: 300 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_4" }
+}
+definitions {
+  id: "sample:peer_5" version: 1
+  phases { warmup_millis: 300 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_5" }
+}
+definitions {
+  id: "sample:peer_6" version: 1
+  phases { warmup_millis: 325 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1.0833 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_6" }
+}
+definitions {
+  id: "sample:peer_7" version: 1
+  phases { warmup_millis: 352 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1.1735 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_7" }
+}
+definitions {
+  id: "sample:peer_8" version: 1
+  phases { warmup_millis: 381 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1.2712 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 peer_8" }
+}

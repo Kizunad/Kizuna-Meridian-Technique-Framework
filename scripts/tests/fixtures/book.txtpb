@@ -1,0 +1,14 @@
+books { id: "sample:book" display_name: "试剑" held_item_rules { required_item_tags: "minecraft:swords" } }
+volumes {
+  id: "sample:volume" book_id: "sample:book" display_name: "上卷"
+  techniques { id: "sample:peer_0" version: 1 }
+  techniques { id: "sample:peer_1" version: 1 }
+  techniques { id: "sample:peer_2" version: 1 }
+  techniques { id: "sample:peer_3" version: 1 }
+  techniques { id: "sample:peer_4" version: 1 }
+  techniques { id: "sample:peer_5" version: 1 }
+  techniques { id: "sample:peer_6" version: 1 }
+  techniques { id: "sample:peer_7" version: 1 }
+  techniques { id: "sample:peer_8" version: 1 }
+  techniques { id: "sample:candidate" version: 1 }
+}

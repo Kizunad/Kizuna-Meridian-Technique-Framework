@@ -1,0 +1,7 @@
+definitions {
+  id: "sample:candidate" version: 1
+  phases { warmup_millis: 300 active_millis: 0 recovery_millis: 300 }
+  cooldown_millis: 3000
+  effects { weapon_strike { multiplier { value: 1 unit: RATIO } dedup_group: "first" } }
+  presentation { display_name: "直刺 candidate" }
+}

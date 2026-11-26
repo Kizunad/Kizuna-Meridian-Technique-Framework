@@ -293,11 +293,16 @@ enum ImpulseDirection {
   TOWARD_TARGET = 3; // 朝施放目标的水平方向；起手时没有选中目标、或和目标水平重合的，宿主按面朝的方向推进
   INPUT = 4; // 输入为零或缺省时使用 input_default_direction，未声明则向前
   BACKWARD = 5;
+  SIDE = 6; // 面朝方向的左右一侧；按输入的横向分量选边，没有横向输入时向左
 }
 message Impulse {
   ImpulseDirection direction = 1;
   Quantity speed = 2; // (0, 100] m/s
   optional ImpulseDirection input_default_direction = 3; // 仅 INPUT 可声明，FORWARD 或 BACKWARD
+  // METER，(0, 4]。声明后按定距短移执行：宿主先逐段试探碰撞和落脚，只走到能站住的最远处，
+  // 再按这段距离给初速度，speed 只作每刻速度的上限；不能和 UP 同用。
+  optional Quantity maximum_distance = 4;
+  bool blocked_cancels_strikes = 5; // 一步也走不了时，本次施放此后的兵器打击全部取消；须声明 maximum_distance
 }
 // 注册于模组初始化的增益；相同身份重复施放只刷新持续时间。
 message StatusBenefit {
@@ -588,6 +593,11 @@ message WeaponStrike {
   bool release_bound_arm = 25; // 末击仅对本次施放锁住的前臂抽回
   bool cut_bound_arm = 26; // 持段只割已绑定的前臂，不解开牵制
   string hit_particle_id = 27; // 在实际受伤的目标处播放一个简单原版粒子
+  // 只钉不打：在本扇区里钉住最近的一个目标和他此刻的位置，并冻结本次施放此后各击的出剑朝向。
+  // 不伤人、不挥手、不做功，也不能是最后一击。
+  bool pin_target = 28;
+  // METER。只查同一施放里钉住的那一人；他离钉住时的位置水平超过该值，或已不在本击扇区内，就挥空。
+  optional Quantity pinned_drift = 29;
 }
 message WeaponBind {
   StatusBenefit caster = 1;

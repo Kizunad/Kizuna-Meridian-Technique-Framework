@@ -57,6 +57,7 @@ final class TechniqueCombatEffects {
         if (strike.hasSplash()) {
             validateSplash(strike);
         }
+        validatePin(strike);
         if (strike.hasInjuryOverride() && strike.getInjuryOverride() != InjuryKind.CUTTING
                 && strike.getInjuryOverride() != InjuryKind.BLUNT) {
             throw TechniqueErrors.invalid("injury_override", "未知致伤覆盖");
@@ -184,6 +185,17 @@ final class TechniqueCombatEffects {
         }
     }
 
+    private static void validatePin(WeaponStrike strike) {
+        // 钉住的一击不结算伤害，因此不能兼作末击、泼金或牵制；查钉住目标的一击不能自己再钉。
+        if (strike.hasPinnedDrift()) {
+            positive(strike.getPinnedDrift(), Unit.METER, MAX_DISTANCE, "weapon_strike.pinned_drift");
+        }
+        if (strike.getPinTarget() && (strike.getLastStrike() || strike.hasSplash() || strike.hasPinnedDrift()
+                || strike.getReleaseBoundArm() || strike.getCutBoundArm())) {
+            throw TechniqueErrors.invalid("weapon_strike.pin_target", "钉住目标的一击不能兼作末击、泼金、牵制或查钉");
+        }
+    }
+
     private static void validateBudget(WeaponStrike strike, double twoHand) {
         // 每击预算不能超过整次预算，耐久只在显式末击扣除。
         int maximumTargets = strike.getMaximumTargets();
@@ -244,6 +256,7 @@ final class TechniqueCombatEffects {
             return;
         }
         WeaponStrike first = strikes.get(0);
+        boolean pinned = false;
         for (int index = 0; index < strikes.size(); index++) {
             WeaponStrike strike = strikes.get(index);
             boolean last = index == strikes.size() - 1;
@@ -253,6 +266,10 @@ final class TechniqueCombatEffects {
                         definition.getId(),
                         "整次目标上限、耐久基数或最后一击声明不一致");
             }
+            if (strike.hasPinnedDrift() && !pinned) {
+                throw TechniqueErrors.invalid(definition.getId(), "查钉住目标的一击之前没有钉住目标的一击");
+            }
+            pinned |= strike.getPinTarget();
         }
     }
 

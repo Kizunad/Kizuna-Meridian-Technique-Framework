@@ -5,6 +5,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BreakBlocksIn
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.EffectIntent;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemCategory;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItemRules;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ImpulseDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.InjuryKind;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ShieldInteraction;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.SoundCue;
@@ -54,6 +55,9 @@ public final class TechniqueWorldEffects {
     }
 
     private static final long MILLIS_PER_TICK = 50;
+    private static final double MILLIS_PER_SECOND = 1000;
+    /** 定距短移能走的距离不到这么多就算被堵住，不为贴墙的一小段挪动。 */
+    private static final double MINIMUM_STEP = 0.3;
     private static final float SHIELD_BREAK_VOLUME = 0.8F;
     private static final float SHIELD_BREAK_PITCH = 0.8F;
     private static final float SHIELD_BREAK_PITCH_SPREAD = 0.4F;
@@ -93,6 +97,13 @@ public final class TechniqueWorldEffects {
         }
         var heat = TechniqueWeaponHeat.active(actor, hand, strike.getHeatStatusId());
         CastHits hits = casts.computeIfAbsent(effect.getCastId(), id -> new CastHits());
+        if (hits.strikesCancelled) {
+            return;
+        }
+        if (strike.getPinTarget()) {
+            pin(strike, hits);
+            return;
+        }
         hits.lastWeapon = stack.copy();
         hits.lastStrikeMillis = effect.getScheduledMillis();
         if (!strike.getCutBoundArm()) {
@@ -126,7 +137,7 @@ public final class TechniqueWorldEffects {
         if (strike.getReleaseBoundArm() || strike.getCutBoundArm()) {
             candidates = pull.stream().map(TechniqueWeaponBinds.Pull::target).toList();
         } else {
-            candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
+            candidates = facingCandidates(strike, hits);
         }
         List<String> selected = selectTargets(strike, hits, candidates);
         List<SoundCue> hitSounds = effect.getWeaponStrike().getHitSoundsList();
@@ -146,6 +157,62 @@ public final class TechniqueWorldEffects {
         } else {
             strikeWork.run();
         }
+    }
+
+    private List<LivingEntity> facingCandidates(WeaponStrike strike, CastHits hits) {
+        // 本次施放钉过目标或走过定距短移的，扇区沿当时冻结的朝向；查钉的一击只留下原目标。
+        float facing = actor.getYRot();
+        if (hits.facing != null) {
+            facing = hits.facing;
+        }
+        List<LivingEntity> inSector = TechniqueWorldTargets.candidates(actor, strike, hostile, facing);
+        if (!strike.hasPinnedDrift()) {
+            return inSector;
+        }
+        LivingEntity pinned = hits.pinned;
+        if (pinned == null || !inSector.contains(pinned)) {
+            return List.of();
+        }
+        Vec3 drift = pinned.position().subtract(hits.pinnedAt).multiply(1, 0, 1);
+        double limit = strike.getPinnedDrift().getValue();
+        if (drift.lengthSqr() > limit * limit) {
+            return List.of();
+        }
+        return List.of(pinned);
+    }
+
+    private void pin(WeaponStrike strike, CastHits hits) {
+        // 只记人和位置并冻结朝向；扇区里没有人时照样冻结朝向，随后查钉的一击自然挥空。
+        hits.facing = actor.getYRot();
+        List<LivingEntity> candidates = TechniqueWorldTargets.candidates(actor, strike, hostile);
+        if (!candidates.isEmpty()) {
+            hits.pinned = candidates.getFirst();
+            hits.pinnedAt = hits.pinned.position();
+        }
+    }
+
+    public void step(EffectIntent effect, Vec3 direction) {
+        // 先量出这个方向上能站住的最远处，再按这段距离给初速度；此后各击沿这一刻的朝向。
+        var impulse = effect.getImpulse();
+        CastHits hits = casts.computeIfAbsent(effect.getCastId(), id -> new CastHits());
+        hits.facing = actor.getYRot();
+        double maximum = impulse.getMaximumDistance().getValue();
+        Vec3 heading = direction;
+        double reach = TechniqueWorldSteps.reach(actor, heading, maximum);
+        var input = effect.getDirection();
+        boolean freeSide = impulse.getDirection() == ImpulseDirection.SIDE && input.getX() == 0 && input.getZ() == 0;
+        if (reach < MINIMUM_STEP && freeSide) {
+            // 没有指定哪一侧时，缺省的一侧站不住就换另一侧。
+            heading = direction.reverse();
+            reach = TechniqueWorldSteps.reach(actor, heading, maximum);
+        }
+        if (reach < MINIMUM_STEP) {
+            hits.strikesCancelled = impulse.getBlockedCancelsStrikes();
+            return;
+        }
+        double capPerTick = impulse.getSpeed().getValue() * MILLIS_PER_TICK / MILLIS_PER_SECOND;
+        Vec3 velocity = TechniqueWorldSteps.velocity(heading, reach, capPerTick);
+        TechniqueWorldImpulses.apply(actor, impulse.getDirection(), velocity);
     }
 
     private void beginBind(EffectIntent effect, ItemStack stack, InteractionHand hand) {
@@ -464,6 +531,10 @@ public final class TechniqueWorldEffects {
         private final Map<String, Set<String>> groups = new HashMap<>();
         private ItemStack lastWeapon;
         private long lastStrikeMillis;
+        private Float facing;
+        private LivingEntity pinned;
+        private Vec3 pinnedAt;
+        private boolean strikesCancelled;
     }
 
     /** 护甲前剂量预估：剂量、致伤种类与是否双手握持。 */

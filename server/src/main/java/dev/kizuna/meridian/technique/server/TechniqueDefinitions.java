@@ -573,6 +573,13 @@ final class TechniqueDefinitions {
                         "仅 INPUT 可声明向前或向后缺省方向");
         }
         positive(impulse.getSpeed(), Unit.METERS_PER_SECOND, MAX_SPEED, "impulse.speed");
+        if (impulse.hasMaximumDistance()) {
+            positive(impulse.getMaximumDistance(), Unit.METER, MAX_STEP_DISTANCE, "impulse.maximum_distance");
+        }
+        if ((impulse.hasMaximumDistance() && impulse.getDirection() == ImpulseDirection.UP)
+                || (impulse.getBlockedCancelsStrikes() && !impulse.hasMaximumDistance())) {
+            throw TechniqueErrors.invalid("impulse.maximum_distance", "定距短移只能水平，受阻取消打击须先声明定距");
+        }
     }
 
     private static void validateAiHints(Category category, AiHints hints) {

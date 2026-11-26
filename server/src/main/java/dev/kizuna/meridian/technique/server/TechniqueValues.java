@@ -25,6 +25,7 @@ final class TechniqueValues {
     static final double MAX_PEAK = 10;
     static final double MIN_MULTIPLIER = 0.05;
     static final double MAX_SPEED = 100;
+    static final double MAX_STEP_DISTANCE = 4;
     static final double MAX_DISTANCE = 1024;
     static final double MAX_WEIGHT = 100;
     static final int MAX_TEXT = 256;

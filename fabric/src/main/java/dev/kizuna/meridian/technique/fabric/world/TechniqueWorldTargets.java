@@ -20,7 +20,12 @@ public final class TechniqueWorldTargets {
     }
 
     static List<LivingEntity> candidates(LivingEntity actor, WeaponStrike strike, Predicate<LivingEntity> hostile) {
-        // 先统一过滤可伤害对象，再按距离及 UUID 稳定排序。
+        return candidates(actor, strike, hostile, actor.getYRot());
+    }
+
+    static List<LivingEntity> candidates(LivingEntity actor, WeaponStrike strike, Predicate<LivingEntity> hostile,
+                                         float facingYaw) {
+        // 先统一过滤可伤害对象，再按距离及 UUID 稳定排序；扇区朝向可由调用方冻结。
         double distance = strike.getDistance().getValue();
         List<LivingEntity> nearby = actor.level().getEntitiesOfClass(LivingEntity.class,
                 actor.getBoundingBox().inflate(distance), target -> eligible(actor, target, hostile))
@@ -35,7 +40,7 @@ public final class TechniqueWorldTargets {
             }
         }
         return nearby.stream()
-                .filter(target -> inStrikeSector(actor, target, strike))
+                .filter(target -> inStrikeSector(actor, target, strike, facingYaw))
                 .toList();
     }
 
@@ -64,12 +69,17 @@ public final class TechniqueWorldTargets {
     }
 
     public static boolean inStrikeSector(LivingEntity actor, LivingEntity target, WeaponStrike strike) {
+        return inStrikeSector(actor, target, strike, actor.getYRot());
+    }
+
+    public static boolean inStrikeSector(LivingEntity actor, LivingEntity target, WeaponStrike strike,
+                                         float facingYaw) {
         // 扇区只比较水平方向，纵向仍由最大距离约束。
         double reach = strike.getDistance().getValue();
         if (actor.distanceToSqr(target) > reach * reach) {
             return false;
         }
-        Vec3 facing = Vec3.directionFromRotation(0, actor.getYRot() + (float) strike.getFacingOffset().getValue());
+        Vec3 facing = Vec3.directionFromRotation(0, facingYaw + (float) strike.getFacingOffset().getValue());
         Vec3 delta = target.position().subtract(actor.position()).multiply(1, 0, 1);
         if (delta.lengthSqr() == 0) {
             return true;

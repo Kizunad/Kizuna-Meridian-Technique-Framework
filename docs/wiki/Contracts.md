@@ -231,6 +231,7 @@ Framework 的标签是开放字符串，没有标签注册或模板枚举 API。
 |---|---|
 | `weapon_strike.shape/distance` | `SINGLE_TARGET/SECTOR`；距离 `METER`，(0, 1024] |
 | `angle/facing_offset` | `DEGREE`；角度 (0, 360]，朝向偏移 [-180, 180]；相对打击时朝向 |
+| `pin_target` / `pinned_drift` | 钉住的一击不伤人、不挥手、不做功，也不能是最后一击：它在本扇区里记下最近的一个目标和他此刻的位置，并冻结本次施放此后各击的出剑朝向。声明 `pinned_drift`（`METER`）的一击只查钉住的那一人；他离钉住时的位置水平超过该值、已不在本击扇区内，或起手时扇区里没有人，就挥空。查钉的一击之前必须有钉住的一击 |
 | 单体 | `maximum_targets=1`、`angle=60`，先射线首个生物，再在后备锥内取最近目标 |
 | `multiplier/knockback` | `RATIO`；伤害倍率 (0, 10]，击退 [0, 10]；击退换算归宿主 |
 | `maximum_targets/cast_target_limit` | 显式整数，1 ≤ 每击上限 ≤ 整次不同目标上限 ≤ 128；各击整次上限一致 |
@@ -435,6 +436,8 @@ Framework 接受常值曲线的能力不等于本目录必须接受任意修正�
 `INPUT` 不使用玩家局部坐标；客户端或战斗 UI 负责先按视角把按键方向转换为世界方向。
 非零值仅表达方向，不决定速度或其他数值。当前保留原值以供幂等比较。
 `Impulse.input_default_direction` 只允许在 `INPUT` 上声明 `FORWARD` 或 `BACKWARD`，未声明默认前方。
+
+`Impulse.direction: SIDE` 取面朝方向的左右一侧：输入的横向分量朝右才向右，其余向左。声明 `maximum_distance`（`METER`，至多 4）的冲量按定距短移执行：宿主沿该方向每十分之一格试探一次，要求身体放得下、脚下半格多之内有碰撞面，只走到能站住的最远处，再按这段距离折算一次初速度，`speed` 只作每刻速度的上限。能走的距离不足 0.3 格算被堵住，不移动；`SIDE` 在没有任何输入时，缺省的一侧被堵就改走另一侧。`blocked_cancels_strikes` 为真且被堵住时，本次施放此后的兵器打击全部取消，不挥手也不磨损。走过定距短移的施放，此后各击沿位移那一刻的朝向取扇区。定距短移不能向上。初速度按普通地面的摩擦折算，冰面上会多滑一段。
 缺省和全零输入由调度器改成这一方向；非零输入保持 `INPUT` 和原方向，交给效果宿主。
 
 `TechniqueHostRequest` 使用标准小写 `entity_uuid` 和非空 `request_id`。

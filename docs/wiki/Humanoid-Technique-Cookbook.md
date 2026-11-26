@@ -78,3 +78,14 @@ pa="$code/Kizuna-Players-Animation"
 合前从功法框架运行 `python3 "scripts/check_docs.py"`。对功法框架、人体、生人、PA 和伤害的待合工作树分别运行 `python3 "$HOME/Code/wt-technique-f4/scripts/repo_quickref.py" --check "<仓路径>"`，也可用合并后的功法框架主目录调用同一脚本。预期每仓输出 `速查一致` 并退出 0。速查失配时先重新生成，再复核自动段与手写的「常见坑」。
 
 交付清单最后补一行 `手册增补：本次新摸清的接线和坑 N 条`，没有增补就写 `手册增补：无`。有新经验时附上源码或日志位置，主会话合入手册或各仓速查。
+
+## 做过的人踩过的坑
+
+- **新测试类不登记就不会跑。** kz 报「过，N/N」时核对 N 有没有涨；云溪 P3 第一次全绿其实一条新用例都没跑。
+- **通用格挡只管头和躯干。** 一式要让对手的格挡稳定接住，把它的主副手伤害类型加进 `data/meridian/tags/damage_type/aim/torso.json`；不加时每击随机选点，落到四肢不算接住。
+- **原版受击间隔是 10 刻。** 同一式对同一目标两拍间隔不到 10 刻的，第二拍会被吞掉，伤害类型要进 `data/minecraft/tags/damage_type/bypasses_cooldown.json`。用例只数受击入口的调用次数看不出来，要看第二拍有没有再掉血。
+- **读卷是整卷一起学。** 卷里有一式够不上条件，整卷都学不会、卷轴保留；要按式分开传，用 `TechniqueService.learn(实体, 式)` 逐式提交。
+- **测试玩家不会真的移动。** 位移由客户端模拟，GameTest 里的假玩家只能核对服务端给出的初速度（`getDeltaMovement`）；定距短移要查落脚，用例得自己在脚下铺地面。
+- **量真元要在受理当刻量。** 隔几刻再量会混进别的消耗。
+- **守方徒手格挡撑不住几击。** 铁剑两三击就把格挡用的前臂打废、守架自撤；要测连续格挡，给守方主手一把兵器。
+- **从 WSL 用非交互 ssh 跑 kz 没有 `JAVA_HOME`。** 命令前先 `export JAVA_HOME=$HOME/.sdkman/candidates/java/current PATH=$HOME/.sdkman/candidates/java/current/bin:$PATH`。

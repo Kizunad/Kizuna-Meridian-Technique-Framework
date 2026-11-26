@@ -119,6 +119,7 @@ public final class TechniqueState {
         TechniqueProtocol.validateReference(last.getTechnique());
         TechniqueValues.castId(last.getCastId());
         if (last.getActiveEndMillis() < 0 || last.getRecoveryEndMillis() < last.getActiveEndMillis()
+                || last.getGuardContact() && last.getEnding() != CastPhase.FINISHED
                 || (last.getEnding() != CastPhase.FINISHED && last.getEnding() != CastPhase.CANCELLED
                         && last.getEnding() != CastPhase.INTERRUPTED)) {
             throw TechniqueErrors.invalid("last_cast", "最近施放的边界或结束原因非法");

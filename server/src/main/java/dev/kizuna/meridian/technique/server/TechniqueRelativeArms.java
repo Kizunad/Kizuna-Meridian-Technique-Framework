@@ -18,7 +18,8 @@ final class TechniqueRelativeArms {
                          TechniqueDefinition definition) {
         // 持物打击与远程式都按起手选定的手位绑定，左右组织须在模板中存在。
         boolean weaponAction = definition.hasProjectileWeapon()
-                || definition.getEffectsList().stream().anyMatch(TechniqueEffect::hasWeaponStrike);
+                || definition.getEffectsList().stream().anyMatch(effect ->
+                        effect.hasWeaponStrike() || effect.getGuard().hasMaximumHoldMillis());
         for (TechniqueSlot slot : definition.getSlotsList()) {
             if (!slot.hasRelativeArm()) {
                 continue;
@@ -26,7 +27,8 @@ final class TechniqueRelativeArms {
             RelativeArmSlot arm = slot.getRelativeArm();
             if (!weaponAction || slot.getModule() != ModuleKind.TISSUE
                     || (arm.getArm() != DrawStrengthArm.OTHER_ARM && arm.getArm() != DrawStrengthArm.WEAPON_ARM)) {
-                throw TechniqueErrors.invalid(slot.getId(), "相对手臂只允许持物打击或远程式的组织槽");
+                throw TechniqueErrors.invalid(slot.getId(),
+                        "相对手臂只允许持物打击、限时守式或远程式的组织槽");
             }
             Set<String> known = matchingIds(addons, templates, slot);
             validateSide(arm.getLeftModuleIdsList(), known, slot);

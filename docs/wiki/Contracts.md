@@ -766,3 +766,5 @@ Meridian UI 初始化时把功法库说明来源登记到界面框架；原版�
 
 宿主可用 `TechniqueWorldTargets.inStrikeSector(actor, target, strike)` 检查目录规定的距离和角度，面向以调用时为准。目标身份、敌我、存活和可视性由宿主检查。
 `TechniqueWeaponSplash.RELEASED` 在热兵实际释放后通知施放者和精确招式。挥空也通知，起手中断或热兵复核失败时没有释放事件。
+
+限时守式可在守效果声明 `maximum_hold_millis`。从起手结束的身体时刻起计，截止时收势；守方实际减伤时，可由伤害宿主将本次施放的格中收势与费用一起提交。守式可声明 `stamina.break_group` 共用破防期限，缺省键为本式 ID。`requires_guard_contact` 承接要求前式为限时守，收势全部走完才开窗，结束边界为开区间。格中资格随身体、前式施放号保存，下一式受理时消费，离场清除。

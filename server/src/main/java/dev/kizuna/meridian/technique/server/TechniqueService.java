@@ -124,8 +124,10 @@ public final class TechniqueService {
             BodySnapshot body = host.inspect().body();
             ActiveCast active = TechniqueState.read(body).getActiveCast();
             var vitality = body.vitality();
+            long now = body.settledAt().elapsedMillis();
             if (vitality.dead() || vitality.remainingSeconds() == 0 || !active.hasSustained()
-                    || TechniqueScheduler.phase(active, body.settledAt().elapsedMillis()) != CastPhase.EFFECTIVE
+                    || now >= TechniqueGuardStamina.holdDeadline(active)
+                    || TechniqueScheduler.phase(active, now) != CastPhase.EFFECTIVE
                     || hardControlled(entityUuid)) {
                 return Optional.empty();
             }
@@ -157,7 +159,8 @@ public final class TechniqueService {
         validateReleaseSession(session, active, request);
         boolean replayed = session.pendingRelease != null || active.getSustained().hasEndRequestedMillis();
         if (!replayed && !session.terminating) {
-            session.pendingRelease = new PendingRelease(request, body.settledAt().elapsedMillis());
+            long requested = Math.min(body.settledAt().elapsedMillis(), TechniqueGuardStamina.holdDeadline(active));
+            session.pendingRelease = new PendingRelease(request, requested);
         }
         if (!session.processing) {
             advance(entityUuid, session);
@@ -993,7 +996,7 @@ public final class TechniqueService {
             }
             BodySnapshot body = inspection.body();
             TechniqueProgress progress = TechniqueState.read(body);
-            if (!progress.hasBlockedAttack()) {
+            if (!progress.hasBlockedAttack() && !progress.getLastCast().getGuardContact()) {
                 return true;
             }
             if (body.vitality().dead()) {
@@ -1002,10 +1005,8 @@ public final class TechniqueService {
                 }
                 return true;
             }
-            String eventId = progress.getBlockedAttack().getEventId();
-            TechniqueProgress.Builder clearedBuilder = progress.toBuilder();
-            clearedBuilder.clearBlockedAttack();
-            TechniqueProgress cleared = clearedBuilder.build();
+            String eventId = contactId(progress);
+            TechniqueProgress cleared = clearContacts(progress);
             BodyActivity activity = progressActivity(cleared);
             BodyActivityExecution.apply(body, activity, TechniqueHost.CALLER_ID);
             String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
@@ -1027,10 +1028,8 @@ public final class TechniqueService {
     private static boolean clearBlockedAttack(TechniqueRecoveryHost host, BodySnapshot body,
                                                TechniqueProgress progress) {
         // 死体不能执行普通活动，清理通过可信恢复命令保存相同的进度变更。
-        String eventId = progress.getBlockedAttack().getEventId();
-        TechniqueProgress.Builder clearedBuilder = progress.toBuilder();
-        clearedBuilder.clearBlockedAttack();
-        TechniqueProgress cleared = clearedBuilder.build();
+        String eventId = contactId(progress);
+        TechniqueProgress cleared = clearContacts(progress);
         String requestId = CLEAR_BLOCKED_ATTACK_PREFIX + eventId;
         try {
             long revision = host.submitRecovery(requestId, progressCommand(body, cleared));
@@ -1041,6 +1040,23 @@ public final class TechniqueService {
         } catch (TechniqueErrors.HostRejected rejected) {
             return rejected.failure() != FailureCode.REVISION_CONFLICT;
         }
+    }
+
+    private static String contactId(TechniqueProgress progress) {
+        // 重试时沿用持久记录的事件身份。
+        if (progress.hasBlockedAttack()) {
+            return progress.getBlockedAttack().getEventId();
+        }
+        return progress.getLastCast().getCastId();
+    }
+
+    private static TechniqueProgress clearContacts(TechniqueProgress progress) {
+        // 保留前式历史及冷却，只撤掉离场前可以消费的阻挡事实。
+        var cleared = progress.toBuilder().clearBlockedAttack();
+        if (progress.getLastCast().getGuardContact()) {
+            cleared.getLastCastBuilder().clearGuardContact();
+        }
+        return cleared.build();
     }
 
     public void reportStrike(StrikeReport report) {
@@ -1158,7 +1174,8 @@ public final class TechniqueService {
         BodySnapshot body = host.snapshot();
         TechniqueProgress progress = TechniqueState.read(body);
         if (!progress.hasActiveCast()
-                && (progress.hasBlockedAttack() || body.vitality().dead() && progress.hasActiveInfusion())) {
+                && (progress.hasBlockedAttack() || progress.getLastCast().getGuardContact()
+                    || body.vitality().dead() && progress.hasActiveInfusion())) {
             clearRecoveredProgress(host, body, progress);
         }
         if (progress.hasActiveCast()) {
@@ -1214,13 +1231,8 @@ public final class TechniqueService {
     private static void clearRecoveredProgress(TechniqueRecoveryHost host, BodySnapshot body,
                                                TechniqueProgress progress) {
         // 装载时清除离场前的阻挡窗口和死体上不会自行到期的附行。
-        TechniqueProgress.Builder cleared = progress.toBuilder();
-        String requestId = "technique_recover_progress_";
-        if (progress.hasBlockedAttack()) {
-            String eventId = progress.getBlockedAttack().getEventId();
-            cleared.clearBlockedAttack();
-            requestId += eventId;
-        }
+        TechniqueProgress.Builder cleared = clearContacts(progress).toBuilder();
+        String requestId = "technique_recover_progress_" + contactId(progress);
         if (body.vitality().dead() && progress.hasActiveInfusion()) {
             String castId = progress.getActiveInfusion().getCastId();
             cleared.clearActiveInfusion();
@@ -1333,6 +1345,7 @@ public final class TechniqueService {
                 terminate(entityUuid, session);
                 return;
             }
+            scheduleGuardExpiry(session, body);
             if (session.pendingRelease != null && session.pendingAdvance == null) {
                 applyRelease(entityUuid, session, body);
                 body = session.host.inspect().body();
@@ -1353,6 +1366,23 @@ public final class TechniqueService {
             // 即使业务进度损坏，已经开始的表现与移动锁仍有清理责任。
             beginTermination(entityUuid, session, TechniqueCastEndReason.FAILED,
                     invalidStateOutcome(session.castId));
+        }
+    }
+
+    private static void scheduleGuardExpiry(Session session, BodySnapshot body) {
+        // 宿主尚未自行结清时，由同一收势提交流程补上截止边界。
+        var active = TechniqueState.read(body).getActiveCast();
+        if (session.pendingRelease != null || !TechniqueSustained.unknownEnd(active)
+                || !active.getSustained().getGuard().hasMaximumHoldMillis()) {
+            return;
+        }
+        long deadline = TechniqueGuardStamina.holdDeadline(active);
+        if (body.settledAt().elapsedMillis() >= deadline) {
+            var request = EndActiveRequest.newBuilder()
+                    .setBodyId(body.id().value())
+                    .setCastId(active.getRequest().getCastId())
+                    .build();
+            session.pendingRelease = new PendingRelease(request, deadline);
         }
     }
 

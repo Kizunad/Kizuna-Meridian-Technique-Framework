@@ -94,8 +94,17 @@ final class TechniqueSustained {
         // 标签只检查公共身份格式，实际伤害类型归伤害适配器解释。
         TechniqueValues.positive(guard.getAngle(), Unit.DEGREE, FULL_ANGLE, "guard.angle");
         TechniqueValues.quantity(guard.getDamageMultiplier(), Unit.RATIO, 0, 1, "guard.damage_multiplier");
+        if (guard.hasMaximumHoldMillis()) {
+            validatePositive(guard.getMaximumHoldMillis(), TechniqueValues.MAX_MILLIS);
+            if (!guard.hasStamina()) {
+                throw TechniqueErrors.invalid("guard.stamina", "限时守式需要持守费用");
+            }
+        }
         if (guard.hasStamina()) {
             var stamina = guard.getStamina();
+            if (stamina.hasBreakGroup()) {
+                TechniqueValues.id(stamina.getBreakGroup(), "guard.stamina.break_group");
+            }
             validatePositive(stamina.getJoulesPerSecond(), TechniqueValues.MAX_QUANTITY);
             validatePositive(stamina.getJoulesPerDamagePrevented(), TechniqueValues.MAX_QUANTITY);
             validatePositive(stamina.getRestartRatio(), 1);
@@ -141,9 +150,12 @@ final class TechniqueSustained {
         validateGuard(sustained.getGuard());
         if (sustained.hasStaminaPaidMillis() && (!sustained.getGuard().hasStamina()
                 || sustained.getStaminaPaidMillis() < active.getWarmupEndMillis()
+                || sustained.getStaminaPaidMillis() > TechniqueGuardStamina.holdDeadline(active)
                 || sustained.hasEndRequestedMillis() && sustained.getStaminaPaidMillis() > active.getActiveEndMillis())
                 || sustained.getExhausted() && (!sustained.hasEndRequestedMillis()
                     || !sustained.getGuard().hasStamina())
+                || sustained.getGuardContact() && (!sustained.hasEndRequestedMillis()
+                    || !sustained.getGuard().hasMaximumHoldMillis() || sustained.getExhausted())
                 || sustained.hasWeaponContactOnBreak() && !sustained.getExhausted()) {
             throw TechniqueErrors.invalid("sustained.stamina", "守式结算时刻或破防原因与施放边界不符");
         }
@@ -164,7 +176,8 @@ final class TechniqueSustained {
         long requested = sustained.getEndRequestedMillis();
         long activeEnd = Math.max(active.getWarmupEndMillis(), requested);
         long recoveryEnd = addTime(activeEnd, sustained.getRecoveryMillis());
-        if (requested < active.getStartedMillis() || active.getActiveEndMillis() != activeEnd
+        if (requested < active.getStartedMillis() || requested > TechniqueGuardStamina.holdDeadline(active)
+                || active.getActiveEndMillis() != activeEnd
                 || active.getRecoveryEndMillis() != recoveryEnd) {
             throw TechniqueErrors.invalid("sustained", "收势时刻与已保存边界不一致");
         }
@@ -195,7 +208,8 @@ final class TechniqueSustained {
                 .putCooldowns(active.getRequest().getTechnique().getId(), cooldownEnd);
         if (guard.getExhausted()) {
             long deadline = addTime(requestedMillis, guard.getGuard().getStamina().getBreakMillis());
-            updated.putGuardBreakEnds(active.getRequest().getTechnique().getId(), deadline);
+            String group = TechniqueGuardStamina.breakGroup(active);
+            updated.putGuardBreakEnds(group, deadline);
         }
         var plan = BodyActivity.newBuilder().putProgress(TechniqueState.KEY, TechniqueState.pack(updated.build()));
         TechniqueGuardStamina.stopOccupancy(active, plan);

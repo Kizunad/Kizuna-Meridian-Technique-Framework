@@ -694,6 +694,7 @@ message FollowUp {
   optional ProjectileWeaponCategory previous_projectile_weapon = 5;
   optional ProjectileWeaponCategory next_projectile_weapon = 6;
   repeated BlockedAttackSource blocked_attack_sources = 7; // 非空时须在最近一次被挡后的 600 ms 内承接
+  bool requires_guard_contact = 9; // 仅接受前式守方真正挡住本击的回执
   optional int64 after_bind_release_millis = 8; // 要求前式真实抽回，自抽回起计时
 }
 message FollowUpRules {
@@ -744,6 +745,7 @@ message Guard {
   Quantity angle = 1; // DEGREE，水平总角 (0, 360]，边界包含在扇面内
   Quantity damage_multiplier = 2; // RATIO，[0, 1]，挡住部分剩余的剂量比例
   repeated string damage_tags = 3; // namespace:path，不带 #，任一匹配；1–16 项，不重复
+  optional int64 maximum_hold_millis = 5; // 成架后最迟收势的身体时间间隔
   GuardStamina stamina = 4; // 缺省沿用原守式，起手时随 guard 冻结
 }
 message GuardStamina {
@@ -751,6 +753,7 @@ message GuardStamina {
   double joules_per_damage_prevented = 2;
   int64 break_millis = 3;
   double restart_ratio = 4;
+  optional string break_group = 5; // 共用禁守记录的标识，省略时使用本式标识
 }
 // 炼化：宿主每批从经脉槽取料送入器官槽，按身体相态在配方族里选具体配方。
 // 施放结束或被打断后不再下发新批；已开始的批次由宿主照常完成。
@@ -1171,6 +1174,7 @@ message SustainedCast {
   Guard guard = 3; // 起手冻结的守参数；当前是否生效仍由阶段和身体存活状态决定
   optional int64 stamina_paid_millis = 4; // 从生效边界起，已结清到的身体毫秒
   bool exhausted = 5; // 耗尽触发的收势，与普通松手区分
+  bool guard_contact = 7; // 本次短守已因实际减伤收势
   optional bool weapon_contact_on_break = 6; // 命中耗尽时固定本击承力样式；空守耗尽时缺省。
 }
 message LastCast {
@@ -1178,6 +1182,7 @@ message LastCast {
   string cast_id = 2;
   int64 active_end_millis = 3;
   int64 recovery_end_millis = 4; // 保留正常边界，提前承接不提前开始前式冷却
+  bool guard_contact = 6; // 守方正常收势后的一次还击资格
   CastPhase ending = 5; // 只有 FINISHED 可用于收势后的承接
 }
 // 身体上的附行，一身至多一个；按身体时钟在查询时判断到期，不主动清除。

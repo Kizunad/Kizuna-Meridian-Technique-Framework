@@ -16,6 +16,48 @@ public final class TechniqueGuardStamina {
         // 只构造候选活动，提交仍由权威身体宿主完成。
     }
 
+    static String breakGroup(ActiveCast active) {
+        // 禁守键从起手快照读取，改目录不改变这次破防归属。
+        var rules = active.getSustained().getGuard().getStamina();
+        if (rules.hasBreakGroup()) {
+            return rules.getBreakGroup();
+        }
+        return active.getRequest().getTechnique().getId();
+    }
+
+    public static long holdDeadline(ActiveCast active) {
+        // 缺省允许持续持守；短守以成架时刻为计费起点。
+        var guard = active.getSustained().getGuard();
+        if (!guard.hasMaximumHoldMillis()) {
+            return Long.MAX_VALUE;
+        }
+        return Math.addExact(active.getWarmupEndMillis(), guard.getMaximumHoldMillis());
+    }
+
+    public static BodyActivity expire(TechniqueProgress progress) {
+        // 计费游标和收势边界在同一版本封账。
+        var active = progress.getActiveCast();
+        long end = holdDeadline(active);
+        var paid = active.getSustained().toBuilder().setStaminaPaidMillis(end).build();
+        return TechniqueSustained.release(progress, end, paid);
+    }
+
+    public static BodyActivity guardContact(BodySnapshot body, GuardState state) {
+        // 重定向判定后只允许同一身体、施放号与有效时刻写入还击资格。
+        var progress = TechniqueState.read(body);
+        var active = progress.getActiveCast();
+        var sustained = active.getSustained();
+        long now = body.settledAt().elapsedMillis();
+        if (!state.bodyId().equals(body.id().value()) || !state.castId().equals(active.getRequest().getCastId())
+                || !state.guard().equals(sustained.getGuard()) || !state.guard().hasMaximumHoldMillis()
+                || !state.technique().equals(active.getRequest().getTechnique()) || sustained.hasEndRequestedMillis()
+                || now < active.getWarmupEndMillis() || now >= holdDeadline(active)) {
+            throw TechniqueErrors.invalid("guard.contact", "守方回执与当前守窗不符");
+        }
+        var contacted = sustained.toBuilder().setGuardContact(true /* guardContact */).build();
+        return TechniqueSustained.release(progress, now, contacted);
+    }
+
     public static BodyActivity hold(BodySnapshot body, TechniqueProgress progress, List<String> tissues) {
         // 同刻重查不重写游标；伤愈或失能后按当前可工作的肌肉更新占用。
         ActiveCast active = progress.getActiveCast();

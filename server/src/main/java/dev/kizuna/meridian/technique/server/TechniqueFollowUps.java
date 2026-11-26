@@ -17,6 +17,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Unit;
 
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -45,46 +46,62 @@ final class TechniqueFollowUps {
         }
         var previous = new HashSet<TechniqueReference>();
         for (FollowUp transition : rules.getTransitionsList()) {
-            TechniqueReference reference = transition.getPrevious();
-            boolean ordinaryBlockedTransition = isOrdinaryAttack(reference);
-            if (!ordinaryBlockedTransition) {
-                TechniqueProtocol.validateReference(reference);
+            validateTransition(definition, definitions, previous, transition);
+        }
+    }
+
+    private static void validateTransition(TechniqueDefinition definition,
+                                           Map<TechniqueReference, TechniqueDefinition> definitions,
+                                           Set<TechniqueReference> previous, FollowUp transition) {
+        // 每条承接分别核对前式身份、起播边界和所需接触条件。
+        TechniqueReference reference = transition.getPrevious();
+        boolean ordinaryBlockedTransition = isOrdinaryAttack(reference);
+        if (!ordinaryBlockedTransition) {
+            TechniqueProtocol.validateReference(reference);
+        }
+        long startMillis = transition.getStartMillis();
+        TechniqueDefinition previousDefinition;
+        if (ordinaryBlockedTransition) {
+            previousDefinition = null;
+        } else {
+            previousDefinition = definitions.get(reference);
+        }
+        if ((!ordinaryBlockedTransition && (previousDefinition == null
+                || reference.equals(TechniqueRegistry.reference(definition))
+                || TechniqueSustained.enabled(previousDefinition) != transition.getRequiresGuardContact()
+                || !previous.add(reference))) || (ordinaryBlockedTransition
+                && transition.getBlockedAttackSourcesCount() == 0) || !transition.hasAfterRecoveryMillis()
+                || !transition.hasStartMillis() || startMillis < 0
+                || startMillis >= definition.getPhases().getWarmupMillis()) {
+            throw TechniqueErrors.invalid(
+                    "follow_up", "前式不存在、重复、自引用或起播时刻不在起手段内");
+        }
+        TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
+        TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
+        validateGuardContact(transition, previousDefinition);
+        validateBlockedAttackSources(transition);
+        if (transition.hasAfterBindReleaseMillis()) {
+            TechniqueValues.millis(transition.getAfterBindReleaseMillis(), "after_bind_release_millis");
+            if (previousDefinition == null || previousDefinition.getEffectsList().stream()
+                    .noneMatch(effect -> effect.getWeaponStrike().getReleaseBoundArm())) {
+                throw TechniqueErrors.invalid("follow_up", "牵制承接需要前式声明抽回末击");
             }
-            long startMillis = transition.getStartMillis();
-            TechniqueDefinition previousDefinition;
-            if (ordinaryBlockedTransition) {
-                previousDefinition = null;
-            } else {
-                previousDefinition = definitions.get(reference);
-            }
-            if ((!ordinaryBlockedTransition && (previousDefinition == null
-                    || reference.equals(TechniqueRegistry.reference(definition))
-                    || TechniqueSustained.enabled(previousDefinition)
-                    || !previous.add(reference))) || (ordinaryBlockedTransition
-                    && transition.getBlockedAttackSourcesCount() == 0) || !transition.hasAfterRecoveryMillis()
-                    || !transition.hasStartMillis() || startMillis < 0
-                    || startMillis >= definition.getPhases().getWarmupMillis()) {
-                throw TechniqueErrors.invalid(
-                        "follow_up", "前式不存在、重复、自引用或起播时刻不在起手段内");
-            }
-            TechniqueValues.quantity(transition.getRecoveryStartRatio(), Unit.RATIO, 0, 1, "recovery_start_ratio");
-            TechniqueValues.millis(transition.getAfterRecoveryMillis(), "after_recovery_millis");
-            validateBlockedAttackSources(transition);
-            if (transition.hasAfterBindReleaseMillis()) {
-                TechniqueValues.millis(transition.getAfterBindReleaseMillis(), "after_bind_release_millis");
-                if (previousDefinition == null || previousDefinition.getEffectsList().stream()
-                        .noneMatch(effect -> effect.getWeaponStrike().getReleaseBoundArm())) {
-                    throw TechniqueErrors.invalid("follow_up", "牵制承接需要前式声明抽回末击");
-                }
-            }
-            if (ordinaryBlockedTransition) {
-                if (transition.hasPreviousProjectileWeapon() || transition.hasNextProjectileWeapon()) {
-                    throw TechniqueErrors.invalid(
-                            "follow_up.projectile_weapon", "普通攻击承接不能声明投射武器类别");
-                }
-            } else {
-                validateWeaponGroup(transition, previousDefinition, definition);
-            }
+        }
+        if (!ordinaryBlockedTransition) {
+            validateWeaponGroup(transition, previousDefinition, definition);
+        } else if (transition.hasPreviousProjectileWeapon() || transition.hasNextProjectileWeapon()) {
+            throw TechniqueErrors.invalid(
+                    "follow_up.projectile_weapon", "普通攻击承接不能声明投射武器类别");
+        }
+    }
+
+    private static void validateGuardContact(FollowUp transition, TechniqueDefinition previousDefinition) {
+        // 还击只接受守方收势后的窗口，不能混用攻方被挡或牵制的来源。
+        if (transition.getRequiresGuardContact() && (previousDefinition == null
+                || previousDefinition.getEffectsList().stream().noneMatch(e -> e.getGuard().hasMaximumHoldMillis())
+                || transition.getRecoveryStartRatio().getValue() != 1 || transition.getAfterRecoveryMillis() == 0
+                || transition.getBlockedAttackSourcesCount() != 0 || transition.hasAfterBindReleaseMillis())) {
+            throw TechniqueErrors.invalid("follow_up", "格中承接须从前一限时守式收势后起算");
         }
     }
 
@@ -170,10 +187,10 @@ final class TechniqueFollowUps {
         Optional<LastCast> previous = Optional.empty();
         if (progress.hasActiveCast()) {
             ActiveCast active = progress.getActiveCast();
-            if (active.hasSustained()) {
+            CastPhase phase = TechniqueScheduler.phase(active, now);
+            if (active.hasSustained() && phase != CastPhase.FINISHED) {
                 return Optional.empty();
             }
-            CastPhase phase = TechniqueScheduler.phase(active, now);
             if (phase != CastPhase.RECOVERING && phase != CastPhase.FINISHED) {
                 return Optional.empty();
             }
@@ -266,13 +283,18 @@ final class TechniqueFollowUps {
                 .setCastId(active.getRequest().getCastId())
                 .setActiveEndMillis(active.getActiveEndMillis())
                 .setRecoveryEndMillis(active.getRecoveryEndMillis())
+                .setGuardContact(ending == CastPhase.FINISHED && active.getSustained().getGuardContact())
                 .setEnding(ending)
                 .build();
     }
 
     private static boolean inWindow(LastCast previous, FollowUp transition, long now) {
-        // 窗口两端包含边界；用减法比较结束后时长避免长整型时钟溢出。
+        // 格中窗在截止毫秒关闭；普通承接沿用含截止的窗口。
         long recoveryEnd = previous.getRecoveryEndMillis();
+        if (transition.getRequiresGuardContact()) {
+            return previous.getGuardContact() && now >= recoveryEnd
+                    && now - recoveryEnd < transition.getAfterRecoveryMillis();
+        }
         if (now < windowOpen(previous.getActiveEndMillis(), recoveryEnd, transition)) {
             return false;
         }

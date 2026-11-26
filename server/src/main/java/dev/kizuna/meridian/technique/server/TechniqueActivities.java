@@ -128,7 +128,7 @@ final class TechniqueActivities {
         TechniqueDefinition definition = start.definition();
         var progress = start.progress().toBuilder()
                 .setActiveCast(active)
-                .removeGuardBreakEnds(definition.getId())
+                .removeGuardBreakEnds(TechniqueGuardStamina.breakGroup(active))
                 .putCurveEnds(definition.getId(), curveEnd(modifiers));
         if (!TechniqueSustained.unknownEnd(active)) {
             long cooldownEnd = addTime(active.getRecoveryEndMillis(), definition.getCooldownMillis());
@@ -136,6 +136,9 @@ final class TechniqueActivities {
         }
         if (start.progress().hasActiveCast()) {
             progress.setLastCast(TechniqueFollowUps.history(start.progress().getActiveCast(), CastPhase.FINISHED));
+        }
+        if (progress.getLastCast().getGuardContact()) {
+            progress.getLastCastBuilder().clearGuardContact();
         }
         if (consumesBlockedAttack(start)) {
             progress.clearBlockedAttack();

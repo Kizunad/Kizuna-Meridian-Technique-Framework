@@ -478,6 +478,7 @@ outcome))` 报告结果，`castId` 和 `technique` 取自意图的 `cast_id` 与
 Fabric 的 `dev.kizuna.meridian.technique.fabric.world` 提供上述世界操作的共享实现，
 由 Human、Threatening 等宿主主动调用；功法服务仍只交付意图，不自行操作世界。
 `TechniqueWorldEffects` 接收权限策略、敌我判定和一次出手做功边界，避免两种宿主重复伤害与耐久逻辑。
+兵器打击逐个伤到目标期间，`TechniqueStrikeScope.current(来源)` 给出这一击的打击意图（施放号、精确式、选定手、权威生效时刻）、出击当刻选定手上的物品副本，以及按结算先后排列的本击目标。只有本击自己的伤害来源能读到；附伤、反伤和调用返回之后读到的都是空。伤害附属和内容模组用它认出一击属于哪次施放的哪一拍，不要按伤害类型或时间去猜。
 玩家和生物共用方块破坏入口；出手类别按所选手判断，副手斧可直接劈门。
 物品耐久仅在功法末击结算，方块破坏不额外磨损工具。
 `TechniqueWorldImpulses` 分别替换水平推进和竖直跳跃分量，同刻 INPUT 与 UP 可按任意顺序组合；

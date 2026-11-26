@@ -130,8 +130,14 @@ public final class TechniqueWorldEffects {
         }
         List<String> selected = selectTargets(strike, hits, candidates);
         List<SoundCue> hitSounds = effect.getWeaponStrike().getHitSoundsList();
+        List<String> struck = candidates.stream()
+                .map(LivingEntity::getStringUUID)
+                .filter(selected::contains)
+                .toList();
+        var scope = new TechniqueStrikeScope.Strike(effect, data.stack(), struck, data.source());
+        Runnable hitWork = () -> hitTargets(candidates, selected, hits, data, hitSounds);
         Runnable strikeWork = () -> work.execute(actor, data.source(),
-                () -> hitTargets(candidates, selected, hits, data, hitSounds));
+                () -> TechniqueStrikeScope.run(scope, hitWork));
         if (pull.isPresent()) {
             TechniqueWeaponBinds.hit(pull.orElseThrow(), data.source(), strikeWork);
             if (strike.getReleaseBoundArm()) {
